@@ -1,0 +1,7 @@
+-- Template de tabla
+-- Convención: appsheet.<app_name>_<table_name>
+--
+-- CREATE TABLE appsheet.<app_name>_<table_name> (
+--     id TEXT PRIMARY KEY,
+--     -- columnas aquí
+-- );

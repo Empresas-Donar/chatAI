@@ -1,0 +1,19 @@
+---
+description: Backend Rules
+globs:
+  - "**/*.py"
+  - "**/*.sql"
+alwaysApply: true
+---
+
+# Backend Engineering Rules
+
+- Use psycopg2 or asyncpg properly
+- Always use transactions
+- Always use parameterized queries
+- Avoid raw string SQL concatenation
+- Validate types before DB insert
+- Log migration results
+- Do not duplicate logic between apps
+- Use reusable helpers inside core/
+- Follow multi-app architecture

@@ -1,0 +1,2 @@
+-- Tables for appsheet.medicion_pozos_*
+-- TODO: definir tablas según estructura de AppSheet

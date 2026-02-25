@@ -1,0 +1,2 @@
+-- Tables for appsheet.contratistas_isla_maipo_*
+-- TODO: definir tablas según estructura de AppSheet
