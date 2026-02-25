@@ -60,15 +60,15 @@ appsheet-migration/
 │
 ├── apps/
 │   ├── contratistas_isla_maipo/
-│   │   ├── migrar_contratistas.py
-│   │   ├── migrar_trabajadores.py
-│   │   ├── migrar_tratos.py
-│   │   ├── migrar_registro.py
-│   │   └── migrar_all.py
+│   │   ├── load_contratistas.py
+│   │   ├── load_trabajadores.py
+│   │   ├── load_tratos.py
+│   │   ├── load_registro.py
+│   │   └── load_all.py
 │   │
 │   ├── medicion_pozos/
-│   │   ├── migrar_pozos.py
-│   │   └── migrar_all.py
+│   │   ├── load_pozos.py
+│   │   └── load_all.py
 │   │
 │   └── ...
 │
@@ -181,6 +181,50 @@ El sistema normaliza:
 8. resumen
 9. pagos
 10. usuarios
+
+---
+
+## AppSheet + PostgreSQL Conventions
+
+### Por qué PostgreSQL
+
+Google Sheets tiene un límite de ~400k celdas y alta latencia en lecturas. Con muchos registros la app se vuelve lenta. PostgreSQL maneja millones de filas con índices, y AppSheet hace queries directas en vez de descargar toda la hoja.
+
+### Primary Keys
+
+Siempre `TEXT NOT NULL PRIMARY KEY` — nunca `SERIAL` ni `INTEGER`. AppSheet genera sus propios IDs como strings y el nombre de la columna debe coincidir exactamente con el Row ID configurado en la app.
+
+### Columnas que NO se migran
+
+- `_RowNumber` — columna virtual de Sheets, no existe en PostgreSQL
+- `Related_*` — columnas de reverse ref, AppSheet las genera automáticamente
+- Columnas virtuales / fórmulas de AppSheet
+
+### Mapeo de tipos
+
+| AppSheet      | PostgreSQL    |
+|---------------|---------------|
+| Text          | `TEXT`        |
+| Number / Decimal / Price | `NUMERIC` |
+| Date          | `DATE`        |
+| DateTime      | `TIMESTAMP`   |
+| Yes/No        | `BOOLEAN`     |
+| EnumList      | `TEXT[]`      |
+| Ref           | `TEXT` + FK   |
+
+### Columnas Ref (relaciones)
+
+Se almacenan como `TEXT` con FK real en PostgreSQL. AppSheet las usa para navegar relaciones automáticamente igual que en Sheets.
+
+### Nombres de columnas
+
+AppSheet es case-sensitive — los nombres deben coincidir exactamente con los definidos en la app. No renombrar ni cambiar mayúsculas.
+
+### Después de conectar AppSheet a PostgreSQL
+
+1. Ejecutar "Regenerate Structure" para que AppSheet re-escanee los tipos
+2. Si un tipo es incorrecto (ej. fecha guardada como TEXT) AppSheet no lo reconocerá bien
+3. Probar todas las vistas y acciones en modo preview antes de publicar
 
 ---
 

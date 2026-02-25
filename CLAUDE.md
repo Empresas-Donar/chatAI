@@ -32,6 +32,18 @@ No mezclar responsabilidades entre capas. La lógica reutilizable siempre va en 
 
 ---
 
+## Language Convention
+
+All code must be written in English:
+- File names, variable names, function names, class names
+- Comments, docstrings, log messages, git commit messages
+
+Exception: table names, column names, and CSV field names stay in Spanish
+as defined by the client (e.g. `id_trabajador`, `contratista`, `fecha_inicio_trato`).
+Do not translate these — they must match the AppSheet source exactly.
+
+---
+
 ## Reglas de Desarrollo
 
 1. No hardcodear credenciales — usar variables de entorno (`.env`)
@@ -57,6 +69,41 @@ Aplicar siempre estas transformaciones antes de insertar:
 | EnumList     | `TEXT[]`       |
 
 ---
+
+## AppSheet + PostgreSQL Conventions
+
+**Primary Keys**
+- Always `TEXT NOT NULL PRIMARY KEY` — never `SERIAL` or `INTEGER`
+- AppSheet generates its own string IDs; the column name must match exactly what AppSheet uses as Row ID
+
+**Columns to NEVER migrate**
+- `_RowNumber` — virtual Sheets column, does not exist in PostgreSQL
+- `Related_*` — reverse ref virtual columns, AppSheet generates these automatically
+- Any AppSheet formula/virtual columns
+
+**Type Mapping**
+| AppSheet type | PostgreSQL type |
+|---|---|
+| Text | `TEXT` |
+| Number / Decimal / Price | `NUMERIC` |
+| Date | `DATE` |
+| DateTime | `TIMESTAMP` |
+| Yes/No | `BOOLEAN` |
+| EnumList | `TEXT[]` |
+| Ref | `TEXT` (FK to the referenced table's PK) |
+
+**Ref columns (relationships)**
+- Store as `TEXT` with a real FK constraint
+- AppSheet uses these to navigate relationships automatically
+
+**Column names**
+- AppSheet is case-sensitive — column names must match exactly what AppSheet expects
+- Never rename, add spaces, or change casing
+
+**After connecting AppSheet to PostgreSQL**
+- Run "Regenerate Structure" so AppSheet re-scans types
+- If a column type is wrong (e.g. date stored as TEXT), AppSheet will not recognize it correctly
+- Test all views and actions in preview mode before going live
 
 ## Revisión de SQL
 
