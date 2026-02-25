@@ -31,3 +31,24 @@ All code must be written in English:
 Exception: table names, column names, and CSV field names stay in Spanish
 as defined by the client (e.g. `id_trabajador`, `contratista`, `fecha_inicio_trato`).
 Do not translate these — they must match the AppSheet source exactly.
+
+## SQL Generation Rules for AppSheet Compatibility
+
+You are generating SQL for a PostgreSQL database that will be connected directly to AppSheet.
+
+STRICT RULES:
+
+1. Keep column names EXACTLY as they appear in AppSheet.
+2. Respect uppercase, lowercase, underscores, and special characters (including `%`).
+3. Always wrap column names in double quotes in PostgreSQL.
+4. DO NOT rename columns.
+5. DO NOT normalize to snake_case.
+6. DO NOT refactor names.
+7. DO NOT change structure for architectural improvements.
+8. DO NOT remove fields unless explicitly instructed.
+9. DO NOT migrate virtual columns like `Related_*`.
+10. DO NOT migrate `_RowNumber` unless explicitly instructed.
+
+The goal is zero structural changes so AppSheet can connect without breaking formulas, references, or virtual columns.
+
+Generate production-ready SQL strictly following these rules.

@@ -1,4 +1,4 @@
-from core.cleaners import clean_percentage
+from core.cleaners import clean_currency, clean_percentage
 from core.db import get_connection
 from core.loader import load_csv
 from core.utils import get_logger
@@ -18,37 +18,37 @@ def run():
                     cur.execute(
                         f"""
                         INSERT INTO {TABLE} (
-                            id_supervisor, campo, supervisor, empresa_contratista,
-                            valor_jornada, valor_hora_extra,
-                            porcentaje_jornada_bono, porcentaje_trato,
-                            fijo_jornada, bono_extra
+                            "Id_Supervisor", "Campo", "Supervisor", "Empresa_Contratista",
+                            "Valor_Jornada", "Valor_Hora_Extra",
+                            "%%Jornada_Bono", "%%Trato",
+                            "Fijo_Jornada", "Bono_Extra"
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id_supervisor) DO UPDATE SET
-                            campo = EXCLUDED.campo,
-                            supervisor = EXCLUDED.supervisor,
-                            empresa_contratista = EXCLUDED.empresa_contratista,
-                            valor_jornada = EXCLUDED.valor_jornada,
-                            valor_hora_extra = EXCLUDED.valor_hora_extra,
-                            porcentaje_jornada_bono = EXCLUDED.porcentaje_jornada_bono,
-                            porcentaje_trato = EXCLUDED.porcentaje_trato,
-                            fijo_jornada = EXCLUDED.fijo_jornada,
-                            bono_extra = EXCLUDED.bono_extra
+                        ON CONFLICT ("Id_Supervisor") DO UPDATE SET
+                            "Campo" = EXCLUDED."Campo",
+                            "Supervisor" = EXCLUDED."Supervisor",
+                            "Empresa_Contratista" = EXCLUDED."Empresa_Contratista",
+                            "Valor_Jornada" = EXCLUDED."Valor_Jornada",
+                            "Valor_Hora_Extra" = EXCLUDED."Valor_Hora_Extra",
+                            "%%Jornada_Bono" = EXCLUDED."%%Jornada_Bono",
+                            "%%Trato" = EXCLUDED."%%Trato",
+                            "Fijo_Jornada" = EXCLUDED."Fijo_Jornada",
+                            "Bono_Extra" = EXCLUDED."Bono_Extra"
                         """,
                         (
-                            row.get("id_supervisor") or None,
-                            row.get("campo") or None,
-                            row.get("supervisor") or None,
-                            row.get("empresa_contratista") or None,
-                            row.get("valor_jornada") or None,
-                            row.get("valor_hora_extra") or None,
-                            clean_percentage(row.get("porcentaje_jornada_bono")),
-                            clean_percentage(row.get("porcentaje_trato")),
-                            row.get("fijo_jornada") or None,
-                            row.get("bono_extra") or None,
+                            row.get("Id_Supervisor") or None,
+                            row.get("Campo") or None,
+                            row.get("Supervisor") or None,
+                            row.get("Empresa_Contratista") or None,
+                            clean_currency(row.get("Valor_Jornada")),
+                            clean_currency(row.get("Valor_Hora_Extra")),
+                            clean_percentage(row.get("%Jornada_Bono")),
+                            clean_percentage(row.get("%Trato")),
+                            clean_currency(row.get("Fijo_Jornada")),
+                            clean_currency(row.get("Bono_Extra")),
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 

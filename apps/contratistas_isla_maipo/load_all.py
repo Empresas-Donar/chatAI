@@ -3,6 +3,10 @@
 #   empresa → labor → contratistas → trabajadores → tratos
 #   → registro → registro_trato → resumen → pagos → cultivos → usuarios
 
+import sys
+import time
+from datetime import datetime
+
 from apps.contratistas_isla_maipo import (
     load_contratistas,
     load_cultivos,
@@ -35,16 +39,34 @@ STEPS = [
 ]
 
 
+def _print(msg: str):
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] {msg}", flush=True)
+
+
 def run():
-    logger.info("=== Starting migration: contratistas_isla_maipo ===")
-    for name, module in STEPS:
-        logger.info(f"--- Loading: {name} ---")
+    total = len(STEPS)
+    _print(f"{'='*55}")
+    _print(f"  Migración: contratistas_isla_maipo  ({total} tablas)")
+    _print(f"{'='*55}")
+
+    migration_start = time.time()
+    for i, (name, module) in enumerate(STEPS, 1):
+        _print(f"[{i}/{total}] Cargando: {name} ...")
+        step_start = time.time()
         try:
             module.run()
+            elapsed = time.time() - step_start
+            _print(f"[{i}/{total}] ✓ {name}  ({elapsed:.1f}s)")
         except Exception as e:
+            _print(f"[{i}/{total}] ✗ ERROR en {name}: {e}")
             logger.error(f"Error loading {name}: {e}")
             raise
-    logger.info("=== Migration complete: contratistas_isla_maipo ===")
+
+    total_elapsed = time.time() - migration_start
+    _print(f"{'='*55}")
+    _print(f"  Migración completa en {total_elapsed:.1f}s")
+    _print(f"{'='*55}")
 
 
 if __name__ == "__main__":

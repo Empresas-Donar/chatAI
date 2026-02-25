@@ -17,24 +17,24 @@ def run():
                     cur.execute(
                         f"""
                         INSERT INTO {TABLE} (
-                            id_usuario, nombre_usuario, correo, rol, contrasena
+                            "Id_Usuario", "Nombre Usuario", "Correo", "Rol", "Contraseña"
                         )
                         VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (id_usuario) DO UPDATE SET
-                            nombre_usuario = EXCLUDED.nombre_usuario,
-                            correo = EXCLUDED.correo,
-                            rol = EXCLUDED.rol,
-                            contrasena = EXCLUDED.contrasena
+                        ON CONFLICT ("Id_Usuario") DO UPDATE SET
+                            "Nombre Usuario" = EXCLUDED."Nombre Usuario",
+                            "Correo" = EXCLUDED."Correo",
+                            "Rol" = EXCLUDED."Rol",
+                            "Contraseña" = EXCLUDED."Contraseña"
                         """,
                         (
-                            row.get("id_usuario") or None,
-                            row.get("nombre_usuario") or None,
-                            row.get("correo") or None,
-                            row.get("rol") or None,
-                            row.get("contrasena") or None,
+                            row.get("Id_Usuario") or None,
+                            row.get("Nombre Usuario") or None,
+                            row.get("Correo") or None,
+                            row.get("Rol") or None,
+                            row.get("Contraseña") or None,
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 

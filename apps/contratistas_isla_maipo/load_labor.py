@@ -16,17 +16,17 @@ def run():
                 for _, row in df.iterrows():
                     cur.execute(
                         f"""
-                        INSERT INTO {TABLE} (codigo_labor, labor)
+                        INSERT INTO {TABLE} ("Codigo_Labor", "Labor")
                         VALUES (%s, %s)
-                        ON CONFLICT (codigo_labor) DO UPDATE SET
-                            labor = EXCLUDED.labor
+                        ON CONFLICT ("Codigo_Labor") DO UPDATE SET
+                            "Labor" = EXCLUDED."Labor"
                         """,
                         (
-                            row.get("codigo_labor") or None,
-                            row.get("labor") or None,
+                            row.get("Codigo_Labor") or None,
+                            row.get("Labor") or None,
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 

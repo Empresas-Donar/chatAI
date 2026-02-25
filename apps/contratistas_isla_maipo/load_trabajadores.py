@@ -17,27 +17,27 @@ def run():
                     cur.execute(
                         f"""
                         INSERT INTO {TABLE} (
-                            id_trabajador, nombre_trabajador, campo,
-                            contratista, ingresar_nombre, rut
+                            "Id_Trabajador", "Nombre_Trabajador", "Campo",
+                            "Contratista", "Ingresar_Nombre", "Rut"
                         )
                         VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id_trabajador) DO UPDATE SET
-                            nombre_trabajador = EXCLUDED.nombre_trabajador,
-                            campo = EXCLUDED.campo,
-                            contratista = EXCLUDED.contratista,
-                            ingresar_nombre = EXCLUDED.ingresar_nombre,
-                            rut = EXCLUDED.rut
+                        ON CONFLICT ("Id_Trabajador") DO UPDATE SET
+                            "Nombre_Trabajador" = EXCLUDED."Nombre_Trabajador",
+                            "Campo" = EXCLUDED."Campo",
+                            "Contratista" = EXCLUDED."Contratista",
+                            "Ingresar_Nombre" = EXCLUDED."Ingresar_Nombre",
+                            "Rut" = EXCLUDED."Rut"
                         """,
                         (
-                            row.get("id_trabajador") or None,
-                            row.get("nombre_trabajador") or None,
-                            row.get("campo") or "Isla de Maipo",
-                            row.get("contratista") or None,
-                            row.get("ingresar_nombre") or None,
-                            row.get("rut") or None,
+                            row.get("Id_Trabajador") or None,
+                            row.get("Nombre_Trabajador") or None,
+                            row.get("Campo") or "Isla de Maipo",
+                            row.get("Contratista") or None,
+                            row.get("Ingresar_Nombre") or None,
+                            row.get("Rut") or None,
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 

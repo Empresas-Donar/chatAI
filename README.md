@@ -228,6 +228,175 @@ AppSheet es case-sensitive — los nombres deben coincidir exactamente con los d
 
 ---
 
+## Checklist para Nueva App
+
+Pasos a seguir cada vez que se migra una nueva aplicación AppSheet.
+
+### 1. Capturar screenshots de AppSheet antes de crear nada
+
+Antes de escribir una sola línea de SQL, abre AppSheet y toma un screenshot de la estructura de cada tabla (columnas y tipos). Guardarlos en:
+
+```
+docs/appsheet_screenshots/<nombre_app>/
+```
+
+Esta es la fuente de verdad. Los nombres en AppSheet son los que mandan.
+
+### 2. Crear el SQL con nombres exactos
+
+- Abrir el screenshot de cada tabla
+- Escribir cada columna exactamente como aparece en AppSheet
+- Respetar mayúsculas, minúsculas, espacios, guiones bajos y caracteres especiales como `%`
+- Siempre envolver en comillas dobles en PostgreSQL: `"Nombre columna"`
+
+```sql
+-- CORRECTO
+"Id_Supervisor"   text NOT NULL
+"%Jornada_Bono"   numeric DEFAULT 0
+"Centro de Costo" text
+
+-- INCORRECTO — nunca hacer esto
+id_supervisor     text NOT NULL
+porcentaje_jornada_bono numeric
+centro_de_costo   text
+```
+
+### 3. Reglas estrictas de nombres
+
+| Regla | Detalle |
+|-------|---------|
+| NO renombrar | Nunca cambiar a snake_case |
+| NO normalizar | Nunca quitar espacios ni caracteres especiales |
+| NO traducir | Si AppSheet dice `"Empresa"`, el campo es `"Empresa"` |
+| NO asumir | Siempre verificar contra el screenshot |
+| NO quitar tildes | Si AppSheet dice `"Bonificación"`, el campo es `"Bonificación"` — con tilde |
+
+### 3.1 Tildes y caracteres especiales en nombres de columna
+
+AppSheet preserva tildes y acentos exactamente como el usuario los definió. El CSV exportado también los incluye. La DB debe coincidir.
+
+**Columnas con tilde confirmadas en contratistas_isla_maipo:**
+
+| Columna en AppSheet/CSV | Columna en DB |
+|-------------------------|---------------|
+| `Bonificación` | `"Bonificación"` |
+| `Valor Bonificación 2` | `"Valor Bonificación 2"` |
+
+**Regla práctica:** si el CSV exportado tiene tilde → la tabla DB debe tener tilde → el INSERT usa tilde → el `row.get()` usa tilde.
+
+```sql
+-- CORRECTO
+"Bonificación" numeric
+
+-- INCORRECTO — rompe la conexión con AppSheet
+"Bonificacion" numeric
+```
+
+```python
+# CORRECTO — tilde en INSERT y en row.get()
+cur.execute(f'INSERT INTO {TABLE} ("Bonificación") VALUES (%s)', (
+    clean_currency(row.get("Bonificación")),
+))
+```
+
+### 4. Columnas `%` y psycopg2
+
+Las columnas que empiezan con `%` (como `%Jornada_Bono`, `%Trato`) requieren manejo especial:
+
+- En el SQL del script Python, usar `%%` para escapar el `%` (psycopg2 trata `%` como placeholder)
+- En el `row.get()` del CSV, usar `%` normal porque el CSV tiene el nombre real
+
+```python
+# En la query SQL (dentro del f-string) → doble %%
+cur.execute(f"""
+    INSERT INTO {TABLE} ("%%Jornada_Bono", "%%Trato")
+    VALUES (%s, %s)
+""", (
+    clean_percentage(row.get("%Jornada_Bono")),  # CSV → % normal
+    clean_percentage(row.get("%Trato")),
+))
+```
+
+### 5. Columnas que NUNCA se migran
+
+| Columna | Razón |
+|---------|-------|
+| `_RowNumber` | Virtual de Google Sheets, no existe en PostgreSQL |
+| `Related_*` | AppSheet las genera automáticamente como reverse ref |
+| Columnas de fórmula | AppSheet las recalcula, no son datos |
+
+### 6. Orden de carga respeta FKs
+
+Identificar las dependencias entre tablas antes de escribir `load_all.py`. Cargar siempre:
+- Primero las tablas sin FK (lookup tables: empresa, labor, cultivos)
+- Luego las que dependen de ellas (contratistas → trabajadores → tratos → registro...)
+
+### 7. Loader no normaliza headers
+
+El `core/loader.py` solo hace `.strip()` en los headers del CSV — no transforma ni normaliza. Los headers del CSV de AppSheet ya coinciden con los nombres de columna. No agregar transformaciones.
+
+### 8. Script load_*.py: estructura estándar
+
+```python
+from core.cleaners import clean_currency, clean_percentage
+from core.db import get_connection
+from core.loader import load_csv
+from core.utils import get_logger
+
+logger = get_logger("<nombre_app>")
+TABLE = "appsheet.<nombre_app>_<tabla>"
+CSV = "data/<nombre_app>/raw/<tabla>.csv"
+
+def run():
+    df = load_csv(CSV)
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for _, row in df.iterrows():
+                    cur.execute(f"""
+                        INSERT INTO {TABLE} ("Col1", "Col2")
+                        VALUES (%s, %s)
+                        ON CONFLICT ("PK_Col") DO UPDATE SET
+                            "Col2" = EXCLUDED."Col2"
+                    """, (
+                        row.get("Col1") or None,
+                        row.get("Col2") or None,
+                    ))
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    run()
+```
+
+### 9. Tipos de datos — mapeo
+
+| AppSheet | PostgreSQL | Cleaner |
+|----------|-----------|---------|
+| Text | `TEXT` | ninguno |
+| Number / Decimal | `NUMERIC` | ninguno |
+| Price | `NUMERIC` | `clean_currency()` |
+| Percent | `NUMERIC` | `clean_percentage()` |
+| Date | `DATE` | `clean_date()` |
+| DateTime | `TIMESTAMP` | `clean_date()` |
+| Yes/No | `BOOLEAN` | `clean_boolean()` |
+| EnumList | `TEXT[]` | `clean_enumlist()` |
+| Ref | `TEXT` + FK | `row.get()` |
+
+### 10. Validación post-carga
+
+Después de cargar cada tabla, verificar conteos:
+
+```sql
+SELECT COUNT(*) FROM appsheet.<nombre_app>_<tabla>;
+```
+
+El número debe coincidir con las filas del CSV original.
+
+---
+
 ## Proyecto
 
 Migración técnica AppSheet → PostgreSQL

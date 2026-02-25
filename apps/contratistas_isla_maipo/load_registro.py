@@ -1,7 +1,7 @@
-from core.cleaners import clean_boolean, clean_date, clean_enumlist
+from core.cleaners import clean_boolean, clean_date, clean_enumlist, clean_currency
 from core.db import get_connection
 from core.loader import load_csv
-from core.utils import get_logger
+from core.utils import get_logger, print_progress
 
 logger = get_logger("contratistas_isla_maipo")
 TABLE = "appsheet.contratistas_isla_maipo_registro"
@@ -10,57 +10,59 @@ CSV = "data/contratistas_isla_maipo/raw/registro.csv"
 
 def run():
     df = load_csv(CSV)
+    total = len(df)
     conn = get_connection()
     try:
         with conn:
             with conn.cursor() as cur:
-                for _, row in df.iterrows():
+                for i, (_, row) in enumerate(df.iterrows(), 1):
+                    print_progress(i, total)
                     cur.execute(
                         f"""
                         INSERT INTO {TABLE} (
-                            id_registro, campo, fecha, contratista, cc,
-                            labor, tipo_de_registro, trabajador, jornada,
-                            bonificacion, bono_especial_piso, horas_extras,
-                            trato, dia_habil, contador, dia
+                            "ID_Registro", "Campo", "Fecha", "Contratista", "CC",
+                            "Labor", "Tipo de Registro", "Trabajador", "Jornada",
+                            "Bonificación", "Bono_Especial_Piso", "Horas_Extras",
+                            "Trato", "Dia_Habil", "Contador", "dia"
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id_registro) DO UPDATE SET
-                            campo = EXCLUDED.campo,
-                            fecha = EXCLUDED.fecha,
-                            contratista = EXCLUDED.contratista,
-                            cc = EXCLUDED.cc,
-                            labor = EXCLUDED.labor,
-                            tipo_de_registro = EXCLUDED.tipo_de_registro,
-                            trabajador = EXCLUDED.trabajador,
-                            jornada = EXCLUDED.jornada,
-                            bonificacion = EXCLUDED.bonificacion,
-                            bono_especial_piso = EXCLUDED.bono_especial_piso,
-                            horas_extras = EXCLUDED.horas_extras,
-                            trato = EXCLUDED.trato,
-                            dia_habil = EXCLUDED.dia_habil,
-                            contador = EXCLUDED.contador,
-                            dia = EXCLUDED.dia
+                        ON CONFLICT ("ID_Registro") DO UPDATE SET
+                            "Campo" = EXCLUDED."Campo",
+                            "Fecha" = EXCLUDED."Fecha",
+                            "Contratista" = EXCLUDED."Contratista",
+                            "CC" = EXCLUDED."CC",
+                            "Labor" = EXCLUDED."Labor",
+                            "Tipo de Registro" = EXCLUDED."Tipo de Registro",
+                            "Trabajador" = EXCLUDED."Trabajador",
+                            "Jornada" = EXCLUDED."Jornada",
+                            "Bonificación" = EXCLUDED."Bonificación",
+                            "Bono_Especial_Piso" = EXCLUDED."Bono_Especial_Piso",
+                            "Horas_Extras" = EXCLUDED."Horas_Extras",
+                            "Trato" = EXCLUDED."Trato",
+                            "Dia_Habil" = EXCLUDED."Dia_Habil",
+                            "Contador" = EXCLUDED."Contador",
+                            "dia" = EXCLUDED."dia"
                         """,
                         (
-                            row.get("id_registro") or None,
-                            row.get("campo") or "Isla de Maipo",
-                            clean_date(row.get("fecha")),
-                            row.get("contratista") or None,
-                            row.get("cc") or None,
-                            row.get("labor") or None,
-                            row.get("tipo_de_registro") or None,
-                            clean_enumlist(row.get("trabajador")),
-                            row.get("jornada") or 1,
-                            row.get("bonificacion") or None,
-                            row.get("bono_especial_piso") or 0,
-                            row.get("horas_extras") or 0,
-                            row.get("trato") or None,
-                            clean_boolean(row.get("dia_habil")),
-                            row.get("contador") or None,
+                            row.get("ID_Registro") or None,
+                            row.get("Campo") or "Isla de maipo",
+                            clean_date(row.get("Fecha")),
+                            row.get("Contratista") or None,
+                            row.get("CC") or None,
+                            row.get("Labor") or None,
+                            row.get("Tipo de Registro") or None,
+                            clean_enumlist(row.get("Trabajador")),
+                            clean_currency(row.get("Jornada")) or 1,
+                            clean_currency(row.get("Bonificación")) or None,
+                            clean_currency(row.get("Bono_Especial_Piso")) or 0,
+                            clean_currency(row.get("Horas_Extras")) or 0,
+                            row.get("Trato") or None,
+                            clean_boolean(row.get("Día_Habil")),
+                            clean_currency(row.get("Contador")) or None,
                             row.get("dia") or None,
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 

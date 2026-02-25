@@ -1,7 +1,7 @@
-from core.cleaners import clean_boolean, clean_date
+from core.cleaners import clean_boolean, clean_currency, clean_date
 from core.db import get_connection
 from core.loader import load_csv
-from core.utils import get_logger
+from core.utils import get_logger, print_progress
 
 logger = get_logger("contratistas_isla_maipo")
 TABLE = "appsheet.contratistas_isla_maipo_pagos"
@@ -10,23 +10,27 @@ CSV = "data/contratistas_isla_maipo/raw/pagos.csv"
 
 def run():
     df = load_csv(CSV)
+    total = len(df)
     conn = get_connection()
     try:
         with conn:
             with conn.cursor() as cur:
-                for _, row in df.iterrows():
+                for i, (_, row) in enumerate(df.iterrows(), 1):
+                    print_progress(i, total)
                     cur.execute(
                         f"""
                         INSERT INTO {TABLE} (
-                            id_resumen, campo, fecha, mes, contratista, cc,
-                            labor, trabajador, jornada, bonificacion,
-                            bono_especial_piso, horas_extras, trato,
-                            unidades_trato, base_trato, dia_habil, nombre_labor,
-                            valor_bonificacion_2, bono_extra, valor_jornada,
-                            total_unidades, valor_trato, trabajador_jornal_mas_bonos,
-                            trabajador_tratos, total_trabajador, contratista_jornada,
-                            contratista_tratos, total_contratista, total_a_pagar,
-                            total_jornada, dia, empresa, cultivo, dia_de_ayer, tipo_de_pago
+                            "ID_Resumen", "Campo", "Fecha", "Mes", "Contratista", "CC",
+                            "Labor", "Trabajador", "Jornada", "Bonificación",
+                            "Bono_Especial_Piso", "Horas_Extras", "Trato",
+                            "Unidades Trato", "Base Trato", "Dia_Habil", "Nombre Labor",
+                            "Valor Bonificación 2", "Bono Extra", "Valor Jornada",
+                            "Total Unidades", "Valor Trato",
+                            "Trabajador Jornal mas Bonos", "Trabajador Tratos",
+                            "Total Trabajador", "Contratista Jornada",
+                            "Contratista Tratos", "Total Contratista",
+                            "Total a Pagar", "Total Jornada",
+                            "dia", "Empresa", "Cultivo", "Dia de Ayer", "Tipo de Pago"
                         )
                         VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
@@ -34,81 +38,81 @@ def run():
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s
                         )
-                        ON CONFLICT (id_resumen) DO UPDATE SET
-                            campo = EXCLUDED.campo,
-                            fecha = EXCLUDED.fecha,
-                            mes = EXCLUDED.mes,
-                            contratista = EXCLUDED.contratista,
-                            cc = EXCLUDED.cc,
-                            labor = EXCLUDED.labor,
-                            trabajador = EXCLUDED.trabajador,
-                            jornada = EXCLUDED.jornada,
-                            bonificacion = EXCLUDED.bonificacion,
-                            bono_especial_piso = EXCLUDED.bono_especial_piso,
-                            horas_extras = EXCLUDED.horas_extras,
-                            trato = EXCLUDED.trato,
-                            unidades_trato = EXCLUDED.unidades_trato,
-                            base_trato = EXCLUDED.base_trato,
-                            dia_habil = EXCLUDED.dia_habil,
-                            nombre_labor = EXCLUDED.nombre_labor,
-                            valor_bonificacion_2 = EXCLUDED.valor_bonificacion_2,
-                            bono_extra = EXCLUDED.bono_extra,
-                            valor_jornada = EXCLUDED.valor_jornada,
-                            total_unidades = EXCLUDED.total_unidades,
-                            valor_trato = EXCLUDED.valor_trato,
-                            trabajador_jornal_mas_bonos = EXCLUDED.trabajador_jornal_mas_bonos,
-                            trabajador_tratos = EXCLUDED.trabajador_tratos,
-                            total_trabajador = EXCLUDED.total_trabajador,
-                            contratista_jornada = EXCLUDED.contratista_jornada,
-                            contratista_tratos = EXCLUDED.contratista_tratos,
-                            total_contratista = EXCLUDED.total_contratista,
-                            total_a_pagar = EXCLUDED.total_a_pagar,
-                            total_jornada = EXCLUDED.total_jornada,
-                            dia = EXCLUDED.dia,
-                            empresa = EXCLUDED.empresa,
-                            cultivo = EXCLUDED.cultivo,
-                            dia_de_ayer = EXCLUDED.dia_de_ayer,
-                            tipo_de_pago = EXCLUDED.tipo_de_pago
+                        ON CONFLICT ("ID_Resumen") DO UPDATE SET
+                            "Campo" = EXCLUDED."Campo",
+                            "Fecha" = EXCLUDED."Fecha",
+                            "Mes" = EXCLUDED."Mes",
+                            "Contratista" = EXCLUDED."Contratista",
+                            "CC" = EXCLUDED."CC",
+                            "Labor" = EXCLUDED."Labor",
+                            "Trabajador" = EXCLUDED."Trabajador",
+                            "Jornada" = EXCLUDED."Jornada",
+                            "Bonificación" = EXCLUDED."Bonificación",
+                            "Bono_Especial_Piso" = EXCLUDED."Bono_Especial_Piso",
+                            "Horas_Extras" = EXCLUDED."Horas_Extras",
+                            "Trato" = EXCLUDED."Trato",
+                            "Unidades Trato" = EXCLUDED."Unidades Trato",
+                            "Base Trato" = EXCLUDED."Base Trato",
+                            "Dia_Habil" = EXCLUDED."Dia_Habil",
+                            "Nombre Labor" = EXCLUDED."Nombre Labor",
+                            "Valor Bonificación 2" = EXCLUDED."Valor Bonificación 2",
+                            "Bono Extra" = EXCLUDED."Bono Extra",
+                            "Valor Jornada" = EXCLUDED."Valor Jornada",
+                            "Total Unidades" = EXCLUDED."Total Unidades",
+                            "Valor Trato" = EXCLUDED."Valor Trato",
+                            "Trabajador Jornal mas Bonos" = EXCLUDED."Trabajador Jornal mas Bonos",
+                            "Trabajador Tratos" = EXCLUDED."Trabajador Tratos",
+                            "Total Trabajador" = EXCLUDED."Total Trabajador",
+                            "Contratista Jornada" = EXCLUDED."Contratista Jornada",
+                            "Contratista Tratos" = EXCLUDED."Contratista Tratos",
+                            "Total Contratista" = EXCLUDED."Total Contratista",
+                            "Total a Pagar" = EXCLUDED."Total a Pagar",
+                            "Total Jornada" = EXCLUDED."Total Jornada",
+                            "dia" = EXCLUDED."dia",
+                            "Empresa" = EXCLUDED."Empresa",
+                            "Cultivo" = EXCLUDED."Cultivo",
+                            "Dia de Ayer" = EXCLUDED."Dia de Ayer",
+                            "Tipo de Pago" = EXCLUDED."Tipo de Pago"
                         """,
                         (
-                            row.get("id_resumen") or None,
-                            row.get("campo") or None,
-                            clean_date(row.get("fecha")),
-                            row.get("mes") or None,
-                            row.get("contratista") or None,
-                            row.get("cc") or None,
-                            row.get("labor") or None,
-                            row.get("trabajador") or None,
-                            row.get("jornada") or None,
-                            row.get("bonificacion") or None,
-                            row.get("bono_especial_piso") or None,
-                            row.get("horas_extras") or None,
-                            row.get("trato") or None,
-                            row.get("unidades_trato") or None,
-                            row.get("base_trato") or None,
-                            clean_boolean(row.get("dia_habil")),
-                            row.get("nombre_labor") or None,
-                            row.get("valor_bonificacion_2") or None,
-                            row.get("bono_extra") or None,
-                            row.get("valor_jornada") or None,
-                            row.get("total_unidades") or None,
-                            row.get("valor_trato") or None,
-                            row.get("trabajador_jornal_mas_bonos") or None,
-                            row.get("trabajador_tratos") or None,
-                            row.get("total_trabajador") or None,
-                            row.get("contratista_jornada") or None,
-                            row.get("contratista_tratos") or None,
-                            row.get("total_contratista") or None,
-                            row.get("total_a_pagar") or None,
-                            row.get("total_jornada") or None,
-                            row.get("dia") or None,
-                            row.get("empresa") or None,
-                            row.get("cultivo") or None,
-                            clean_boolean(row.get("dia_de_ayer")),
-                            row.get("tipo_de_pago") or None,
+                            row.get("ID_Resumen") or None,
+                            row.get("Campo") or None,
+                            clean_date(row.get("Fecha")),
+                            row.get("Mes") or None,
+                            row.get("Contratista") or None,
+                            row.get("CC") or None,
+                            row.get("Labor") or None,
+                            row.get("Trabajador") or None,
+                            clean_currency(row.get("Jornada")) or None,
+                            clean_currency(row.get("Bonificación")) or None,
+                            clean_currency(row.get("Bono Especial PISO")) or None,
+                            clean_currency(row.get("Horas Extras")) or None,
+                            row.get("Trato") or None,
+                            clean_currency(row.get("Unidades Trato")) or None,
+                            clean_currency(row.get("Base Tato")) or None,
+                            clean_boolean(row.get("Día Hábil")),
+                            row.get("Nombre Labor") or None,
+                            clean_currency(row.get("Valor Bonificación 2")) or None,
+                            clean_currency(row.get("Bono Extra")) or None,
+                            clean_currency(row.get("Valor Jornada")) or None,
+                            clean_currency(row.get("Total Unidades")) or None,
+                            clean_currency(row.get("Valor Trato")) or None,
+                            clean_currency(row.get("Trabajador Jor + Bonos")) or None,
+                            clean_currency(row.get("Trabajador Tratos")) or None,
+                            clean_currency(row.get("Total Trabajador")) or None,
+                            clean_currency(row.get(" Contratista\nJornada ")) or None,
+                            clean_currency(row.get(" Contratista\nTratos ")) or None,
+                            clean_currency(row.get("Total Contratista")) or None,
+                            clean_currency(row.get("Total a Pagar")) or None,
+                            clean_currency(row.get("Total Jornada")) or None,
+                            row.get("Dia") or None,
+                            row.get("Empresa") or None,
+                            row.get("Cultivo") or None,
+                            clean_boolean(row.get("Día de Ayer")),
+                            row.get("Tipo de pago") or None,
                         ),
                     )
-        logger.info(f"{TABLE}: {len(df)} filas procesadas.")
+        logger.info(f"{TABLE}: {len(df)} rows loaded.")
     finally:
         conn.close()
 
