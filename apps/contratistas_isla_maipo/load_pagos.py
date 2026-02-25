@@ -10,6 +10,13 @@ CSV = "data/contratistas_isla_maipo/raw/pagos.csv"
 
 def run():
     df = load_csv(CSV)
+    # Skip rows with empty ID_Resumen (invalid/export artifacts from Sheets)
+    before = len(df)
+    id_col = df["ID_Resumen"].fillna("").astype(str).str.strip()
+    df = df[id_col != ""].reset_index(drop=True)
+    skipped = before - len(df)
+    if skipped > 0:
+        logger.warning(f"Skipping {skipped} rows with empty ID_Resumen")
     total = len(df)
     conn = get_connection()
     try:
