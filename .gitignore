@@ -21,6 +21,9 @@ env/
 data/**/raw/*.csv
 data/**/processed/*.csv
 
+# Uploaded CSVs (temp storage, auto-cleaned after sync)
+web_migrator/uploads/*/
+
 # Logs
 logs/*.log
 
