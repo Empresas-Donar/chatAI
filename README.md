@@ -34,12 +34,25 @@ AppSheet now reads from PostgreSQL
 
 ## Registered apps
 
-| App name | Status |
-|---|---|
-| `contratistas_isla_maipo` | Migrated |
-| `medicion_pozos` | Pending |
+| App name | Status | Notes |
+|---|---|---|
+| `contratistas_isla_maipo` | Migrated | Full migration via per-table scripts in `apps/` |
+| `tarjas` | Migrated | Migrated via web tool as first production test |
+| `medicion_pozos` | Pending | — |
 
 Table naming convention: `appsheet.<app_name>_<table_name>`
+
+### tarjas
+
+Migrated using the web migrator tool as the first real production migration. Tables live under the `appsheet.tarjas_*` prefix in `donar_prod`.
+
+A reporting view is defined in [sql/tarjas/01_views_reporte.sql](sql/tarjas/01_views_reporte.sql):
+
+```
+appsheet.tarjas_reporte
+```
+
+Aggregates weekly payment data from `appsheet.tarjas_pagos` by contractor, field, date, and labor type (`trato` vs `al día`). Replaces the dynamic Google Sheets reports that AppSheet previously generated.
 
 ---
 
@@ -54,7 +67,7 @@ Open the URL in any browser. A login popup will appear — enter the credentials
 | Field | Value |
 |---|---|
 | Username | `gestion` |
-| Password | _(see `.env` → `AUTH_PASSWORD`)_ |
+| Password | _(stored in Cloud Run env var `AUTH_PASSWORD` — ask the project admin)_ |
 
 No installation or commands required.
 
