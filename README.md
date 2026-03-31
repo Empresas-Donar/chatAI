@@ -1,125 +1,202 @@
-# AppSheet → PostgreSQL Migration Admin
+# Migrador AppSheet → PostgreSQL
 
-Internal admin tool for migrating AppSheet applications to PostgreSQL.
+Herramienta interna para migrar aplicaciones AppSheet a una base de datos PostgreSQL.
 
-The workflow is: export CSVs from AppSheet → upload to the web tool → validate schema and data → sync to PostgreSQL → reconnect AppSheet to the new database.
-
----
-
-## How it works
-
-```
-AppSheet (Google Sheets backend)
-        │
-        │  Export CSVs
-        ▼
-Web Migrator  (https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
-        │
-        │  1. Upload CSVs + set app name
-        │  2. Auto-infer column types
-        │  3. Preview & validate
-        │  4. Dry run (optional)
-        │  5. Confirm & Sync
-        ▼
-PostgreSQL  →  schema: appsheet
-                tables: appsheet.<app_name>_<table>
-        │
-        │  Connect AppSheet → PostgreSQL
-        │  Run "Regenerate Structure"
-        ▼
-AppSheet now reads from PostgreSQL
-```
+El flujo es: exportar CSVs desde AppSheet → subirlos a la herramienta web → validar estructura y datos → sincronizar con PostgreSQL → reconectar AppSheet a la nueva base de datos.
 
 ---
 
-## Registered apps
+## Cómo funciona
 
-| App name | Status | Notes |
+```
+AppSheet (con backend en Google Sheets)
+        │
+        │  Exportar CSVs
+        ▼
+Herramienta Web  (https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
+        │
+        │  1. Subir CSVs e ingresar nombre de la app
+        │  2. Detección automática de tipos de columna
+        │  3. Vista previa y validación
+        │  4. Prueba en seco (opcional)
+        │  5. Confirmar y sincronizar
+        ▼
+PostgreSQL  →  esquema: appsheet
+               tablas: appsheet.<nombre_app>_<tabla>
+        │
+        │  Conectar AppSheet → PostgreSQL
+        │  Ejecutar "Regenerar estructura"
+        ▼
+AppSheet ahora lee desde PostgreSQL
+```
+
+---
+
+## Apps registradas
+
+| App | Estado | Notas |
 |---|---|---|
-| `contratistas_isla_maipo` | Migrated | Full migration via per-table scripts in `apps/` |
-| `tarjas` | Migrated | Migrated via web tool as first production test |
-| `medicion_pozos` | Pending | — |
+| `contratistas_isla_maipo` | Migrada | Migración completa con scripts por tabla en `apps/` |
+| `tarjas` | Migrada | Migrada con la herramienta web como primera prueba en producción |
+| `medicion_pozos` | Pendiente | — |
 
-Table naming convention: `appsheet.<app_name>_<table_name>`
+Convención de nombres: `appsheet.<nombre_app>_<nombre_tabla>`
 
 ### tarjas
 
-Migrated using the web migrator tool as the first real production migration. Tables live under the `appsheet.tarjas_*` prefix in `donar_prod`.
+Primera migración real en producción, realizada con la herramienta web. Las tablas viven bajo el prefijo `appsheet.tarjas_*` en la base de datos `donar_prod`.
 
-A reporting view is defined in [sql/tarjas/01_views_reporte.sql](sql/tarjas/01_views_reporte.sql):
+Se creó una vista de reporte en [sql/tarjas/01_views_reporte.sql](sql/tarjas/01_views_reporte.sql):
 
 ```
 appsheet.tarjas_reporte
 ```
 
-Aggregates weekly payment data from `appsheet.tarjas_pagos` by contractor, field, date, and labor type (`trato` vs `al día`). Replaces the dynamic Google Sheets reports that AppSheet previously generated.
+Consolida los pagos semanales de `appsheet.tarjas_pagos` agrupados por contratista, campo, fecha y tipo de pago (`trato` vs `al día`). Reemplaza los reportes dinámicos que AppSheet generaba desde Google Sheets.
 
 ---
 
-## Accessing the tool
+## Acceso a la herramienta
 
-The tool is deployed on Google Cloud Run and accessible at:
+La herramienta está desplegada en Google Cloud y se accede desde cualquier browser:
 
 **URL:** `https://appsheet-migrator-nx63mrnslq-tl.a.run.app`
 
-Open the URL in any browser. A login popup will appear — enter the credentials and you're in.
+Al abrir la URL el browser muestra un popup de login. Ingresar las credenciales y listo — no se requiere instalar nada ni correr comandos.
 
-| Field | Value |
+| Campo | Valor |
 |---|---|
-| Username | `gestion` |
-| Password | _(stored in Cloud Run env var `AUTH_PASSWORD` — ask the project admin)_ |
-
-No installation or commands required.
+| Usuario | `gestion` |
+| Contraseña | _(guardada en Cloud Run como `AUTH_PASSWORD` — consultar al administrador del proyecto)_ |
 
 ---
 
-## Infrastructure (Google Cloud)
+## Migrar una nueva app
 
-| Resource | Details |
+### Paso 1 — Exportar CSVs desde AppSheet
+
+Exportar cada tabla como CSV. Mantener los nombres de archivo originales — el nombre del archivo se convierte en el nombre de la tabla.
+
+> Antes de correr cualquier migración, tomar capturas de pantalla de la definición de columnas de cada tabla en AppSheet. Los nombres de columna en AppSheet son la fuente de verdad.
+
+### Paso 2 — Subir y validar
+
+1. Abrir [https://appsheet-migrator-nx63mrnslq-tl.a.run.app](https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
+2. Ingresar el **nombre de la app** (ej. `medicion_pozos`) — se usa como prefijo de las tablas
+3. Seleccionar todos los CSVs de la app
+4. Hacer clic en **Subir y Analizar**
+
+La herramienta va a:
+- Detectar el tipo PostgreSQL de cada columna automáticamente
+- Marcar columnas con muchos valores vacíos, IDs duplicados o tipos mezclados
+- Mostrar una vista previa de las primeras 20 filas por tabla
+
+### Paso 3 — Prueba en seco
+
+Hacer clic en **Prueba en seco** para validar todo el proceso sin escribir nada en la base de datos. Confirma que los CSVs son legibles y que el conteo de filas es correcto.
+
+### Paso 4 — Sincronizar
+
+Hacer clic en **Confirmar y Sincronizar**. La herramienta va a:
+- Crear el esquema `appsheet` si no existe
+- Crear cada tabla con los tipos detectados (`CREATE TABLE IF NOT EXISTS`)
+- Insertar filas con `ON CONFLICT DO NOTHING` — seguro para volver a correr
+- Mostrar los logs en tiempo real en el browser
+- En caso de error, revertir solo la tabla afectada — las demás no se ven afectadas
+
+### Paso 5 — Conectar AppSheet a PostgreSQL
+
+1. En AppSheet ir a **Datos → Agregar fuente de datos → Base de datos en la nube**
+2. Ingresar los datos de conexión PostgreSQL
+3. Hacer clic en **Regenerar estructura** para que AppSheet relea los tipos de columna
+4. Probar todas las vistas y acciones en modo **Vista previa** antes de publicar
+
+---
+
+## Reglas de nombres de columna
+
+AppSheet distingue mayúsculas y minúsculas. Los nombres de columna deben coincidir exactamente con el origen — sin excepciones.
+
+| Regla | Ejemplo |
 |---|---|
-| **Cloud Run** | `appsheet-migrator`, region `southamerica-west1` |
-| **Cloud SQL** | `db-donar` (PostgreSQL 16), database `donar_prod` |
-| **Artifact Registry** | `integraciones`, image `appsheet-migrator:latest` |
-| **Project** | `integraciones-484915` |
+| No renombrar columnas | `Id_Supervisor` se queda como `Id_Supervisor` |
+| Preservar tildes | `Bonificación` se queda como `Bonificación` |
+| Preservar prefijo `%` | `%Jornada_Bono` se queda como `%Jornada_Bono` |
+| Preservar espacios | `Centro de Costo` se queda como `Centro de Costo` |
+| Siempre con comillas dobles en SQL | `"Bonificación"`, `"%Jornada_Bono"` |
 
-The service scales to zero when not in use — no cost when idle.
+**Columnas que nunca se migran:**
 
-### Redeploy after code changes
+| Columna | Motivo |
+|---|---|
+| `_RowNumber` | Columna virtual de Google Sheets — no existe en PostgreSQL |
+| `Related_*` | AppSheet genera estas columnas de referencia inversa automáticamente |
+
+---
+
+## Detección de tipos
+
+| Condición | Tipo PostgreSQL |
+|---|---|
+| Más del 30% de valores vacíos | `TEXT` |
+| Todo `true/false/yes/no/si/sí/1/0` | `BOOLEAN` |
+| Todo con formato `YYYY-MM-DD` | `DATE` |
+| Todo con formato `YYYY-MM-DD HH:MM...` | `TIMESTAMP` |
+| Solo números enteros | `INTEGER` |
+| Números con decimales | `NUMERIC(12,2)` |
+| Mezclado o no reconocido | `TEXT` |
+
+Las claves primarias siempre son `TEXT NOT NULL PRIMARY KEY` — AppSheet genera sus propios IDs en formato texto.
+
+---
+
+## Infraestructura (Google Cloud)
+
+| Recurso | Detalle |
+|---|---|
+| **Cloud Run** | `appsheet-migrator`, región `southamerica-west1` |
+| **Cloud SQL** | `db-donar` (PostgreSQL 16), base de datos `donar_prod` |
+| **Artifact Registry** | `integraciones`, imagen `appsheet-migrator:latest` |
+| **Proyecto** | `integraciones-484915` |
+
+El servicio escala a cero cuando no está en uso — sin costo cuando está inactivo.
+
+### Actualizar el servidor tras cambios en el código
 
 ```bash
 cd web_migrator/
 
-# 1. Rebuild and push image
+# 1. Reconstruir y subir la imagen
 gcloud builds submit \
   --tag southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
   --project=integraciones-484915
 
-# 2. Deploy new revision
+# 2. Desplegar la nueva revisión
 gcloud run deploy appsheet-migrator \
   --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
   --region=southamerica-west1 \
   --project=integraciones-484915
 ```
 
-### Environment variables
+### Variables de entorno
 
-Set in Cloud Run via `gcloud run deploy --set-env-vars` or the Google Cloud Console.
+Se configuran en Cloud Run desde la consola de Google Cloud o con `--set-env-vars`.
 
-| Variable | Description |
+| Variable | Descripción |
 |---|---|
-| `DB_HOST` | Cloud SQL socket path (`/cloudsql/...`) |
+| `DB_HOST` | Ruta del socket de Cloud SQL (`/cloudsql/...`) |
 | `DB_PORT` | `5432` |
 | `DB_NAME` | `donar_prod` |
-| `DB_USER` | Database user |
-| `DB_PASSWORD` | Database password |
-| `AUTH_USER` | Basic Auth username |
-| `AUTH_PASSWORD` | Basic Auth password |
+| `DB_USER` | Usuario de la base de datos |
+| `DB_PASSWORD` | Contraseña de la base de datos |
+| `AUTH_USER` | Usuario para el login de la herramienta |
+| `AUTH_PASSWORD` | Contraseña para el login de la herramienta |
 
 ---
 
-## Local development
+## Desarrollo local
 
-### 1. Install dependencies
+### 1. Instalar dependencias
 
 ```bash
 cd web_migrator/
@@ -128,14 +205,14 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure credentials
+### 2. Configurar credenciales
 
 ```bash
 cp web_migrator/.env.example web_migrator/.env
-# Edit .env with real values — never commit this file
+# Editar .env con los valores reales — nunca subir este archivo al repositorio
 ```
 
-### 3. Start the server
+### 3. Iniciar el servidor
 
 ```bash
 cd web_migrator/
@@ -143,150 +220,58 @@ source .venv/bin/activate
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000).
+Abrir [http://localhost:8000](http://localhost:8000).
 
-To stop: `Ctrl+C`. If the port is busy: `lsof -ti :8000 | xargs kill -9`
-
----
-
-## Migrating a new app
-
-### Step 1 — Export CSVs from AppSheet
-
-Export each table as CSV. Keep the original filenames — the filename becomes the table name.
-
-> Before writing any SQL or running any migration, take screenshots of each table's column definitions in AppSheet. Column names in AppSheet are the source of truth.
-
-### Step 2 — Upload & validate
-
-1. Open [https://appsheet-migrator-nx63mrnslq-tl.a.run.app](https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
-2. Enter the **app name** (e.g. `medicion_pozos`) — this becomes the table prefix
-3. Select all CSV files for the app
-4. Click **Upload & Analyse**
-
-The tool will:
-- Infer a PostgreSQL type for every column
-- Flag columns with high empty rates, duplicate IDs, or mixed types
-- Show a preview of the first 20 rows per table
-
-### Step 3 — Dry run
-
-Click **Dry Run** to validate the full sync path without writing anything to the database. Confirms CSVs are readable and row counts look correct.
-
-### Step 4 — Sync
-
-Click **Confirm & Sync**. The tool will:
-- Create schema `appsheet` if it does not exist
-- Create each table with inferred types (`CREATE TABLE IF NOT EXISTS`)
-- Insert rows with `ON CONFLICT DO NOTHING` — safe to re-run
-- Stream real-time logs to the browser
-- Roll back only the failing table on error — other tables are unaffected
-
-### Step 5 — Connect AppSheet to PostgreSQL
-
-1. In AppSheet go to **Data → Add a data source → Cloud Database**
-2. Enter the PostgreSQL connection details
-3. Click **Regenerate Structure** so AppSheet re-reads the column types
-4. Test all views and actions in **Preview** mode before publishing
+Para detener: `Ctrl+C`. Si el puerto está ocupado: `lsof -ti :8000 | xargs kill -9`
 
 ---
 
-## Column name rules
+## Seguridad
 
-AppSheet is case-sensitive. Column names must match the source exactly — no exceptions.
-
-| Rule | Example |
-|---|---|
-| Never rename columns | `Id_Supervisor` stays `Id_Supervisor` |
-| Preserve accents | `Bonificación` stays `Bonificación` |
-| Preserve `%` prefix | `%Jornada_Bono` stays `%Jornada_Bono` |
-| Preserve spaces | `Centro de Costo` stays `Centro de Costo` |
-| Always double-quote in SQL | `"Bonificación"`, `"%Jornada_Bono"` |
-
-**Columns to never migrate:**
-
-| Column | Reason |
-|---|---|
-| `_RowNumber` | Virtual Google Sheets column — does not exist in PostgreSQL |
-| `Related_*` | AppSheet generates these reverse-ref columns automatically |
+- **Nunca subir `.env`** al repositorio — contiene credenciales de la base de datos. Está en `.gitignore`.
+- Usar `.env.example` como plantilla segura para compartir con el equipo.
+- La URL de producción está protegida con usuario y contraseña — las credenciales se guardan como variables de entorno en Cloud Run, nunca en el código.
+- La base de datos se conecta por socket interno de Cloud SQL (sin exponer IP pública).
+- Los CSVs subidos se guardan temporalmente en `uploads/` y se eliminan automáticamente después de una sincronización exitosa.
 
 ---
 
-## Type inference
-
-| Condition | PostgreSQL type |
-|---|---|
-| > 30% empty values | `TEXT` |
-| All `true/false/yes/no/si/sí/1/0` | `BOOLEAN` |
-| All match `YYYY-MM-DD` | `DATE` |
-| All match `YYYY-MM-DD HH:MM...` | `TIMESTAMP` |
-| All whole numbers | `INTEGER` |
-| All decimals | `NUMERIC(12,2)` |
-| Mixed or unrecognized | `TEXT` |
-
-Primary keys are always `TEXT NOT NULL PRIMARY KEY` — AppSheet generates string IDs.
-
----
-
-## Project structure
+## Estructura del proyecto
 
 ```
 Appsheet_migration/
-├── web_migrator/                   # Main web tool (FastAPI)
+├── web_migrator/                   # Herramienta web principal (FastAPI)
 │   ├── backend/
-│   │   ├── main.py                 # FastAPI routes + SSE streaming
-│   │   ├── csv_parser.py           # CSV → TableAnalysis + preview
-│   │   ├── type_inference.py       # Column type inference + warnings
-│   │   ├── schema_builder.py       # DDL generation (CREATE SCHEMA/TABLE)
-│   │   └── sync_service.py         # PostgreSQL sync, transactions, dry run
+│   │   ├── main.py                 # Rutas FastAPI + streaming de logs
+│   │   ├── auth.py                 # Autenticación Basic Auth
+│   │   ├── csv_parser.py           # CSV → análisis de tablas y vista previa
+│   │   ├── type_inference.py       # Detección de tipos + advertencias
+│   │   ├── schema_builder.py       # Generación de DDL (CREATE SCHEMA/TABLE)
+│   │   └── sync_service.py         # Sincronización con PostgreSQL y transacciones
 │   ├── frontend/
-│   │   ├── templates/index.html    # Single-page UI (EN/ES)
+│   │   ├── templates/index.html    # Interfaz de una sola página (ES/EN)
 │   │   └── static/
-│   │       ├── app.js              # UI logic + SSE client
-│   │       ├── i18n.js             # EN/ES translations
+│   │       ├── app.js              # Lógica de la UI + cliente SSE
+│   │       ├── i18n.js             # Traducciones ES/EN
 │   │       └── styles.css
-│   ├── uploads/                    # Temp CSV storage (auto-cleaned after sync)
-│   ├── .env                        # ⚠ Never commit — contains DB credentials
-│   ├── .env.example                # Safe template to commit and share
+│   ├── uploads/                    # CSVs temporales (se eliminan tras la sync)
+│   ├── .env                        # ⚠ Nunca subir — contiene credenciales
+│   ├── .env.example                # Plantilla segura para compartir
 │   └── requirements.txt
 │
-├── apps/                           # Legacy per-app Python scripts
-├── sql/                            # SQL schema definitions per app
-├── data/                           # Raw and processed CSV files per app
-├── core/                           # Shared utilities (db, cleaners, loader)
-└── logs/                           # Migration output logs
+├── apps/                           # Scripts de migración por app (legado)
+├── sql/                            # Definición de esquemas SQL por app
+├── data/                           # CSVs originales y procesados por app
+├── core/                           # Utilidades compartidas (db, cleaners, loader)
+└── logs/                           # Logs de migración
 ```
 
 ---
 
-## Security
+## Problemas frecuentes
 
-- **Never commit `.env`** — it contains database credentials. It is listed in `.gitignore`.
-- Use `.env.example` as the safe template to share with the team.
-- The production URL is protected by HTTP Basic Auth — credentials are stored as Cloud Run environment variables, never in code.
-- The database connects via Cloud SQL Unix socket (no public IP exposure).
-- Uploaded CSVs are stored temporarily in `uploads/` and deleted automatically after a successful sync.
-- The database user only needs `INSERT` and `CREATE TABLE` on the `appsheet` schema.
+**La sesión expiró después de recargar la página**
+La herramienta recupera la sesión automáticamente desde el disco. Si sigue fallando, volver a subir los CSVs — la sesión se reconstruye en segundos.
 
----
-
-## Troubleshooting
-
-**`uvicorn: command not found`**
-```bash
-source web_migrator/.venv/bin/activate
-```
-
-**Port already in use**
-```bash
-lsof -ti :8000 | xargs kill -9
-```
-
-**Session expired after server restart**
-The tool auto-recovers sessions from disk. If it still fails, re-upload the CSVs — the session is rebuilt in seconds.
-
-**`role "your_user" does not exist`**
-Your shell environment has variables that are overriding `.env`. The tool uses `override=True` in `load_dotenv` to prevent this. If the issue persists, check for conflicting exports (`DB_USER`, `DB_HOST`) in your shell profile (`.zshrc`, `.bashrc`).
-
-**AppSheet does not recognize a column type after connecting**
-The column was likely inferred as `TEXT` instead of the correct type. Check the validation step — the tool shows inferred types before syncing. Correct the source CSV and re-run.
+**AppSheet no reconoce el tipo de una columna al conectarse**
+La columna probablemente fue detectada como `TEXT` en vez del tipo correcto. Revisar el paso de validación — la herramienta muestra los tipos detectados antes de sincronizar. Corregir el CSV origen y volver a correr.
