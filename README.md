@@ -13,7 +13,7 @@ AppSheet (Google Sheets backend)
         │
         │  Export CSVs
         ▼
-Web Migrator  (http://localhost:8000)
+Web Migrator  (https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
         │
         │  1. Upload CSVs + set app name
         │  2. Auto-infer column types
@@ -43,7 +43,68 @@ Table naming convention: `appsheet.<app_name>_<table_name>`
 
 ---
 
-## Quick start
+## Accessing the tool
+
+The tool is deployed on Google Cloud Run and accessible at:
+
+**URL:** `https://appsheet-migrator-nx63mrnslq-tl.a.run.app`
+
+Open the URL in any browser. A login popup will appear — enter the credentials and you're in.
+
+| Field | Value |
+|---|---|
+| Username | `gestion` |
+| Password | _(see `.env` → `AUTH_PASSWORD`)_ |
+
+No installation or commands required.
+
+---
+
+## Infrastructure (Google Cloud)
+
+| Resource | Details |
+|---|---|
+| **Cloud Run** | `appsheet-migrator`, region `southamerica-west1` |
+| **Cloud SQL** | `db-donar` (PostgreSQL 16), database `donar_prod` |
+| **Artifact Registry** | `integraciones`, image `appsheet-migrator:latest` |
+| **Project** | `integraciones-484915` |
+
+The service scales to zero when not in use — no cost when idle.
+
+### Redeploy after code changes
+
+```bash
+cd web_migrator/
+
+# 1. Rebuild and push image
+gcloud builds submit \
+  --tag southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
+  --project=integraciones-484915
+
+# 2. Deploy new revision
+gcloud run deploy appsheet-migrator \
+  --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
+  --region=southamerica-west1 \
+  --project=integraciones-484915
+```
+
+### Environment variables
+
+Set in Cloud Run via `gcloud run deploy --set-env-vars` or the Google Cloud Console.
+
+| Variable | Description |
+|---|---|
+| `DB_HOST` | Cloud SQL socket path (`/cloudsql/...`) |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `donar_prod` |
+| `DB_USER` | Database user |
+| `DB_PASSWORD` | Database password |
+| `AUTH_USER` | Basic Auth username |
+| `AUTH_PASSWORD` | Basic Auth password |
+
+---
+
+## Local development
 
 ### 1. Install dependencies
 
@@ -60,14 +121,6 @@ pip install -r requirements.txt
 cp web_migrator/.env.example web_migrator/.env
 # Edit .env with real values — never commit this file
 ```
-
-| Variable | Description |
-|---|---|
-| `DB_HOST` | PostgreSQL host |
-| `DB_PORT` | PostgreSQL port (default `5432`) |
-| `DB_NAME` | Database name |
-| `DB_USER` | Database user |
-| `DB_PASSWORD` | Database password |
 
 ### 3. Start the server
 
@@ -93,7 +146,7 @@ Export each table as CSV. Keep the original filenames — the filename becomes t
 
 ### Step 2 — Upload & validate
 
-1. Open [http://localhost:8000](http://localhost:8000)
+1. Open [https://appsheet-migrator-nx63mrnslq-tl.a.run.app](https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
 2. Enter the **app name** (e.g. `medicion_pozos`) — this becomes the table prefix
 3. Select all CSV files for the app
 4. Click **Upload & Analyse**
@@ -197,9 +250,10 @@ Appsheet_migration/
 
 - **Never commit `.env`** — it contains database credentials. It is listed in `.gitignore`.
 - Use `.env.example` as the safe template to share with the team.
-- The web tool is for local use only — do not expose port `8000` to the internet.
-- The database user only needs `INSERT` and `CREATE TABLE` on the `appsheet` schema.
+- The production URL is protected by HTTP Basic Auth — credentials are stored as Cloud Run environment variables, never in code.
+- The database connects via Cloud SQL Unix socket (no public IP exposure).
 - Uploaded CSVs are stored temporarily in `uploads/` and deleted automatically after a successful sync.
+- The database user only needs `INSERT` and `CREATE TABLE` on the `appsheet` schema.
 
 ---
 

@@ -247,6 +247,7 @@ async function runSync(dryRun) {
 
     jobId = data.job_id;
     state.currentJobId = jobId;
+    state.streamToken = data.stream_token;
   } catch (err) {
     setLoading("sync-btn", false);
     setLoading("dryrun-btn", false);
@@ -259,7 +260,7 @@ async function runSync(dryRun) {
   document.getElementById("overlay-stop-btn").classList.remove("hidden");
 
   // 2. Stream logs via SSE
-  const es = new EventSource(`/sync/stream/${jobId}`);
+  const es = new EventSource(`/sync/stream/${jobId}?token=${state.streamToken}`);
   state.currentEventSource = es;
 
   es.onmessage = (e) => {

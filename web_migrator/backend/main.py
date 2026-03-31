@@ -30,11 +30,12 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 import asyncio
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from auth import require_auth
 from csv_parser import TableAnalysis, parse_csv
 from sync_service import (
     SyncResult, sync,
@@ -61,7 +62,11 @@ STATIC_DIR    = FRONTEND_DIR / "static"
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="AppSheet → PostgreSQL Migrator", version="1.0.0")
+app = FastAPI(
+    title="AppSheet → PostgreSQL Migrator",
+    version="1.0.0",
+    dependencies=[Depends(require_auth)],
+)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -71,6 +76,9 @@ _sessions: dict[str, dict] = {}
 # Job store: job_id → {thread, stopped_event, result}
 _jobs: dict[str, dict] = {}
 
+# Stream tokens: token → job_id (one-time use, for SSE auth)
+_stream_tokens: dict[str, str] = {}
+
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -78,7 +86,7 @@ _jobs: dict[str, dict] = {}
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/health")
@@ -177,15 +185,22 @@ async def sync_start(
     _jobs[job_id]["thread"] = thread
     thread.start()
 
-    return {"job_id": job_id}
+    stream_token = str(uuid.uuid4())
+    _stream_tokens[stream_token] = job_id
+
+    return {"job_id": job_id, "stream_token": stream_token}
 
 
-@app.get("/sync/stream/{job_id}")
-async def sync_stream(job_id: str):
+@app.get("/sync/stream/{job_id}", dependencies=[])
+async def sync_stream(job_id: str, token: str = ""):
     """
     SSE endpoint — streams log lines from the sync job to the browser.
-    Sends result JSON as the final event when the job completes.
+    Protected by a one-time stream_token (EventSource cannot send Basic Auth headers).
     """
+    expected_job = _stream_tokens.pop(token, None)
+    if expected_job != job_id:
+        raise HTTPException(status_code=403, detail="Invalid or expired stream token")
+
     log_q = get_log_queue(job_id)
     if not log_q:
         raise HTTPException(status_code=404, detail="Job not found")
