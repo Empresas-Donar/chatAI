@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inventario de Sensores — Donar</title>
+  <link rel="stylesheet" href="/static/styles.css?v=2" />
+  <style>
+    body { background: var(--bg); font-family: system-ui, sans-serif; color: var(--text); }
+    .container { max-width: 1200px; margin: 28px auto; padding: 0 20px; }
+
+    /* Page header */
+    .page-header { margin-bottom: 24px; }
+    .page-header h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+    .page-header p  { font-size: 14px; color: var(--text-muted); margin: 0; }
+
+    /* Summary cards */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .summary-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px;
+    }
+    .summary-card .card-label {
+      font-size: 11px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px;
+    }
+    .summary-card .card-main {
+      font-size: 28px; font-weight: 800; line-height: 1;
+    }
+    .summary-card .card-sub {
+      font-size: 12px; color: var(--text-muted); margin-top: 5px;
+    }
+    .summary-card.ok   .card-main { color: #16a34a; }
+    .summary-card.warn .card-main { color: #dc2626; }
+    .summary-card.total .card-main { color: var(--primary); }
+
+    /* Source tabs */
+    .source-tabs {
+      display: flex; gap: 8px; margin-bottom: 16px;
+    }
+    .tab-btn {
+      padding: 7px 18px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface); font-size: 13px; font-weight: 600;
+      cursor: pointer; color: var(--text-muted); transition: all .15s;
+    }
+    .tab-btn.active {
+      background: #1d4ed8; color: white; border-color: #1d4ed8;
+    }
+    .tab-btn:hover:not(.active) { background: #f1f5f9; }
+
+    /* Filters bar */
+    .filter-bar {
+      display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 18px; margin-bottom: 20px;
+    }
+    .filter-bar label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+    .filter-bar select, .filter-bar input {
+      padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; background: white; color: var(--text); min-width: 160px;
+    }
+    .filter-bar select:focus, .filter-bar input:focus {
+      outline: none; border-color: var(--primary);
+    }
+
+    /* Table */
+    .table-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; margin-bottom: 24px;
+    }
+    .table-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .table-header span { font-size: 13px; font-weight: 700; }
+    .table-header .count { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+    .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tbl thead tr { background: #1e293b; color: white; }
+    .tbl thead th { padding: 9px 12px; text-align: left; font-weight: 700; font-size: 12px; white-space: nowrap; }
+    .tbl tbody tr:nth-child(even) { background: #f8fafc; }
+    .tbl tbody tr:hover { background: #eff6ff; }
+    .tbl tbody td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .tbl tbody tr:last-child td { border-bottom: none; }
+    .num { text-align: right; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+    .badge-ok      { background: #dcfce7; color: #15803d; }
+    .badge-offline { background: #fee2e2; color: #b91c1c; }
+    .badge-ubibot  { background: #ede9fe; color: #6d28d9; }
+    .badge-wiseconn{ background: #dbeafe; color: #1d4ed8; }
+
+    .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid #e2e8f0;
+      border-top-color: #3b82f6; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-row td { text-align: center; padding: 40px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <a href="/" class="navbar-brand">
+    <div class="navbar-logo">
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="17" cy="17" r="16" fill="#1e3a6e" stroke="#2563eb" stroke-width="1.5"/>
+        <path d="M17 6 C17 6, 26 13, 26 19.5 C26 24.2 21.97 28 17 28 C12.03 28 8 24.2 8 19.5 C8 13 17 6 17 6Z" fill="#3b82f6" opacity="0.9"/>
+        <path d="M17 11 C17 11, 22 16, 22 19.5 C22 22.5 19.76 25 17 25 C14.24 25 12 22.5 12 19.5 C12 16 17 11 17 11Z" fill="#93c5fd" opacity="0.7"/>
+        <rect x="11" y="19" width="12" height="1.5" rx="0.75" fill="white" opacity="0.9"/>
+      </svg>
+    </div>
+    <div class="navbar-brand-text">
+      <span class="navbar-brand-name">Donar</span>
+      <span class="navbar-brand-sub">Integraciones</span>
+    </div>
+  </a>
+  <div class="navbar-divider"></div>
+  <div class="navbar-nav">
+    <a href="/" class="nav-link">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+      </svg>
+      Migrador CSV
+    </a>
+    <a href="/purchase-orders" class="nav-link">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+      Órdenes de Compra
+    </a>
+    <a href="/sensors" class="nav-link active">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+      </svg>
+      Sensores
+    </a>
+    <a href="/sensors/status" class="nav-link">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      Status Diario
+    </a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <div class="page-header">
+    <h1>Inventario de Sensores</h1>
+    <p>Estado actual de todos los sensores conectados — Ubibot y Wiseconn</p>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="summary-grid" id="summary-grid">
+    <div class="summary-card total">
+      <div class="card-label">Total sensores</div>
+      <div class="card-main" id="card-total"><span class="spinner-inline"></span></div>
+      <div class="card-sub" id="card-total-sub">—</div>
+    </div>
+    <div class="summary-card ok">
+      <div class="card-label">Online</div>
+      <div class="card-main" id="card-ok"><span class="spinner-inline"></span></div>
+      <div class="card-sub" id="card-ok-sub">—</div>
+    </div>
+    <div class="summary-card warn">
+      <div class="card-label">Offline</div>
+      <div class="card-main" id="card-offline"><span class="spinner-inline"></span></div>
+      <div class="card-sub" id="card-offline-sub">—</div>
+    </div>
+    <div class="summary-card" id="card-ubibot-wrap">
+      <div class="card-label">Ubibot</div>
+      <div class="card-main" id="card-ubibot"><span class="spinner-inline"></span></div>
+      <div class="card-sub" id="card-ubibot-sub">—</div>
+    </div>
+    <div class="summary-card" id="card-wiseconn-wrap">
+      <div class="card-label">Wiseconn</div>
+      <div class="card-main" id="card-wiseconn"><span class="spinner-inline"></span></div>
+      <div class="card-sub" id="card-wiseconn-sub">—</div>
+    </div>
+  </div>
+
+  <!-- Source tabs -->
+  <div class="source-tabs">
+    <button class="tab-btn active" data-source="">Todos</button>
+    <button class="tab-btn" data-source="ubibot">Ubibot</button>
+    <button class="tab-btn" data-source="wiseconn">Wiseconn</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <div>
+      <label>Campo</label>
+      <select id="fil-field">
+        <option value="">Todos los campos</option>
+      </select>
+    </div>
+    <div>
+      <label>Estado</label>
+      <select id="fil-status">
+        <option value="">Todos</option>
+        <option value="ok">Online</option>
+        <option value="offline">Offline</option>
+      </select>
+    </div>
+    <div>
+      <label>Buscar sensor</label>
+      <input type="text" id="fil-search" placeholder="Nombre o ID…" />
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card">
+    <div class="table-header">
+      <span>Sensores</span>
+      <span class="count" id="tbl-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Fuente</th>
+            <th>Campo</th>
+            <th>Zona</th>
+            <th>Sensor ID</th>
+            <th>Nombre</th>
+            <th>Unidad</th>
+            <th class="num">Último valor</th>
+            <th>Último dato</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="sensor-tbody">
+          <tr class="empty-row"><td colspan="9">Cargando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+let allRows = [];
+let activeSource = '';
+
+// ── Init ──────────────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([loadSummary(), loadInventory()]);
+}
+
+// ── Summary cards ─────────────────────────────────────────────────────────
+async function loadSummary() {
+  try {
+    const res  = await fetch('/api/sensors/inventory/summary');
+    const data = await res.json();
+    const t    = data.totals;
+
+    setText('card-total',   t.total);
+    setText('card-total-sub', `en ${data.by_source.length} fuentes`);
+    setText('card-ok',      t.ok);
+    setText('card-ok-sub',  `${pct(t.ok, t.total)}% del total`);
+    setText('card-offline', t.offline);
+    setText('card-offline-sub', `${pct(t.offline, t.total)}% del total`);
+
+    for (const src of data.by_source) {
+      const key = src.source; // 'ubibot' or 'wiseconn'
+      const el = document.getElementById(`card-${key}`);
+      if (el) {
+        el.textContent = src.total;
+        setText(`card-${key}-sub`,
+          `${src.ok} online · ${src.offline} offline · ${src.fields} campo${src.fields !== 1 ? 's' : ''}`);
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ── Inventory table ───────────────────────────────────────────────────────
+async function loadInventory() {
+  try {
+    const res  = await fetch('/api/sensors/inventory');
+    const data = await res.json();
+    allRows = data.rows;
+
+    // Populate field filter
+    const fields = [...new Set(allRows.map(r => r.field).filter(Boolean))].sort();
+    const sel = document.getElementById('fil-field');
+    sel.innerHTML = '<option value="">Todos los campos</option>' +
+      fields.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
+
+    renderTable();
+  } catch(e) {
+    document.getElementById('sensor-tbody').innerHTML =
+      `<tr class="empty-row"><td colspan="9">Error cargando datos</td></tr>`;
+  }
+}
+
+function renderTable() {
+  const search    = document.getElementById('fil-search').value.toLowerCase();
+  const fieldFil  = document.getElementById('fil-field').value;
+  const statusFil = document.getElementById('fil-status').value;
+
+  let filtered = allRows;
+  if (activeSource) filtered = filtered.filter(r => r.source === activeSource);
+  if (fieldFil)     filtered = filtered.filter(r => r.field  === fieldFil);
+  if (statusFil)    filtered = filtered.filter(r => r.status === statusFil);
+  if (search)       filtered = filtered.filter(r =>
+    (r.sensor_name || '').toLowerCase().includes(search) ||
+    (r.sensor_id   || '').toLowerCase().includes(search)
+  );
+
+  setText('tbl-count', `${filtered.length} sensor${filtered.length !== 1 ? 'es' : ''}`);
+
+  if (!filtered.length) {
+    document.getElementById('sensor-tbody').innerHTML =
+      `<tr class="empty-row"><td colspan="9">Sin resultados para los filtros aplicados</td></tr>`;
+    return;
+  }
+
+  const tbody = document.getElementById('sensor-tbody');
+  tbody.innerHTML = '';
+  for (const r of filtered) {
+    const tr = document.createElement('tr');
+    const lastSeen   = r.last_seen   ? fmtDate(r.last_seen) : '—';
+    const lastValue  = r.last_value  != null ? Number(r.last_value).toLocaleString('es-CL', {maximumFractionDigits: 2}) : '—';
+    const staleClass = isStale(r.last_seen) ? ' style="color:#dc2626;font-weight:700"' : '';
+
+    tr.innerHTML = `
+      <td><span class="badge badge-${esc(r.source)}">${esc(r.source)}</span></td>
+      <td>${esc(r.field || '—')}</td>
+      <td>${esc(r.zone  || '—')}</td>
+      <td style="font-size:11px;color:#64748b">${esc(r.sensor_id || '—')}</td>
+      <td>${esc(r.sensor_name || '—')}</td>
+      <td style="color:#64748b">${esc(r.unit || '—')}</td>
+      <td class="num">${lastValue}</td>
+      <td${staleClass}>${lastSeen}</td>
+      <td><span class="badge badge-${esc(r.status)}">${r.status === 'ok' ? 'Online' : 'Offline'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function fmtDate(s) {
+  if (!s) return '—';
+  const [y, m, d] = s.split('-');
+  return `${d}-${m}-${y}`;
+}
+function isStale(dateStr) {
+  if (!dateStr) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr);
+  const diffDays = (today - d) / 86400000;
+  return diffDays > 2;
+}
+function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
+function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Events ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeSource = btn.dataset.source;
+    renderTable();
+  });
+});
+document.getElementById('fil-field').addEventListener('change', renderTable);
+document.getElementById('fil-status').addEventListener('change', renderTable);
+document.getElementById('fil-search').addEventListener('input', renderTable);
+
+init();
+</script>
+</body>
+</html>

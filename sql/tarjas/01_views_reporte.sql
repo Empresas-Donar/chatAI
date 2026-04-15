@@ -62,3 +62,4 @@ ORDER BY
     p.nombre_campo,
     p.tipo_pago,
     p.cuartel_cc;
+

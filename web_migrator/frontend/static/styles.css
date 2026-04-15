@@ -1,5 +1,130 @@
 /* styles.css — AppSheet → PostgreSQL Web Migrator */
 
+/* ── Global navbar ── */
+.navbar {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 56px;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-sizing: border-box;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  margin-right: 32px;
+  flex-shrink: 0;
+}
+
+.navbar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.navbar-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.navbar-brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.3px;
+}
+
+.navbar-brand-sub {
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.navbar-divider {
+  width: 1px;
+  height: 28px;
+  background: #1e293b;
+  margin: 0 4px;
+}
+
+.navbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.nav-link:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.nav-link.active {
+  background: #1e3a6e;
+  color: #93c5fd;
+}
+
+.nav-link svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.navbar-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.lang-switcher {
+  display: flex;
+  gap: 3px;
+}
+
+.lang-btn {
+  padding: 4px 9px;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.lang-btn:hover { background: #1e293b; color: #e2e8f0; }
+.lang-btn--active { background: #2563eb; color: white; border-color: #2563eb; }
+
 /* Loading overlay */
 .loading-overlay {
   position: fixed;
@@ -94,6 +219,7 @@ body {
 
 header {
   margin-bottom: 32px;
+  padding-top: 8px;
 }
 
 .header-top {
@@ -103,34 +229,6 @@ header {
   gap: 16px;
 }
 
-.lang-switcher {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.lang-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.lang-btn:hover {
-  background: var(--bg);
-  color: var(--text);
-}
-
-.lang-btn--active {
-  background: var(--primary);
-  color: white;
-  border-color: var(--primary);
-}
 
 header h1 {
   font-size: 22px;
