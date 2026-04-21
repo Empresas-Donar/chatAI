@@ -1,14 +1,16 @@
 /* styles.css — AppSheet → PostgreSQL Web Migrator */
 
-/* ── Global navbar ── */
+/* ══════════════════════════════════════════════
+   NAVBAR
+   ══════════════════════════════════════════════ */
+
 .navbar {
   background: #0f172a;
   border-bottom: 1px solid #1e293b;
-  padding: 0 28px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 0;
-  height: 56px;
+  height: 54px;
   width: 100%;
   position: sticky;
   top: 0;
@@ -20,35 +22,38 @@
   display: flex;
   align-items: center;
   text-decoration: none;
-  margin-right: 32px;
   flex-shrink: 0;
+  margin-right: 4px;
 }
 
 .navbar-logo-img {
-  height: 36px;
+  height: 34px;
   width: auto;
   object-fit: contain;
 }
 
 .navbar-divider {
   width: 1px;
-  height: 28px;
-  background: #1e293b;
-  margin: 0 4px;
+  height: 24px;
+  background: #2d3f57;
+  margin: 0 12px;
+  flex-shrink: 0;
 }
 
 .navbar-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   flex: 1;
 }
+
+/* ── Top-level links & trigger buttons ── */
 
 .nav-link {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: 6px;
   text-decoration: none;
   font-size: 13px;
@@ -56,24 +61,14 @@
   color: #94a3b8;
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
+  line-height: 1;
 }
 
-.nav-link:hover {
-  background: #1e293b;
-  color: #e2e8f0;
-}
+.nav-link:hover { background: #1a2744; color: #e2e8f0; }
+.nav-link.active { background: #1e3a6e; color: #93c5fd; }
+.nav-link svg { flex-shrink: 0; opacity: 0.75; }
 
-.nav-link.active {
-  background: #1e3a6e;
-  color: #93c5fd;
-}
-
-.nav-link svg {
-  flex-shrink: 0;
-  opacity: 0.8;
-}
-
-/* Dropdown trigger button — reset browser defaults */
+/* Reset <button> defaults for trigger */
 .nav-link--trigger {
   background: none;
   border: none;
@@ -82,92 +77,113 @@
 }
 
 .nav-link--trigger .chevron {
-  opacity: 0.5;
+  opacity: 0.45;
   transition: transform 0.2s;
-  margin-left: 2px;
-}
-
-/* ── Dropdown menus ── */
-.nav-dropdown {
-  position: relative;
-}
-
-.nav-dropdown-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  padding-top: 4px;
-  min-width: 220px;
-  z-index: 150;
-}
-
-.nav-dropdown-menu-inner {
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-}
-
-.nav-dropdown.open > .nav-dropdown-menu {
-  display: block;
+  margin-left: 3px;
+  flex-shrink: 0;
 }
 .nav-dropdown.open > .nav-link--trigger .chevron {
   transform: rotate(180deg);
 }
 
-/* Dropdown items */
-.nav-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  color: #94a3b8;
-  transition: background 0.12s, color 0.12s;
-  white-space: nowrap;
-}
-.nav-dropdown-item:hover {
-  background: #334155;
-  color: #e2e8f0;
-}
-.nav-dropdown-item.active {
-  background: #1e3a6e;
-  color: #93c5fd;
-}
-.nav-dropdown-item svg { flex-shrink: 0; opacity: 0.7; }
+/* ── Dropdown container ── */
 
-/* Sub-items (indented) */
-.nav-dropdown-item.sub {
-  padding-left: 32px;
-  font-size: 12.5px;
+.nav-dropdown { position: relative; }
+
+.nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  min-width: 240px;
 }
 
-/* Sub-menu group label */
-.nav-submenu {
-  margin-bottom: 2px;
+.nav-dropdown.open > .nav-dropdown-menu { display: block; }
+
+.nav-dropdown-menu-inner {
+  background: #131f35;
+  border: 1px solid #263348;
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.2);
+  min-width: 220px;
 }
-.nav-submenu + .nav-submenu {
-  border-top: 1px solid #334155;
-  padding-top: 6px;
+
+/* ── Group (e.g. "Tarjas", "Despacho") inside dropdown ── */
+
+.nav-group {
+  padding: 4px 0;
+}
+
+.nav-group + .nav-group {
+  border-top: 1px solid #1e2e45;
   margin-top: 4px;
+  padding-top: 8px;
 }
-.nav-submenu-label {
+
+.nav-group-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px 2px;
+  gap: 7px;
+  padding: 4px 10px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a6080;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.nav-group-header svg { opacity: 0.5; flex-shrink: 0; }
+
+/* ── Sub-group (e.g. "Contratistas", "Tractoristas") ── */
+
+.nav-subgroup { margin-bottom: 2px; }
+
+.nav-subgroup + .nav-subgroup { margin-top: 6px; }
+
+.nav-subgroup-label {
+  padding: 5px 12px 3px 22px;
   font-size: 10px;
   font-weight: 700;
-  color: #64748b;
+  color: #3b5070;
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
-.nav-submenu-label svg { flex-shrink: 0; opacity: 0.5; }
+
+/* ── Leaf links (deepest level) ── */
+
+.nav-leaf {
+  display: block;
+  padding: 6px 12px 6px 32px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: #7a9ab8;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.nav-leaf:hover { background: #1a2f4a; color: #c8dff5; }
+.nav-leaf.active { background: #1a3560; color: #93c5fd; font-weight: 600; }
+
+/* ── Item links (direct children of dropdown, no sub-group) ── */
+
+.nav-item {
+  display: block;
+  padding: 7px 12px 7px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 400;
+  color: #7a9ab8;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.nav-item:hover { background: #1a2f4a; color: #c8dff5; }
+.nav-item.active { background: #1a3560; color: #93c5fd; font-weight: 600; }
+
+/* ── Navbar end ── */
 
 .navbar-end {
   display: flex;

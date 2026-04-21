@@ -4,27 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Donar Integraciones{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=4" />
+  <link rel="stylesheet" href="/static/styles.css?v=5" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
 
 {# ── Navigation menu structure ──
-   To add a new page:
-   1. Add an entry below (top-level or inside a group's "children")
-   2. Create the controller, template, CSS/JS
-   3. Register the router in main.py
+   Levels:
+     top-level:  { href, label, icon }  OR  { label, icon, children: [...] }
+     group:      { label, icon, children: [ subgroup | leaf ] }
+     subgroup:   { label, children: [ leaf ] }
+     leaf:       { href, label }
 #}
 {% set nav_menu = [
   {
     "href": "/",
     "label": "Dashboard",
     "icon": "home",
-  },
-  {
-    "href": "/migrador",
-    "label": "Migrador CSV",
-    "icon": "code",
   },
   {
     "label": "Apps",
@@ -34,24 +30,42 @@
         "label": "Tarjas",
         "icon": "clipboard",
         "children": [
-          { "href": "/tarjas/detalle",          "label": "Detalle operacional" },
-          { "href": "/tarjas/contratista",      "label": "Por persona operacional" },
-          { "href": "/tarjas/general",          "label": "General operacional" },
-          { "href": "/tarjas/resumen-persona",  "label": "Resumen por persona operacional" },
-          { "href": "/tarjas/resumen-horas",    "label": "Resumen hora extra por persona" },
-          { "href": "/tarjas/detalle-tractorista",       "label": "Detalle tractorista" },
-          { "href": "/tarjas/general-tractorista",             "label": "General tractorista" },
-          { "href": "/tarjas/resumen-persona-tractorista",    "label": "Resumen por persona tractorista" },
-          { "href": "/purchase-orders",         "label": "Órdenes de Compra" },
+          {
+            "label": "Contratistas",
+            "children": [
+              { "href": "/tarjas/detalle",         "label": "Detalle operacional" },
+              { "href": "/tarjas/contratista",     "label": "Por persona operacional" },
+              { "href": "/tarjas/general",         "label": "General operacional" },
+              { "href": "/tarjas/resumen-persona", "label": "Resumen por persona operacional" },
+              { "href": "/tarjas/resumen-horas",   "label": "Resumen hora extra por persona" },
+            ]
+          },
+          {
+            "label": "Tractoristas",
+            "children": [
+              { "href": "/tarjas/detalle-tractorista",          "label": "Detalle tractorista" },
+              { "href": "/tarjas/general-tractorista",          "label": "General tractorista" },
+              { "href": "/tarjas/resumen-persona-tractorista",  "label": "Resumen por persona tractorista" },
+            ]
+          },
         ]
       },
       {
         "label": "Despacho",
         "icon": "truck",
         "children": [
-          { "href": "/despacho/ejemplo", "label": "Página de Ejemplo" },
+          { "href": "/purchase-orders",      "label": "Órdenes de crédito" },
+          { "href": "/despacho/notas",       "label": "Notas de crédito" },
         ]
       },
+    ]
+  },
+  {
+    "label": "Odoo",
+    "icon": "odoo",
+    "children": [
+      { "href": "/odoo/tarjas",    "label": "Tarjas contratistas" },
+      { "href": "/odoo/despacho",  "label": "Guía de despacho" },
     ]
   },
   {
@@ -62,7 +76,19 @@
       { "href": "/sensors/status", "label": "Estado Diario" },
     ]
   },
+  {
+    "label": "Utilidades",
+    "icon": "tools",
+    "children": [
+      { "href": "/migrador", "label": "Appsheet to PostgreSQL" },
+    ]
+  },
 ] %}
+
+{#
+  Helper macro: check if any descendant href matches current path.
+  Returns true if the item tree contains the active path.
+#}
 
 <nav class="navbar">
   <a href="/" class="navbar-brand">
@@ -73,17 +99,33 @@
 
   <div class="navbar-nav">
     {% for item in nav_menu %}
-      {% if item.children is defined %}
-        {# Detect if any child (or grandchild) matches the current path #}
+
+      {% if item.href is defined %}
+        {# ── Simple top-level link ── #}
+        <a href="{{ item.href }}" class="nav-link{% if request.url.path == item.href %} active{% endif %}">
+          {% include "partials/nav_icon.html" %}
+          {{ item.label }}
+        </a>
+
+      {% else %}
+        {# ── Top-level dropdown ── #}
+        {# Detect active: walk children (groups or leaves) #}
         {% set ns = namespace(active=false) %}
         {% for child in item.children %}
           {% if child.href is defined and request.url.path == child.href %}
             {% set ns.active = true %}
           {% endif %}
           {% if child.children is defined %}
-            {% for gc in child.children %}
-              {% if gc.href is defined and request.url.path == gc.href %}
+            {% for sub in child.children %}
+              {% if sub.href is defined and request.url.path == sub.href %}
                 {% set ns.active = true %}
+              {% endif %}
+              {% if sub.children is defined %}
+                {% for leaf in sub.children %}
+                  {% if leaf.href is defined and request.url.path == leaf.href %}
+                    {% set ns.active = true %}
+                  {% endif %}
+                {% endfor %}
               {% endif %}
             {% endfor %}
           {% endif %}
@@ -93,40 +135,54 @@
           <button class="nav-link nav-link--trigger{% if ns.active %} active{% endif %}">
             {% include "partials/nav_icon.html" %}
             {{ item.label }}
-            <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            <svg class="chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
+
           <div class="nav-dropdown-menu">
             <div class="nav-dropdown-menu-inner">
               {% for child in item.children %}
+
                 {% if child.children is defined %}
-                  <div class="nav-submenu">
-                    <div class="nav-submenu-label">
+                  {# ── Group inside dropdown (e.g. Tarjas, Despacho) ── #}
+                  <div class="nav-group">
+                    <div class="nav-group-header">
                       {% set item = child %}{% include "partials/nav_icon.html" %}
                       {{ child.label }}
                     </div>
-                    {% for gc in child.children %}
-                      <a href="{{ gc.href }}" class="nav-dropdown-item sub{% if request.url.path == gc.href %} active{% endif %}">
-                        {{ gc.label }}
-                      </a>
+
+                    {% for sub in child.children %}
+                      {% if sub.children is defined %}
+                        {# ── Sub-group (e.g. Contratistas, Tractoristas) ── #}
+                        <div class="nav-subgroup">
+                          <div class="nav-subgroup-label">{{ sub.label }}</div>
+                          {% for leaf in sub.children %}
+                            <a href="{{ leaf.href }}" class="nav-leaf{% if request.url.path == leaf.href %} active{% endif %}">
+                              {{ leaf.label }}
+                            </a>
+                          {% endfor %}
+                        </div>
+                      {% else %}
+                        {# ── Direct leaf inside group ── #}
+                        <a href="{{ sub.href }}" class="nav-item{% if request.url.path == sub.href %} active{% endif %}">
+                          {{ sub.label }}
+                        </a>
+                      {% endif %}
                     {% endfor %}
+
                   </div>
+
                 {% else %}
-                  <a href="{{ child.href }}" class="nav-dropdown-item{% if request.url.path == child.href %} active{% endif %}">
-                    {% set item = child %}{% include "partials/nav_icon.html" %}
+                  {# ── Direct leaf at dropdown top level ── #}
+                  <a href="{{ child.href }}" class="nav-item{% if request.url.path == child.href %} active{% endif %}">
                     {{ child.label }}
                   </a>
                 {% endif %}
+
               {% endfor %}
             </div>
           </div>
         </div>
 
-      {% else %}
-        {# Simple top-level link #}
-        <a href="{{ item.href }}" class="nav-link{% if request.url.path == item.href %} active{% endif %}">
-          {% include "partials/nav_icon.html" %}
-          {{ item.label }}
-        </a>
       {% endif %}
     {% endfor %}
   </div>
@@ -139,6 +195,7 @@
 {% block body %}{% endblock %}
 
 <script>
+// Toggle dropdowns
 document.querySelectorAll('.nav-link--trigger').forEach(btn => {
   btn.addEventListener('click', e => {
     e.stopPropagation();
