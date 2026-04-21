@@ -1,0 +1,102 @@
+/* tarjas_general.css — General operational overview */
+
+.tg-filter-bar { flex-wrap: wrap; }
+
+/* Two-column layout */
+.tg-tables-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .tg-tables-row { grid-template-columns: 1fr; }
+}
+
+/* Card */
+.tg-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+.tg-card-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+/* Tables */
+.tg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tg-table thead th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: #ea8c1e;
+  white-space: nowrap;
+}
+.tg-table thead th.num { text-align: right; }
+
+.tg-table tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #fde68a;
+  white-space: nowrap;
+}
+.tg-table tbody td.num { text-align: right; font-weight: 600; }
+
+.tg-table tbody td.cell-labor {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-table tbody td.cell-worker {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-table tbody td.cell-contractor {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-table tbody tr:nth-child(even) { background: #fffbeb; }
+.tg-table tbody tr:hover { background: #fef3c7; }
+
+/* Chart section */
+.tg-chart-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.tg-chart-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 340px;
+}
+
+/* Empty state */
+.tg-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tg-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }

@@ -1,0 +1,163 @@
+/* tarjas_contractor.css — Contractor detail pivot table */
+
+.tc-filter-bar { flex-wrap: wrap; }
+
+.tc-section-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+/* Pivot wrapper */
+.tc-pivot-section {
+  margin-bottom: 24px;
+}
+
+.tc-pivot-scroll {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Pivot table */
+.tc-pivot {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 800px;
+}
+
+.tc-pivot thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.tc-pivot thead th.th-fixed {
+  background: #ea8c1e;
+  color: #fff;
+}
+
+.tc-pivot thead th.th-date {
+  background: #ea8c1e;
+  color: #fff;
+  text-align: right;
+  min-width: 130px;
+}
+
+.tc-pivot thead th.th-valor-label {
+  background: #ea8c1e;
+  color: #fff;
+  text-align: right;
+  font-style: italic;
+}
+
+/* Body */
+.tc-pivot tbody td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #fde68a;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.tc-pivot tbody tr:nth-child(even) { background: #fffbeb; }
+.tc-pivot tbody tr:hover { background: #fef3c7; }
+
+/* Worker group separator */
+.tc-pivot tbody tr.worker-first td {
+  border-top: 2px solid #ea8c1e;
+}
+
+.tc-pivot .cell-worker {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tc-pivot .cell-labor {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Value cells with bar */
+.tc-pivot .cell-value {
+  text-align: right;
+  position: relative;
+  padding-right: 12px;
+}
+
+.tc-pivot .cell-value .bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.tc-pivot .cell-value .bar {
+  height: 22px;
+  background: #f59e0b;
+  border-radius: 3px;
+  min-width: 0;
+  transition: width 0.3s ease;
+}
+
+.tc-pivot .cell-value .bar-text {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tc-pivot .cell-value .cell-dash {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Tipo de pago badges */
+.tc-tipo-trato {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 12px;
+}
+.tc-tipo-aldia {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: #ffedd5;
+  color: #c2410c;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Valor por hr column */
+.tc-pivot .cell-rate {
+  text-align: right;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Empty state */
+.tc-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tc-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }

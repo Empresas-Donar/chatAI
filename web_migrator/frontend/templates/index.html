@@ -1,71 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Donar Integraciones — Migrador CSV</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2" />
-</head>
-<body>
+{% extends "base.html" %}
 
-<!-- ====================================================================== -->
-<!-- NAVBAR                                                                  -->
-<!-- ====================================================================== -->
-<nav class="navbar">
-  <a href="/" class="navbar-brand">
-    <div class="navbar-logo">
-      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="17" cy="17" r="16" fill="#1e3a6e" stroke="#2563eb" stroke-width="1.5"/>
-        <path d="M17 6 C17 6, 26 13, 26 19.5 C26 24.2 21.97 28 17 28 C12.03 28 8 24.2 8 19.5 C8 13 17 6 17 6Z" fill="#3b82f6" opacity="0.9"/>
-        <path d="M17 11 C17 11, 22 16, 22 19.5 C22 22.5 19.76 25 17 25 C14.24 25 12 22.5 12 19.5 C12 16 17 11 17 11Z" fill="#93c5fd" opacity="0.7"/>
-        <rect x="11" y="19" width="12" height="1.5" rx="0.75" fill="white" opacity="0.9"/>
-      </svg>
-    </div>
-    <div class="navbar-brand-text">
-      <span class="navbar-brand-name">Donar</span>
-      <span class="navbar-brand-sub">Integraciones</span>
-    </div>
-  </a>
+{% block title %}Dashboard — Donar Integraciones{% endblock %}
 
-  <div class="navbar-divider"></div>
+{% block navbar_end_extra %}
+<div class="lang-switcher">
+  <button class="lang-btn" data-lang="es" onclick="setLang('es')">ES</button>
+  <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
+</div>
+{% endblock %}
 
-  <div class="navbar-nav">
-    <a href="/" class="nav-link active">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
-      </svg>
-      Migrador CSV
-    </a>
-    <a href="/purchase-orders" class="nav-link">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-      </svg>
-      Órdenes de Compra
-    </a>
-    <a href="/sensors" class="nav-link">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-      </svg>
-      Sensores
-    </a>
-    <a href="/sensors/status" class="nav-link">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-      </svg>
-      Status Diario
-    </a>
-  </div>
-
-  <div class="navbar-end">
-    <div class="lang-switcher">
-      <button class="lang-btn" data-lang="es" onclick="setLang('es')">ES</button>
-      <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
-    </div>
-  </div>
-</nav>
-
+{% block body %}
 <div class="app-shell">
 
   <header>
@@ -77,86 +21,57 @@
     </div>
   </header>
 
-  <!-- ================================================================== -->
-  <!-- STEP 1: UPLOAD                                                       -->
-  <!-- ================================================================== -->
+  <!-- Step 1: Upload -->
   <div id="step-upload" class="step">
     <div class="step-header">
       <div class="step-number">1</div>
       <h2 data-i18n="step1.title">Upload CSV files</h2>
     </div>
-
     <div class="card">
       <form id="upload-form">
         <div class="form-group">
           <label for="app-name" data-i18n="upload.app_name.label">App name</label>
-          <input
-            type="text"
-            id="app-name"
-            name="app_name"
-            placeholder="contratistas_isla_maipo"
-            required
-          />
+          <input type="text" id="app-name" name="app_name" placeholder="contratistas_isla_maipo" required />
           <span class="form-hint" data-i18n="upload.app_name.hint"></span>
         </div>
-
         <div class="form-group">
           <label for="csv-files" data-i18n="upload.files.label">CSV files</label>
-          <input
-            type="file"
-            id="csv-files"
-            name="files"
-            accept=".csv"
-            multiple
-            required
-          />
+          <input type="file" id="csv-files" name="files" accept=".csv" multiple required />
           <span class="form-hint" data-i18n="upload.files.hint"></span>
         </div>
-
         <div id="upload-error" class="error-box hidden"></div>
-
         <div class="actions">
-          <button type="submit" id="upload-btn" class="btn btn-primary" data-i18n="upload.btn">
-            Upload &amp; Analyse
-          </button>
+          <button type="submit" id="upload-btn" class="btn btn-primary" data-i18n="upload.btn">Upload &amp; Analyse</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- ================================================================== -->
-  <!-- STEP 2: VALIDATION                                                   -->
-  <!-- ================================================================== -->
+  <!-- Step 2: Validation -->
   <div id="step-validate" class="step hidden">
     <div class="step-header">
       <div class="step-number">2</div>
       <h2 data-i18n="step2.title">Validation results</h2>
     </div>
-
     <div id="validation-cards"></div>
-
     <div class="actions">
       <button id="back-to-upload" class="btn btn-secondary" data-i18n="validate.back">← Back</button>
       <button id="confirm-btn" class="btn btn-primary" data-i18n="validate.confirm">Review &amp; Confirm →</button>
     </div>
   </div>
 
-  <!-- ================================================================== -->
-  <!-- STEP 3: CONFIRMATION                                                 -->
-  <!-- ================================================================== -->
+  <!-- Step 3: Confirmation -->
   <div id="step-confirm" class="step hidden">
     <div class="step-header">
       <div class="step-number">3</div>
       <h2 data-i18n="step3.title">Confirm sync</h2>
     </div>
-
     <div class="card">
       <div class="confirm-summary">
         <p><span data-i18n="confirm.app">App</span>: <strong><span id="confirm-app-name"></span></strong></p>
         <p><span data-i18n="confirm.schema">Schema pattern</span>: <code><span id="confirm-schema"></span></code></p>
         <p><span data-i18n="confirm.total_rows">Total rows to insert</span>: <strong><span id="confirm-total-rows"></span></strong></p>
       </div>
-
       <div class="table-scroll">
         <table class="confirm-table">
           <thead>
@@ -170,9 +85,7 @@
           <tbody id="confirm-table-body"></tbody>
         </table>
       </div>
-
       <div id="sync-error" class="error-box hidden" style="margin-top:16px;"></div>
-
       <div class="actions">
         <button id="back-to-validate" class="btn btn-secondary" data-i18n="confirm.back">← Back</button>
         <button id="dryrun-btn" class="btn btn-secondary" data-i18n="confirm.dryrun">Dry Run</button>
@@ -181,18 +94,14 @@
     </div>
   </div>
 
-  <!-- ================================================================== -->
-  <!-- STEP 4: RESULT                                                       -->
-  <!-- ================================================================== -->
+  <!-- Step 4: Result -->
   <div id="step-result" class="step hidden">
     <div class="step-header">
       <div class="step-number">4</div>
       <h2 id="result-title"></h2>
     </div>
-
     <div class="card">
       <div id="result-summary" class="result-summary"></div>
-
       <div class="table-scroll">
         <table class="result-table">
           <thead>
@@ -204,7 +113,6 @@
           <tbody id="result-table-body"></tbody>
         </table>
       </div>
-
       <div class="actions">
         <button id="back-from-result" class="btn btn-secondary hidden" data-i18n="result.back">← Back to confirm</button>
         <button id="restart-btn" class="btn btn-primary" data-i18n="result.restart">Start new migration</button>
@@ -212,11 +120,9 @@
     </div>
   </div>
 
-</div><!-- .app-shell -->
+</div>
 
-<!-- ====================================================================== -->
-<!-- PREVIEW MODAL                                                           -->
-<!-- ====================================================================== -->
+<!-- Preview modal -->
 <div id="preview-modal" class="modal-backdrop hidden">
   <div class="modal">
     <div class="modal-header">
@@ -228,21 +134,18 @@
   </div>
 </div>
 
-<!-- ====================================================================== -->
-<!-- LOADING OVERLAY                                                         -->
-<!-- ====================================================================== -->
+<!-- Loading overlay -->
 <div id="loading-overlay" class="loading-overlay hidden">
   <div class="loading-box">
     <div class="spinner"></div>
     <p id="overlay-msg">Loading…</p>
     <div id="log-lines" class="log-lines"></div>
-    <button id="overlay-stop-btn" class="btn btn-danger btn-sm hidden" data-i18n="overlay.stop">
-      Stop
-    </button>
+    <button id="overlay-stop-btn" class="btn btn-danger btn-sm hidden" data-i18n="overlay.stop">Stop</button>
   </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script src="/static/i18n.js"></script>
 <script src="/static/app.js"></script>
-</body>
-</html>
+{% endblock %}

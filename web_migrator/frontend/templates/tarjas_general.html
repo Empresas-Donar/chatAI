@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}General — Tarjas{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/tarjas_general.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>General</h1>
+      <p>Resumen operacional — Ganancia promedio por labor, ranking por persona y distribución diaria</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar tg-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Centro costo</label>
+      <select id="fil-cc"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Tipo de pago</label>
+      <select id="fil-tipo"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <!-- Two-column tables -->
+  <div class="tg-tables-row" id="tables-section" style="display:none">
+
+    <!-- Left: Ganancia promedio por labor -->
+    <div class="tg-card">
+      <div class="tg-card-title">Ganancia promedio por labor</div>
+      <table class="tg-table">
+        <thead>
+          <tr>
+            <th>Labor</th>
+            <th class="num">Ganancia promedio por hora</th>
+            <th class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody id="labor-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Right: Ranking por persona -->
+    <div class="tg-card">
+      <div class="tg-card-title">Ranking por persona</div>
+      <table class="tg-table">
+        <thead>
+          <tr>
+            <th>trabajador</th>
+            <th>contratista</th>
+            <th class="num">Ganancia por hora</th>
+            <th class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody id="ranking-tbody"></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- Chart -->
+  <div class="tg-chart-section" id="chart-section" style="display:none">
+    <div class="tg-card-title">Ganancia promedio diaria por labor por cuadrilla</div>
+    <div class="tg-chart-wrap">
+      <canvas id="chart-labor-cuadrilla"></canvas>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="tg-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/tarjas_general.js?v=1"></script>
+{% endblock %}

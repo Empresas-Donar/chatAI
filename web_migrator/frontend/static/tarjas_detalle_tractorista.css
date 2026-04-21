@@ -1,0 +1,16 @@
+/* tarjas_detalle_tractorista.css — full-width summary (no pie chart) */
+
+.td-tract-summary-only {
+  margin-bottom: 20px;
+}
+
+.td-tract-full {
+  max-width: none;
+}
+
+.td-summary-table th,
+.td-summary-table td.cell-contractor {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

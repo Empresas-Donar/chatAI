@@ -46,8 +46,8 @@ def init(upload_dir: Path, templates: Jinja2Templates) -> None:
     _templates = templates
 
 
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+@router.get("/migrador", response_class=HTMLResponse)
+async def migrador_page(request: Request):
     return _templates.TemplateResponse(request, "index.html")
 
 

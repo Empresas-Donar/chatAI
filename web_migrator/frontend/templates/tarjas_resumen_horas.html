@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Resumen hora extra por persona — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Detalle trabajador hora extra</h1>
+      <p>Resumen por trabajador — Horas trabajadas diarias por tipo de pago</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar trp-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Tipo de pago</label>
+      <select id="fil-tipo"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Trabajador</label>
+      <select id="fil-trabajador"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <!-- Pivot table -->
+  <div class="trp-pivot-section" id="pivot-section" style="display:none">
+    <div class="trp-section-title">Resumen por trabajador</div>
+    <div class="trp-pivot-scroll">
+      <table class="trp-pivot" id="pivot-table">
+        <thead id="pivot-thead"></thead>
+        <tbody id="pivot-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="trp-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/tarjas_resumen_horas.js?v=1"></script>
+{% endblock %}

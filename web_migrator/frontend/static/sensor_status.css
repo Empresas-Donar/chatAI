@@ -1,0 +1,47 @@
+/* sensor_status.css — Styles specific to the Status Diario page */
+
+/* Heat-map calendar strip */
+.calendar-section { margin-bottom: 24px; }
+.calendar-section h2 {
+  font-size: 14px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .6px; margin-bottom: 12px;
+}
+.calendar-grid { display: flex; flex-direction: column; gap: 10px; }
+.cal-field-row { display: flex; align-items: center; gap: 10px; }
+.cal-field-label { font-size: 12px; font-weight: 700; min-width: 120px; color: var(--text); }
+.cal-days { display: flex; gap: 4px; flex-wrap: wrap; }
+.cal-day {
+  width: 28px; height: 28px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; cursor: default;
+  border: 1px solid transparent; position: relative;
+}
+.cal-day.ok      { background: #bbf7d0; color: #15803d; border-color: #86efac; }
+.cal-day.warn    { background: #fef08a; color: #854d0e; border-color: #fde047; }
+.cal-day.offline { background: #fecaca; color: #b91c1c; border-color: #fca5a5; }
+.cal-day.empty   { background: #f1f5f9; color: #cbd5e1; border-color: #e2e8f0; }
+.cal-day:hover .tooltip { display: block; }
+
+.tooltip {
+  display: none; position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+  background: #1e293b; color: white; font-size: 11px; padding: 6px 10px; border-radius: 6px;
+  white-space: nowrap; z-index: 99; pointer-events: none;
+}
+.tooltip::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #1e293b;
+}
+
+/* Status-specific badges and cells */
+.badge-warn { background: #fef9c3; color: #854d0e; }
+.wc-exec { font-size: 12px; }
+.wc-ok   { color: #15803d; font-weight: 700; }
+.wc-warn { color: #b45309; font-weight: 700; }
+.temp-cell { display: flex; align-items: center; gap: 4px; }
+.temp-min  { color: #3b82f6; font-size: 11px; }
+.temp-max  { color: #ef4444; font-size: 11px; }
+.temp-avg  { font-weight: 700; }
+.note-cell {
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; color: #64748b;
+}

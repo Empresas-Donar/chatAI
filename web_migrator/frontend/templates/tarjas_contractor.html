@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle Contratista — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_contractor.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Detalle contratista</h1>
+      <p>Reporte por persona operacional — Vista pivote de pagos diarios por trabajador</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar tc-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Tipo de pago</label>
+      <select id="fil-tipo"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Centro costo</label>
+      <select id="fil-cc"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <!-- Pivot table -->
+  <div class="tc-pivot-section" id="pivot-section" style="display:none">
+    <div class="tc-section-title">Total trabajador</div>
+    <div class="tc-pivot-scroll">
+      <table class="tc-pivot" id="pivot-table">
+        <thead id="pivot-thead"></thead>
+        <tbody id="pivot-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="tc-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/tarjas_contractor.js?v=1"></script>
+{% endblock %}

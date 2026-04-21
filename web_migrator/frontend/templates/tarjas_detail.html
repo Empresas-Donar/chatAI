@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle Semanal — Tarjas{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/tarjas_detail.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Detalle de la semana</h1>
+      <p>Reporte operacional de tarjas — Filtros por fecha, contratista, centro de costo y labor</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar td-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Campo</label>
+      <select id="fil-campo"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Centro Costo</label>
+      <select id="fil-cc"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Tipo de Pago</label>
+      <select id="fil-tipo">
+        <option value="">Todos</option>
+        <option value="trato">Trato</option>
+        <option value="Al dia">Al Día</option>
+      </select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="td-summary-row" id="summary-section" style="display:none">
+
+    <div class="td-summary-table-wrap">
+      <div class="td-section-title">Resumen</div>
+      <table class="td-summary-table">
+        <thead>
+          <tr>
+            <th>Tipo de pago</th>
+            <th class="num">Total a pagar</th>
+            <th class="num">Jornadas</th>
+          </tr>
+        </thead>
+        <tbody id="summary-tbody"></tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total</strong></td>
+            <td class="num"><strong id="summary-total"></strong></td>
+            <td class="num"><strong id="summary-jornadas"></strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="td-chart-wrap">
+      <canvas id="chart-tipo"></canvas>
+    </div>
+
+  </div>
+
+  <!-- Detail table -->
+  <div class="td-detail-section" id="detail-section" style="display:none">
+    <div class="td-section-title">Detalle</div>
+    <div class="table-card">
+      <div class="table-header">
+        <span>Registros</span>
+        <span class="count" id="detail-count">—</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Tipo de pago</th>
+              <th>Centro costo</th>
+              <th>Labor</th>
+              <th>Contratista</th>
+              <th class="num">Jornadas</th>
+              <th class="num">Total unitario</th>
+              <th class="num">Costo total</th>
+              <th class="num">% del pago</th>
+            </tr>
+          </thead>
+          <tbody id="detail-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="td-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/tarjas_detail.js?v=1"></script>
+{% endblock %}

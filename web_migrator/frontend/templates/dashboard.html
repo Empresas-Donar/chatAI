@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Donar Integraciones{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/dashboard.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Resumen operacional — Empresas Donar</p>
+  </div>
+
+  <!-- ── Date filter ───────────────────────────────────────────────── -->
+  <div class="dash-filter-bar">
+    <div class="dash-filter-group">
+      <label>Desde</label>
+      <input type="date" id="fil-date-from" />
+    </div>
+    <div class="dash-filter-group">
+      <label>Hasta</label>
+      <input type="date" id="fil-date-to" />
+    </div>
+    <div class="dash-filter-presets">
+      <button class="preset-btn" data-days="7">7 días</button>
+      <button class="preset-btn" data-days="14">14 días</button>
+      <button class="preset-btn active" data-days="30">Este mes</button>
+      <button class="preset-btn" data-days="90">3 meses</button>
+    </div>
+    <button class="btn btn-primary btn-sm" id="btn-apply-filter">Aplicar</button>
+  </div>
+
+  <!-- ── KPI Cards ─────────────────────────────────────────────────── -->
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-icon kpi-icon--money">$</div>
+      <div class="kpi-body">
+        <div class="kpi-label" id="kpi-total-label">Total del período</div>
+        <div class="kpi-value" id="kpi-total-mes"><span class="spinner-inline"></span></div>
+        <div class="kpi-sub" id="kpi-total-trend"></div>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon kpi-icon--people">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Contratistas activos</div>
+        <div class="kpi-value" id="kpi-contratistas"><span class="spinner-inline"></span></div>
+        <div class="kpi-sub" id="kpi-contratistas-sub"></div>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon kpi-icon--jornadas">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Jornadas del período</div>
+        <div class="kpi-value" id="kpi-jornadas"><span class="spinner-inline"></span></div>
+        <div class="kpi-sub" id="kpi-jornadas-sub"></div>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon kpi-icon--sensors">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-label">Sensores online</div>
+        <div class="kpi-value" id="kpi-sensors"><span class="spinner-inline"></span></div>
+        <div class="kpi-sub" id="kpi-sensors-sub"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Charts row ────────────────────────────────────────────────── -->
+  <div class="dash-grid-2">
+
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3 id="chart-daily-title">Pagos diarios</h3>
+      </div>
+      <div class="dash-card-body chart-container">
+        <canvas id="chart-daily"></canvas>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3>Distribución de pago</h3>
+      </div>
+      <div class="dash-card-body chart-container-sm">
+        <canvas id="chart-tipo"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Tables row ────────────────────────────────────────────────── -->
+  <div class="dash-grid-2">
+
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3>Top contratistas</h3>
+        <span class="dash-card-badge" id="badge-contratistas">Período</span>
+      </div>
+      <div class="dash-card-body">
+        <table class="dash-table">
+          <thead><tr><th>Contratista</th><th class="num">Total</th><th></th></tr></thead>
+          <tbody id="tbl-contratistas">
+            <tr><td colspan="3" class="loading-cell"><span class="spinner-inline"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3>Top labores</h3>
+        <span class="dash-card-badge" id="badge-labores">Período</span>
+      </div>
+      <div class="dash-card-body">
+        <table class="dash-table">
+          <thead><tr><th>Labor</th><th class="num">Jornadas</th><th class="num">Total</th></tr></thead>
+          <tbody id="tbl-labores">
+            <tr><td colspan="3" class="loading-cell"><span class="spinner-inline"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Sensor alerts ─────────────────────────────────────────────── -->
+  <div class="dash-card dash-card--full">
+    <div class="dash-card-header">
+      <h3>Alertas de sensores</h3>
+      <a href="/sensors" class="dash-card-link">Ver inventario →</a>
+    </div>
+    <div class="dash-card-body">
+      <div id="sensor-alerts">
+        <span class="spinner-inline"></span>
+      </div>
+      <div id="sensor-sources" class="sensor-sources"></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/dashboard.js?v=1"></script>
+{% endblock %}
