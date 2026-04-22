@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iniciar Sesión — Donar Integraciones</title>
+  <link rel="stylesheet" href="/static/login.css" />
+</head>
+<body class="login-body">
+
+  <div class="login-layout">
+
+    <!-- ── Left panel: form ── -->
+    <div class="login-panel">
+      <div class="login-card">
+
+        <div class="login-brand">
+          <img src="/static/img/donar_logo.png" alt="Empresas Donar" class="login-logo" />
+        </div>
+
+        <div class="login-header">
+          <h1 class="login-title">Bienvenido</h1>
+          <p class="login-subtitle">Ingresa tus credenciales para continuar</p>
+        </div>
+
+        {% if error %}
+        <div class="login-error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Credenciales incorrectas. Intenta nuevamente.
+        </div>
+        {% endif %}
+
+        <form method="post" action="/login" class="login-form">
+          <input type="hidden" name="next" value="{{ request.query_params.get('next', '/') }}" />
+
+          <div class="form-group">
+            <label for="username" class="form-label">Usuario</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                class="form-input"
+                placeholder="Nombre de usuario"
+                autocomplete="username"
+                autofocus
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="password" class="form-label">Contraseña</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                class="form-input"
+                placeholder="Contraseña"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="login-btn">
+            Ingresar
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </form>
+
+        <p class="login-footer">
+          Donar Integraciones &copy; {{ 2026 }}
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Right panel: image ── -->
+    <div class="login-image-panel" aria-hidden="true">
+      <div class="login-image-overlay"></div>
+      <div class="login-image-caption">
+        <span class="caption-tag">Empresas Donar</span>
+        <p class="caption-text">Gestión agrícola integrada</p>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

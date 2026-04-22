@@ -1,26 +1,72 @@
+"""
+auth.py — Cookie-based session auth (replaces HTTP Basic).
+
+Flow:
+  1. Any protected request without a valid session cookie → redirect to /login
+  2. POST /login validates credentials → sets signed cookie → redirect to /
+  3. GET  /logout clears the cookie → redirect to /login
+
+Cookie is signed with ITSDANGEROUS using SECRET_KEY from .env.
+"""
+
 import os
 import secrets
+from typing import Optional
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Request
+from fastapi.responses import RedirectResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-security = HTTPBasic()
+_SESSION_COOKIE = "donar_session"
+_MAX_AGE = 60 * 60 * 12  # 12 hours
 
 
-def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
+def _signer() -> URLSafeTimedSerializer:
+    secret = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
+    return URLSafeTimedSerializer(secret)
+
+
+def set_session(response: RedirectResponse, username: str) -> None:
+    token = _signer().dumps(username)
+    response.set_cookie(
+        key=_SESSION_COOKIE,
+        value=token,
+        max_age=_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def clear_session(response: RedirectResponse) -> None:
+    response.delete_cookie(_SESSION_COOKIE)
+
+
+def get_current_user(request: Request) -> Optional[str]:
+    token = request.cookies.get(_SESSION_COOKIE)
+    if not token:
+        return None
+    try:
+        return _signer().loads(token, max_age=_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def require_auth(request: Request):
+    """FastAPI dependency — redirects to /login if not authenticated."""
+    user = get_current_user(request)
+    if not user:
+        raise _LoginRedirect(request.url.path)
+    return user
+
+
+def check_credentials(username: str, password: str) -> bool:
     expected_user = os.environ.get("AUTH_USER", "")
     expected_pass = os.environ.get("AUTH_PASSWORD", "")
+    user_ok = secrets.compare_digest(username.encode(), expected_user.encode())
+    pass_ok = secrets.compare_digest(password.encode(), expected_pass.encode())
+    return user_ok and pass_ok
 
-    user_ok = secrets.compare_digest(
-        credentials.username.encode(), expected_user.encode()
-    )
-    pass_ok = secrets.compare_digest(
-        credentials.password.encode(), expected_pass.encode()
-    )
 
-    if not (user_ok and pass_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+class _LoginRedirect(Exception):
+    def __init__(self, next_path: str):
+        self.next_path = next_path

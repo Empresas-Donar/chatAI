@@ -22,11 +22,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from auth import require_auth
+from auth import _LoginRedirect, require_auth
+import controllers.login_controller as login
 import controllers.dashboard_controller as dashboard
 import controllers.csv_migrator_controller as csv_migrator
 import controllers.tarjas_controller as tarjas
@@ -47,25 +49,34 @@ STATIC_DIR    = BASE_DIR / "frontend" / "static"
 app = FastAPI(
     title="Donar Integraciones",
     version="2.0.0",
-    dependencies=[Depends(require_auth)],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+
+@app.exception_handler(_LoginRedirect)
+async def login_redirect_handler(request: Request, exc: _LoginRedirect):
+    next_path = exc.next_path or "/"
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+
+
 # Inject shared dependencies into controllers
+login.init(templates=templates)
 dashboard.init(templates=templates)
 csv_migrator.init(upload_dir=UPLOAD_DIR, templates=templates)
 tarjas.init(templates=templates)
 purchase_orders.init(templates=templates)
 sensors.init(templates=templates)
 
-# Register controllers (dashboard first → owns "/" route)
-app.include_router(dashboard.router)
-app.include_router(csv_migrator.router)
-app.include_router(tarjas.router)
-app.include_router(purchase_orders.router)
-app.include_router(sensors.router)
+_auth = [Depends(require_auth)]
+
+app.include_router(login.router)
+app.include_router(dashboard.router,       dependencies=_auth)
+app.include_router(csv_migrator.router,    dependencies=_auth)
+app.include_router(tarjas.router,          dependencies=_auth)
+app.include_router(purchase_orders.router, dependencies=_auth)
+app.include_router(sensors.router,         dependencies=_auth)
 
 
 @app.get("/health")
