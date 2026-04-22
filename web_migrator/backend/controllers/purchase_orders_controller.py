@@ -18,7 +18,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
@@ -54,9 +54,13 @@ def _serialize(v):
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.get("/purchase-orders", response_class=HTMLResponse)
+@router.get("/odoo/tarjas", response_class=HTMLResponse)
 async def purchase_order_page(request: Request):
     return _templates.TemplateResponse(request, "purchase_orders.html")
+
+@router.get("/purchase-orders", response_class=HTMLResponse)
+async def purchase_order_legacy(request: Request):
+    return RedirectResponse(url="/odoo/tarjas", status_code=301)
 
 
 @router.get("/api/purchase-orders/filters")
