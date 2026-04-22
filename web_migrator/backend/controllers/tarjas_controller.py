@@ -604,7 +604,8 @@ async def get_tarjas_contractor_data(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM appsheet.tarjas_pagos {where} "
+                f"SELECT *, fecha::date::text AS fecha "
+                f"FROM appsheet.tarjas_pagos {where} "
                 "ORDER BY contratista, labor, fecha::date",
                 params,
             )
@@ -722,7 +723,8 @@ async def get_tarjas_contractor_tractorista_data(
 
             where = "WHERE " + " AND ".join(filters)
             cur.execute(
-                f"SELECT * FROM appsheet.tarjas_pagos {where} "
+                f"SELECT *, fecha::date::text AS fecha "
+                f"FROM appsheet.tarjas_pagos {where} "
                 "ORDER BY contratista, labor, fecha::date",
                 params,
             )
