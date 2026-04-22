@@ -847,9 +847,9 @@ async def get_tarjas_resumen_horas_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT trabajador, COALESCE(SUM(horas_trabajadas), 0)::int AS total "
+                "SELECT trabajador, COALESCE(SUM(horas_trabajadas::numeric), 0)::int AS total "
                 "FROM appsheet.tarjas_pagos "
-                "WHERE trabajador IS NOT NULL "
+                "WHERE trabajador IS NOT NULL AND horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
                 "GROUP BY trabajador ORDER BY total DESC"
             )
             trabajadores = _rows_to_dicts(cur)
@@ -900,7 +900,8 @@ async def get_tarjas_resumen_horas(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(horas_trabajadas), 0)::int AS horas_trabajadas "
+                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_trabajadas::numeric ELSE 0 END), 0)::int AS horas_trabajadas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
