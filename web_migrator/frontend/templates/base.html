@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Donar Integraciones{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=8" />
+  <link rel="stylesheet" href="/static/styles.css?v=9" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -188,13 +188,58 @@
 
   <div class="navbar-end">
     {% block navbar_end_extra %}{% endblock %}
+    <button class="nav-hamburger" id="navHamburger" aria-label="Menú">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </nav>
+
+{# ── Mobile drawer ── #}
+<div class="mobile-overlay" id="mobileOverlay"></div>
+<div class="mobile-drawer" id="mobileDrawer">
+  <div class="mobile-drawer-header">
+    <img src="/static/img/donar_logo.png" alt="Empresas Donar" class="navbar-logo-img" />
+    <button class="mobile-drawer-close" id="drawerClose" aria-label="Cerrar">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <nav class="mobile-nav">
+    {% for item in nav_menu %}
+      {% if item.href is defined %}
+        <a href="{{ item.href }}" class="mobile-nav-link{% if request.url.path == item.href %} active{% endif %}">
+          {{ item.label }}
+        </a>
+      {% else %}
+        <div class="mobile-nav-section">
+          <div class="mobile-nav-section-title">{{ item.label }}</div>
+          {% for child in item.children %}
+            {% if child.children is defined %}
+              <div class="mobile-nav-group-label">{{ child.label }}</div>
+              {% for sub in child.children %}
+                {% if sub.children is defined %}
+                  <div class="mobile-nav-subgroup-label">{{ sub.label }}</div>
+                  {% for leaf in sub.children %}
+                    <a href="{{ leaf.href }}" class="mobile-nav-leaf{% if request.url.path == leaf.href %} active{% endif %}">{{ leaf.label }}</a>
+                  {% endfor %}
+                {% else %}
+                  <a href="{{ sub.href }}" class="mobile-nav-leaf{% if request.url.path == sub.href %} active{% endif %}">{{ sub.label }}</a>
+                {% endif %}
+              {% endfor %}
+            {% else %}
+              <a href="{{ child.href }}" class="mobile-nav-leaf{% if request.url.path == child.href %} active{% endif %}">{{ child.label }}</a>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endfor %}
+    <a href="/logout" class="mobile-nav-logout">Cerrar sesión</a>
+  </nav>
+</div>
 
 {% block body %}{% endblock %}
 
 <script>
-// Toggle dropdowns
+// ── Desktop dropdowns ──
 document.querySelectorAll('.nav-link--trigger').forEach(btn => {
   btn.addEventListener('click', e => {
     e.stopPropagation();
@@ -210,6 +255,19 @@ document.addEventListener('click', () => {
 document.querySelectorAll('.nav-dropdown-menu').forEach(menu => {
   menu.addEventListener('click', e => e.stopPropagation());
 });
+
+// ── Mobile drawer ──
+const hamburger = document.getElementById('navHamburger');
+const drawer    = document.getElementById('mobileDrawer');
+const overlay   = document.getElementById('mobileOverlay');
+const closeBtn  = document.getElementById('drawerClose');
+
+function openDrawer()  { drawer.classList.add('open'); overlay.classList.add('open'); document.body.style.overflow = 'hidden'; }
+function closeDrawer() { drawer.classList.remove('open'); overlay.classList.remove('open'); document.body.style.overflow = ''; }
+
+hamburger.addEventListener('click', openDrawer);
+closeBtn.addEventListener('click', closeDrawer);
+overlay.addEventListener('click', closeDrawer);
 </script>
 {% block scripts %}{% endblock %}
 </body>
