@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -f
+      - web_migrator/Dockerfile
+      - -t
+      - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest
+      - .
+images:
+  - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest

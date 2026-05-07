@@ -34,6 +34,7 @@ import controllers.csv_migrator_controller as csv_migrator
 import controllers.tarjas_controller as tarjas
 import controllers.purchase_orders_controller as purchase_orders
 import controllers.sensors_controller as sensors
+import controllers.despacho_controller as despacho
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ csv_migrator.init(upload_dir=UPLOAD_DIR, templates=templates)
 tarjas.init(templates=templates)
 purchase_orders.init(templates=templates)
 sensors.init(templates=templates)
+despacho.init(templates=templates)
 
 _auth = [Depends(require_auth)]
 
@@ -77,6 +79,7 @@ app.include_router(csv_migrator.router,    dependencies=_auth)
 app.include_router(tarjas.router,          dependencies=_auth)
 app.include_router(purchase_orders.router, dependencies=_auth)
 app.include_router(sensors.router,         dependencies=_auth)
+app.include_router(despacho.router,        dependencies=_auth)
 
 
 @app.get("/health")

@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Notas de Crédito — Despacho{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/despacho_notas.css?v=2" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Notas de crédito</h1>
+      <p>Reporte de pago por contratista — Desglose por tipo de pago, centro de costo y labor</p>
+    </div>
+  </div>
+
+  <!-- Tab selector -->
+  <div class="dn-tabs">
+    <button class="dn-tab active" data-tab="notas">Nota de crédito</button>
+    <button class="dn-tab" data-tab="odoo">Exportar a Odoo</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: Nota de crédito                                      -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <div id="tab-notas">
+
+    <div class="filter-bar dn-filter-bar">
+      <div>
+        <label>Desde</label>
+        <input type="date" id="fil-from" />
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="date" id="fil-to" />
+      </div>
+      <div>
+        <label>Campo</label>
+        <select id="fil-campo"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label>Contratista <span class="required">*</span></label>
+        <select id="fil-contratista"><option value="">Seleccionar…</option></select>
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+        <button class="btn btn-secondary btn-sm" id="btn-print" style="display:none">Imprimir</button>
+      </div>
+    </div>
+
+    <!-- Report -->
+    <div id="report-section" style="display:none">
+
+      <!-- Header card -->
+      <div class="dn-header-card">
+        <div class="dn-header-logo">
+          <img src="/static/img/donar_logo.png" alt="Empresas Donar" />
+          <span>EMPRESAS<br>DONAR</span>
+        </div>
+        <div class="dn-header-center">
+          <div class="dn-empresa" id="hdr-empresa">AGRÍCOLA DONAR UNO SPA</div>
+          <div class="dn-rut">77.294.771-2</div>
+          <div class="dn-contratista-label">Contratista: <span id="hdr-contratista"></span></div>
+          <div class="dn-periodo" id="hdr-periodo"></div>
+        </div>
+        <div class="dn-header-dates">
+          <div class="dn-date-row">
+            <span class="dn-date-label">Fecha Inicio</span>
+            <span class="dn-date-val" id="hdr-fecha-inicio"></span>
+          </div>
+          <div class="dn-date-row">
+            <span class="dn-date-label">Fecha Término</span>
+            <span class="dn-date-val" id="hdr-fecha-termino"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Glosa / totals banner -->
+      <div class="dn-glosa-card">
+        <div class="dn-glosa-title">GLOSA</div>
+        <div class="dn-glosa-subtitle" id="glosa-text">SERVICIOS DE LABORES AGRÍCOLAS</div>
+        <div class="dn-totals-row">
+          <div class="dn-total-box dn-total-trato">
+            <div class="dn-total-label">TOTAL A TRATO</div>
+            <div class="dn-total-val" id="tot-trato">$0</div>
+          </div>
+          <div class="dn-total-box dn-total-aldia">
+            <div class="dn-total-label">TOTAL AL DÍA</div>
+            <div class="dn-total-val" id="tot-aldia">$0</div>
+          </div>
+          <div class="dn-total-box dn-total-general">
+            <div class="dn-total-label">TOTAL A PAGAR</div>
+            <div class="dn-total-val" id="tot-general">$0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail table -->
+      <div class="dn-detail-section">
+        <div class="table-card">
+          <div class="table-header">
+            <span>Detalle</span>
+            <span class="count" id="detail-count">—</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl dn-table">
+              <thead>
+                <tr>
+                  <th>Tipo de pago</th>
+                  <th>CC</th>
+                  <th>Nombre labor</th>
+                  <th class="num">Jornadas</th>
+                  <th class="num">Total unitario</th>
+                  <th class="num">Total pagar</th>
+                </tr>
+              </thead>
+              <tbody id="detail-tbody"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="5"><strong>Total</strong></td>
+                  <td class="num"><strong id="table-total"></strong></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="empty-state" class="dn-empty" style="display:none">
+      <h3>Sin resultados</h3>
+      <p>No hay registros para los filtros seleccionados.</p>
+    </div>
+
+  </div><!-- /tab-notas -->
+
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: Exportar a Odoo                                      -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <div id="tab-odoo" style="display:none">
+
+    <div class="filter-bar dn-filter-bar">
+      <div>
+        <label>Desde</label>
+        <input type="date" id="odoo-from" />
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="date" id="odoo-to" />
+      </div>
+      <div>
+        <label>Cliente</label>
+        <select id="odoo-cliente"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" id="btn-odoo-preview">Vista previa</button>
+        <button class="btn btn-success btn-sm" id="btn-odoo-download">↓ Descargar CSV</button>
+      </div>
+    </div>
+
+    <!-- Preview table -->
+    <div id="odoo-preview-section" style="display:none">
+      <div class="table-card">
+        <div class="table-header">
+          <span>Vista previa — formato Odoo</span>
+          <span class="count" id="odoo-count">—</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl dn-odoo-table">
+            <thead>
+              <tr>
+                <th>Vendedor</th>
+                <th>Producto</th>
+                <th class="num">Cantidad</th>
+                <th>Cód. Distribución</th>
+                <th>partner_id</th>
+                <th>order_line/product_id</th>
+                <th>order_line/analytic_distribution</th>
+              </tr>
+            </thead>
+            <tbody id="odoo-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="odoo-empty" class="dn-empty" style="display:none">
+      <h3>Sin resultados</h3>
+      <p>No hay despachos para los filtros seleccionados.</p>
+    </div>
+
+  </div><!-- /tab-odoo -->
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/despacho_notas.js?v=2"></script>
+{% endblock %}
