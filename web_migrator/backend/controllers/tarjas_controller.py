@@ -23,15 +23,21 @@ Routes:
   GET  /tarjas/contratista-tractorista       → Tractorista worker pivot (Looker)
   GET  /api/tarjas/contratista-tractorista/filters
   GET  /api/tarjas/contratista-tractorista   → Raw tarjas_pagos rows (tractorista only)
+
+  GET  /tarjas/notas                    → Notas de crédito page (contractor payment report)
+  GET  /api/tarjas/notas/filters        → Filter options (notas)
+  GET  /api/tarjas/notas                → Report data
 """
 
+import csv
 import datetime
 import decimal
+import io
 import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from psycopg2 import sql as psql
@@ -1179,3 +1185,191 @@ async def get_tarjas_general_tractorista(
         "person_ranking": person_ranking,
         "chart_data": chart_data,
     }
+
+
+# ===========================================================================
+# Notas de crédito — contractor payment report (moved from despacho)
+# ===========================================================================
+
+@router.get("/tarjas/notas", response_class=HTMLResponse)
+async def tarjas_notas_page(request: Request):
+    return _templates.TemplateResponse(request, "despacho_notas.html")
+
+
+@router.get("/api/tarjas/notas/filters")
+async def get_tarjas_notas_filters():
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
+                "WHERE nombre_campo IS NOT NULL ORDER BY nombre_campo"
+            )
+            campos = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    return {"campos": campos, "contratistas": contratistas}
+
+
+@router.get("/api/tarjas/notas")
+async def get_tarjas_notas(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    campo: str = Query(None),
+    contratista: str = Query(...),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+
+    filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s"]
+    params: list = [fecha_inicio, fecha_termino, contratista]
+
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT
+                    tipo_pago,
+                    cuartel_cc              AS cc,
+                    labor,
+                    COUNT(*)                AS jornadas,
+                    ROUND(
+                      CASE
+                        WHEN LOWER(TRIM(tipo_pago)) IN ('a trato', 'trato')
+                          THEN AVG(NULLIF(total_trato, 0))
+                        ELSE AVG(NULLIF(total_jornada, 0))
+                      END::numeric, 0
+                    )                       AS total_unitario,
+                    COALESCE(SUM(total_pagar), 0) AS total_pagar
+                FROM appsheet.tarjas_pagos
+                {where}
+                GROUP BY tipo_pago, cuartel_cc, labor
+                ORDER BY
+                    CASE WHEN LOWER(TRIM(tipo_pago)) IN ('a trato','trato') THEN 0 ELSE 1 END,
+                    cuartel_cc, labor
+            """, params)
+            rows = _rows_to_dicts(cur)
+
+            cur.execute(f"""
+                SELECT
+                    tipo_pago,
+                    COALESCE(SUM(total_pagar), 0) AS total
+                FROM appsheet.tarjas_pagos
+                {where}
+                GROUP BY tipo_pago
+            """, params)
+            totals_by_tipo = {r[0]: float(r[1]) for r in cur.fetchall()}
+
+            cur.execute(f"""
+                SELECT DISTINCT nombre_campo
+                FROM appsheet.tarjas_pagos
+                {where}
+                LIMIT 1
+            """, params)
+            row = cur.fetchone()
+            nombre_campo = row[0] if row else ""
+
+    finally:
+        conn.close()
+
+    total_trato = sum(
+        r["total_pagar"] for r in rows
+        if r["tipo_pago"] and r["tipo_pago"].lower().strip() in ("a trato", "trato")
+    )
+    total_aldia = sum(
+        r["total_pagar"] for r in rows
+        if r["tipo_pago"] and r["tipo_pago"].lower().strip() not in ("a trato", "trato")
+    )
+    total_general = total_trato + total_aldia
+
+    return {
+        "nombre_campo": nombre_campo,
+        "contratista": contratista,
+        "fecha_inicio": fecha_inicio,
+        "fecha_termino": fecha_termino,
+        "total_trato": total_trato,
+        "total_aldia": total_aldia,
+        "total_general": total_general,
+        "rows": rows,
+        "count": len(rows),
+    }
+
+
+@router.get("/api/tarjas/notas/odoo-export")
+async def export_tarjas_notas_odoo(
+    contratista: str = Query(...),
+    campo: str = Query(...),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    "Vendedor",
+                    "Lineas del pedido/Producto/Nombre",
+                    "Lineas del pedido/Cantidad",
+                    "Lineas del pedido/Código de Distribución Analítica/Código",
+                    "Lineas del pedido/Precio un.",
+                    "partner_id",
+                    "order_line/product_id",
+                    "order_line/product_qty",
+                    "order_line/analytic_distribution",
+                    "order_line/price_unit"
+                FROM appsheet.tarjas_reporte_odoo
+                WHERE "Vendedor"     = %s
+                  AND "nombre_campo" = %s
+                  AND "fecha" BETWEEN %s AND %s
+                ORDER BY "fecha",
+                         "Lineas del pedido/Código de Distribución Analítica/Código",
+                         "Lineas del pedido/Producto/Nombre"
+            """, (contratista, campo, fecha_inicio, fecha_termino))
+            columns = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([str(v) if v is not None else "" for v in row])
+
+    filename = (
+        f"odoo_nota_{contratista.replace(' ', '_')}_{campo.replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.csv"
+    )
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

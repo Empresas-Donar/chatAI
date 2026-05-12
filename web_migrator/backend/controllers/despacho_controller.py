@@ -4,9 +4,13 @@ controllers/despacho_controller.py
 HTTP layer for Despacho reports.
 
 Routes:
-  GET  /despacho/notas                  → Notas de crédito page
-  GET  /api/despacho/notas/filters      → Filter options
-  GET  /api/despacho/notas              → Report data
+  GET  /despacho/notas                  → redirect 301 → /tarjas/notas
+  GET  /api/despacho/notas/filters      → redirect 301
+  GET  /api/despacho/notas              → redirect 301
+
+  GET  /despacho/resumen                → Resumen de despacho page
+  GET  /api/despacho/resumen/filters    → Filter options (clientes, fechas)
+  GET  /api/despacho/resumen            → Dashboard data
 
   GET  /despacho/odoo                   → Odoo export page
   GET  /api/despacho/odoo/filters       → Filter options (clientes, fechas)
@@ -23,7 +27,7 @@ import re
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
@@ -56,45 +60,86 @@ def _rows_to_dicts(cur):
 
 
 # ===========================================================================
-# Notas de crédito — contractor payment report
+# Notas de crédito — moved to /tarjas/notas (redirects kept for old bookmarks)
 # ===========================================================================
 
-@router.get("/despacho/notas", response_class=HTMLResponse)
-async def despacho_notas_page(request: Request):
-    return _templates.TemplateResponse(request, "despacho_notas.html")
+@router.get("/despacho/notas")
+async def despacho_notas_redirect():
+    return RedirectResponse(url="/tarjas/notas", status_code=301)
 
 
 @router.get("/api/despacho/notas/filters")
-async def get_despacho_notas_filters():
+async def redirect_despacho_notas_filters():
+    return RedirectResponse(url="/api/tarjas/notas/filters", status_code=301)
+
+
+@router.get("/api/despacho/notas")
+async def redirect_despacho_notas(request: Request):
+    return RedirectResponse(url=f"/api/tarjas/notas?{request.url.query}", status_code=301)
+
+
+# ===========================================================================
+# Odoo export — CSV for Odoo purchase order import
+# ===========================================================================
+
+# ===========================================================================
+# Guía de despacho — document view
+# ===========================================================================
+
+@router.get("/despacho/guia", response_class=HTMLResponse)
+async def despacho_guia_page(request: Request):
+    return _templates.TemplateResponse(request, "despacho_guia.html")
+
+
+@router.get("/api/despacho/guia/filters")
+async def get_despacho_guia_filters(
+    cliente: str = Query(None),
+    chofer: str = Query(None),
+):
     try:
         conn = get_connection()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
-                "WHERE nombre_campo IS NOT NULL ORDER BY nombre_campo"
-            )
-            campos = [r[0] for r in cur.fetchall()]
+            # Clientes — filtered by chofer if selected
+            if chofer:
+                cur.execute(
+                    "SELECT DISTINCT cliente FROM appsheet.despacho_ingreso "
+                    "WHERE cliente IS NOT NULL AND nombre_chofer = %s ORDER BY cliente",
+                    (chofer,)
+                )
+            else:
+                cur.execute(
+                    "SELECT DISTINCT cliente FROM appsheet.despacho_ingreso "
+                    "WHERE cliente IS NOT NULL ORDER BY cliente"
+                )
+            clientes = [r[0] for r in cur.fetchall()]
 
-            cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
-            )
-            contratistas = [r[0] for r in cur.fetchall()]
+            # Choferes — filtered by cliente if selected
+            if cliente:
+                cur.execute(
+                    "SELECT DISTINCT nombre_chofer FROM appsheet.despacho_ingreso "
+                    "WHERE nombre_chofer IS NOT NULL AND cliente = %s ORDER BY nombre_chofer",
+                    (cliente,)
+                )
+            else:
+                cur.execute(
+                    "SELECT DISTINCT nombre_chofer FROM appsheet.despacho_ingreso "
+                    "WHERE nombre_chofer IS NOT NULL ORDER BY nombre_chofer"
+                )
+            choferes = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+    return {"clientes": clientes, "choferes": choferes}
 
-    return {"campos": campos, "contratistas": contratistas}
 
-
-@router.get("/api/despacho/notas")
-async def get_despacho_notas(
+@router.get("/api/despacho/guia")
+async def get_despacho_guia(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
-    campo: str = Query(None),
-    contratista: str = Query(...),
+    cliente: str = Query(None),
+    chofer: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -104,85 +149,231 @@ async def get_despacho_notas(
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
 
-    filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s"]
-    params: list = [fecha_inicio, fecha_termino, contratista]
-
-    if campo:
-        filters.append("nombre_campo = %s")
-        params.append(campo)
-
+    filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
+    params: list = [fecha_inicio, fecha_termino]
+    if cliente:
+        filters.append("i.cliente = %s")
+        params.append(cliente)
+    if chofer:
+        filters.append("i.nombre_chofer = %s")
+        params.append(chofer)
     where = "WHERE " + " AND ".join(filters)
 
     try:
         with conn.cursor() as cur:
-            # Detail rows grouped by tipo_pago, cc, labor
             cur.execute(f"""
                 SELECT
-                    tipo_pago,
-                    cuartel_cc              AS cc,
-                    labor,
-                    COUNT(*)                AS jornadas,
-                    ROUND(
-                      CASE
-                        WHEN LOWER(TRIM(tipo_pago)) IN ('a trato', 'trato')
-                          THEN AVG(NULLIF(total_trato, 0))
-                        ELSE AVG(NULLIF(total_jornada, 0))
-                      END::numeric, 0
-                    )                       AS total_unitario,
-                    COALESCE(SUM(total_pagar), 0) AS total_pagar
-                FROM appsheet.tarjas_pagos
+                    i.fecha_limpia::date::text          AS fecha,
+                    COALESCE(i.cliente, '—')            AS cliente,
+                    COALESCE(cl.nombre_odoo, i.cliente) AS nombre_odoo,
+                    COALESCE(i.nombre_chofer, '—')      AS chofer,
+                    COALESCE(i.numero_patente, '—')     AS patente,
+                    COALESCE(i.destino, '—')            AS destino,
+                    i.producto,
+                    cc.id_odoo,
+                    COALESCE(i.calidad, '—')            AS calidad,
+                    COALESCE(i.total_unidades, 0)       AS total_unidades,
+                    COALESCE(i.cajas, 0)                AS cajas,
+                    COALESCE(i.unidades_caja, 0)        AS unidades_caja,
+                    COALESCE(i.cantidad_de_pallet, 0)   AS pallets,
+                    COALESCE(i.mallas, 0)               AS mallas
+                FROM appsheet.despacho_ingreso i
+                LEFT JOIN appsheet.despacho_cliente cl
+                    ON TRIM(cl.cliente) = TRIM(i.cliente)
+                LEFT JOIN appsheet.despacho_cc cc
+                    ON TRIM(cc.producto) = TRIM(i.producto)
                 {where}
-                GROUP BY tipo_pago, cuartel_cc, labor
-                ORDER BY
-                    CASE WHEN LOWER(TRIM(tipo_pago)) IN ('a trato','trato') THEN 0 ELSE 1 END,
-                    cuartel_cc, labor
+                ORDER BY i.fecha_limpia DESC, i.cliente, i.producto
             """, params)
             rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
 
-            # Totals by tipo_pago
+    # Group rows into trips: key = (fecha, cliente, chofer, patente)
+    from collections import OrderedDict
+    trips: dict = OrderedDict()
+    for r in rows:
+        key = (r["fecha"], r["cliente"], r["chofer"], r["patente"])
+        if key not in trips:
+            trips[key] = {
+                "fecha":      r["fecha"],
+                "cliente":    r["cliente"],
+                "nombre_odoo": r["nombre_odoo"],
+                "chofer":     r["chofer"],
+                "patente":    r["patente"],
+                "destino":    r["destino"],
+                "lineas":     [],
+                "total_unidades": 0,
+                "total_pallets":  0,
+            }
+        product_id, analytic = _parse_odoo_id(r["id_odoo"])
+        trips[key]["lineas"].append({
+            "producto":       r["producto"] or "—",
+            "calidad":        r["calidad"],
+            "total_unidades": r["total_unidades"],
+            "cajas":          r["cajas"],
+            "unidades_caja":  r["unidades_caja"],
+            "pallets":        r["pallets"],
+            "mallas":         r["mallas"],
+            "product_id":     product_id,
+            "analytic":       analytic,
+        })
+        trips[key]["total_unidades"] += r["total_unidades"]
+        trips[key]["total_pallets"]  += r["pallets"]
+
+    return {"viajes": list(trips.values())}
+
+
+# ===========================================================================
+# Resumen de despacho — dashboard view
+# ===========================================================================
+
+@router.get("/despacho/resumen", response_class=HTMLResponse)
+async def despacho_resumen_page(request: Request):
+    return _templates.TemplateResponse(request, "despacho_resumen.html")
+
+
+@router.get("/api/despacho/resumen/filters")
+async def get_despacho_resumen_filters():
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT cliente FROM appsheet.despacho_ingreso "
+                "WHERE cliente IS NOT NULL ORDER BY cliente"
+            )
+            clientes = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return {"clientes": clientes}
+
+
+@router.get("/api/despacho/resumen")
+async def get_despacho_resumen(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    cliente: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+
+    base_filters = ["fecha_limpia::date BETWEEN %s AND %s"]
+    base_params: list = [fecha_inicio, fecha_termino]
+    if cliente:
+        base_filters.append("cliente = %s")
+        base_params.append(cliente)
+    where = "WHERE " + " AND ".join(base_filters)
+
+    try:
+        with conn.cursor() as cur:
+            # ── KPIs globales ──
             cur.execute(f"""
                 SELECT
-                    tipo_pago,
-                    COALESCE(SUM(total_pagar), 0) AS total
-                FROM appsheet.tarjas_pagos
+                    COUNT(*)                                    AS total_registros,
+                    COALESCE(SUM(kg_brutos), 0)                AS total_kg,
+                    COALESCE(SUM(total_bins), 0)               AS total_bins,
+                    COALESCE(SUM(total_unidades), 0)           AS total_unidades,
+                    COUNT(DISTINCT cliente)                     AS clientes,
+                    COUNT(DISTINCT fecha_limpia::date)          AS dias
+                FROM appsheet.despacho_ingreso
                 {where}
-                GROUP BY tipo_pago
-            """, params)
-            totals_by_tipo = {r[0]: float(r[1]) for r in cur.fetchall()}
+            """, base_params)
+            kpi = _rows_to_dicts(cur)[0]
 
-            # Campo / empresa info
+            # ── Tendencia semanal (unidades) ──
             cur.execute(f"""
-                SELECT DISTINCT nombre_campo
-                FROM appsheet.tarjas_pagos
+                SELECT
+                    DATE_TRUNC('week', fecha_limpia::timestamp)::date AS semana,
+                    COALESCE(SUM(total_unidades), 0)                  AS unidades,
+                    COALESCE(SUM(kg_brutos), 0)                       AS kg,
+                    COUNT(*)                                          AS registros
+                FROM appsheet.despacho_ingreso
                 {where}
-                LIMIT 1
-            """, params)
-            row = cur.fetchone()
-            nombre_campo = row[0] if row else ""
+                GROUP BY 1 ORDER BY 1
+            """, base_params)
+            tendencia_semanal = _rows_to_dicts(cur)
+
+            # ── Top clientes por unidades ──
+            cur.execute(f"""
+                SELECT
+                    COALESCE(cliente, 'Sin cliente')            AS cliente,
+                    COALESCE(SUM(total_unidades), 0)            AS unidades,
+                    COALESCE(SUM(kg_brutos), 0)                 AS kg,
+                    COUNT(*)                                    AS despachos
+                FROM appsheet.despacho_ingreso
+                {where}
+                GROUP BY cliente
+                ORDER BY unidades DESC, kg DESC
+                LIMIT 10
+            """, base_params)
+            top_clientes = _rows_to_dicts(cur)
+
+            # ── Distribución por calidad (solo registros con unidades) ──
+            cur.execute(f"""
+                SELECT
+                    COALESCE(calidad, 'Sin calidad')            AS calidad,
+                    COALESCE(SUM(total_unidades), 0)            AS unidades,
+                    COUNT(*)                                    AS registros
+                FROM appsheet.despacho_ingreso
+                {where} AND total_unidades > 0
+                GROUP BY calidad
+                ORDER BY unidades DESC
+            """, base_params)
+            por_calidad = _rows_to_dicts(cur)
+
+            # ── Top productos (unidades, semillas/pimientos) ──
+            cur.execute(f"""
+                SELECT
+                    CASE
+                        WHEN producto LIKE '%-25/26 %'
+                            THEN SPLIT_PART(producto, '-25/26 ', 2)
+                        ELSE COALESCE(producto, 'Sin producto')
+                    END                                         AS producto,
+                    COALESCE(SUM(total_unidades), 0)            AS unidades,
+                    COUNT(*)                                    AS registros
+                FROM appsheet.despacho_ingreso
+                {where} AND total_unidades > 0
+                GROUP BY 1
+                ORDER BY unidades DESC
+                LIMIT 10
+            """, base_params)
+            top_productos = _rows_to_dicts(cur)
+
+            # ── Últimos 10 despachos ──
+            cur.execute(f"""
+                SELECT
+                    fecha_limpia::date::text        AS fecha,
+                    COALESCE(cliente, '—')          AS cliente,
+                    COALESCE(producto, '—')         AS producto,
+                    COALESCE(calidad, '—')          AS calidad,
+                    COALESCE(total_unidades, 0)     AS unidades,
+                    COALESCE(kg_brutos, 0)          AS kg,
+                    COALESCE(total_bins, 0)         AS bins
+                FROM appsheet.despacho_ingreso
+                {where}
+                ORDER BY fecha_limpia DESC
+                LIMIT 15
+            """, base_params)
+            ultimos = _rows_to_dicts(cur)
 
     finally:
         conn.close()
 
-    total_trato = sum(
-        r["total_pagar"] for r in rows
-        if r["tipo_pago"] and r["tipo_pago"].lower().strip() in ("a trato", "trato")
-    )
-    total_aldia = sum(
-        r["total_pagar"] for r in rows
-        if r["tipo_pago"] and r["tipo_pago"].lower().strip() not in ("a trato", "trato")
-    )
-    total_general = total_trato + total_aldia
-
     return {
-        "nombre_campo": nombre_campo,
-        "contratista": contratista,
-        "fecha_inicio": fecha_inicio,
-        "fecha_termino": fecha_termino,
-        "total_trato": total_trato,
-        "total_aldia": total_aldia,
-        "total_general": total_general,
-        "rows": rows,
-        "count": len(rows),
+        "kpi": kpi,
+        "tendencia_semanal": tendencia_semanal,
+        "top_clientes": top_clientes,
+        "por_calidad": por_calidad,
+        "top_productos": top_productos,
+        "ultimos": ultimos,
     }
 
 

@@ -170,3 +170,82 @@ Al generar o revisar SQL:
 - Validación automática de esquemas
 - Comparador Sheet vs DB
 - Migraciones incrementales
+
+---
+
+## Fuente de Datos: Odoo en Google Cloud (BigQuery)
+
+El cliente **KONTROLAG SPA** (RUT 77235191-7) tiene una instancia de Odoo activa que exporta datos a BigQuery.
+
+**GCP Project:** `ace-scarab-484515-v1`
+**Dataset:** `odoo_data`
+**Service Account:** `odoo-bigquery@ace-scarab-484515-v1.iam.gserviceaccount.com`
+**Clave JSON local:** `/Users/bedomax/startups/donar/bigquery-odoo-key.json`
+
+### Tablas disponibles
+
+| Tabla BigQuery | Contenido | Filas aprox. |
+|---|---|---|
+| `Cuentas_por_cobrar` | Facturas emitidas (account.move) | 109 |
+| `Remuneraciones` | Liquidaciones de sueldo (hr.payslip) | 1.199 |
+| `Reporte_Analítico_staging_*` | Líneas analíticas contables | 50.000 |
+| `Ordenes_de_aplicación_staging_*` | Órdenes de aplicación agrícola | 1.441 |
+
+> Las tablas sin sufijo `_staging_*` están vacías — los datos reales están en las staging.
+
+### Conexión BigQuery desde Python
+
+```python
+from google.cloud import bigquery
+from google.oauth2 import service_account
+
+credentials = service_account.Credentials.from_service_account_file(
+    "/Users/bedomax/startups/donar/bigquery-odoo-key.json"
+)
+client = bigquery.Client(project="ace-scarab-484515-v1", credentials=credentials)
+
+df = client.query("""
+    SELECT * FROM `ace-scarab-484515-v1.odoo_data.Cuentas_por_cobrar`
+""").to_dataframe()
+```
+
+### Columnas clave — Cuentas_por_cobrar
+
+| Campo Odoo | Significado |
+|---|---|
+| `name` | Número de factura (e.g. `FAC 000135`) |
+| `invoice_partner_display_name` | Nombre del cliente |
+| `invoice_date` | Fecha emisión |
+| `invoice_date_due` | Fecha vencimiento |
+| `amount_untaxed` | Monto neto |
+| `amount_tax` | IVA |
+| `amount_total` | Total con IVA |
+| `amount_residual` | Saldo pendiente de cobro |
+| `payment_state` | Estado: `not_paid`, `partial`, `paid` |
+| `state` | Estado doc: `posted`, `draft`, `cancel` |
+| `l10n_cl_sii_send_ident` | RUT receptor (Chile) |
+| `x_studio_estado_aprobacin` | Campo custom Odoo Studio |
+
+### Columnas clave — Remuneraciones
+
+| Campo Odoo | Significado |
+|---|---|
+| `name` | Nombre liquidación (empleado + mes) |
+| `employee_id` | ID empleado |
+| `date_from` / `date_to` | Período |
+| `gross_wage` | Sueldo bruto |
+| `net_wage` | Sueldo líquido |
+| `sueldo_base` | Sueldo base contractual |
+| `descuentos` | Total descuentos |
+| `aportes_patronales` | Costos patronales |
+| `haberes` | Total haberes |
+| `state` | `done` = liquidación cerrada |
+
+### Contexto del negocio
+
+- KONTROLAG SPA presta servicios agrícolas de supervisión e instalaciones
+- Opera con fuerte estacionalidad: **70 empleados en peak (feb 2025)**, ~10 fuera de temporada
+- Clientes principales: empresas agrícolas de la zona central de Chile
+- **Agricola Donar Dos SpA** es cliente directo de KONTROLAG (empresa del grupo Donar)
+- Facturación concentrada en **diciembre–mayo** (temporada de fruta)
+- Los campos con prefijo `x_studio_` son personalizaciones de Odoo Studio del cliente

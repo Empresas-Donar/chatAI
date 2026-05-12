@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Resumen Despacho — Empresas Donar{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/purchase_orders.css?v=1" />
+<link rel="stylesheet" href="/static/despacho_resumen.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container" style="max-width:1200px">
+
+  <!-- Filters -->
+  <div class="filter-card">
+    <div class="filter-group">
+      <label>Cliente</label>
+      <select id="fil-cliente"><option value="">Todos</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Fecha Inicio</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div class="filter-group">
+      <label>Fecha Término</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div class="filter-group" style="flex:0;min-width:auto;justify-content:flex-end">
+      <label>&nbsp;</label>
+      <button class="btn btn-primary" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box hidden"></div>
+
+  <div id="dashboard" style="display:none">
+
+    <!-- KPI cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Unidades despachadas</div>
+        <div class="kpi-value" id="kpi-unidades">—</div>
+        <div class="kpi-sub" id="kpi-registros"></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">KG brutos (lechuga)</div>
+        <div class="kpi-value" id="kpi-kg">—</div>
+        <div class="kpi-sub" id="kpi-bins"></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Clientes activos</div>
+        <div class="kpi-value" id="kpi-clientes">—</div>
+        <div class="kpi-sub" id="kpi-dias"></div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="charts-row">
+      <div class="chart-card chart-wide">
+        <div class="chart-title">Unidades por semana</div>
+        <canvas id="chart-tendencia" height="110"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Distribución por calidad</div>
+        <canvas id="chart-calidad" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Tables row -->
+    <div class="tables-row">
+
+      <!-- Top clientes -->
+      <div class="table-card dr-table-card">
+        <div class="table-header">
+          <span>Top clientes</span>
+        </div>
+        <table class="oc-table">
+          <thead><tr>
+            <th>Cliente</th>
+            <th class="num">Unidades</th>
+            <th class="num">KG</th>
+            <th class="num">Despachos</th>
+          </tr></thead>
+          <tbody id="tbody-clientes"></tbody>
+        </table>
+      </div>
+
+      <!-- Top productos -->
+      <div class="table-card dr-table-card">
+        <div class="table-header">
+          <span>Top productos</span>
+        </div>
+        <table class="oc-table">
+          <thead><tr>
+            <th>Producto</th>
+            <th class="num">Unidades</th>
+            <th class="num">Registros</th>
+          </tr></thead>
+          <tbody id="tbody-productos"></tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- Últimos despachos -->
+    <div class="table-card" style="margin-top:20px">
+      <div class="table-header">
+        <span>Últimos despachos</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="oc-table">
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th>Producto</th>
+            <th>Calidad</th>
+            <th class="num">Unidades</th>
+            <th class="num">KG</th>
+            <th class="num">Bins</th>
+          </tr></thead>
+          <tbody id="tbody-ultimos"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /dashboard -->
+
+  <div id="empty-box" class="empty-state hidden">
+    <h3>Sin resultados</h3>
+    <p>No hay despachos para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/despacho_resumen.js?v=1"></script>
+{% endblock %}

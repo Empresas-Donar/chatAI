@@ -1,244 +1,196 @@
-/* despacho_notas.js */
+/* despacho_notas.js — Notas de crédito page logic */
 'use strict';
 
-const $ = id => document.getElementById(id);
+let _lastParams = null;
 
-const fmt = n => {
-  if (n == null || n === '') return '—';
-  return '$' + Number(n).toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-};
+const fmtCLP = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
 
-const fmtDate = iso => {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
+function fmtDate(s) {
+  if (!s) return '–';
+  const [y, m, d] = s.split('-');
   return `${d}-${m}-${y}`;
-};
-
-const isTrato = tipo =>
-  tipo && ['a trato', 'trato'].includes(tipo.toLowerCase().trim());
-
-// ── Tabs ─────────────────────────────────────────────────────────────────────
-function initTabs() {
-  document.querySelectorAll('.dn-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.dn-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const tab = btn.dataset.tab;
-      $('tab-notas').style.display = tab === 'notas' ? '' : 'none';
-      $('tab-odoo').style.display  = tab === 'odoo'  ? '' : 'none';
-    });
-  });
 }
 
-// ── Default dates: first and last day of current month ────────────────────────
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const isTrato = tipo => tipo && ['a trato', 'trato'].includes(tipo.toLowerCase().trim());
+
+let chartInstance = null;
+
+// ── Default dates: first and last day of current month ────────────────────
 function setDefaultDates() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const now  = new Date();
+  const y    = now.getFullYear();
+  const m    = String(now.getMonth() + 1).padStart(2, '0');
   const last = new Date(y, now.getMonth() + 1, 0).getDate();
-  const first = `${y}-${m}-01`;
-  const end   = `${y}-${m}-${String(last).padStart(2, '0')}`;
-  $('fil-from').value  = first;
-  $('fil-to').value    = end;
-  $('odoo-from').value = first;
-  $('odoo-to').value   = end;
+  document.getElementById('fil-from').value = `${y}-${m}-01`;
+  document.getElementById('fil-to').value   = `${y}-${m}-${String(last).padStart(2, '0')}`;
 }
 
-// ── Load filters (notas) ──────────────────────────────────────────────────────
-async function loadNotasFilters() {
-  const res = await fetch('/api/despacho/notas/filters');
-  if (!res.ok) return;
-  const data = await res.json();
-
-  const selCampo = $('fil-campo');
-  data.campos.forEach(c => {
-    const o = document.createElement('option');
-    o.value = o.textContent = c;
-    selCampo.appendChild(o);
-  });
-
-  const selCont = $('fil-contratista');
-  data.contratistas.forEach(c => {
-    const o = document.createElement('option');
-    o.value = o.textContent = c;
-    selCont.appendChild(o);
-  });
-}
-
-// ── Load filters (odoo) ───────────────────────────────────────────────────────
-async function loadOdooFilters() {
-  const res = await fetch('/api/despacho/odoo/filters');
-  if (!res.ok) return;
-  const data = await res.json();
-
-  const sel = $('odoo-cliente');
-  data.clientes.forEach(c => {
-    const o = document.createElement('option');
-    o.value = o.textContent = c;
-    sel.appendChild(o);
-  });
-}
-
-// ── Notas: fetch & render ─────────────────────────────────────────────────────
-async function fetchReport() {
-  const from        = $('fil-from').value;
-  const to          = $('fil-to').value;
-  const campo       = $('fil-campo').value;
-  const contratista = $('fil-contratista').value;
-
-  if (!from || !to)    { alert('Selecciona fechas de inicio y término.'); return; }
-  if (!contratista)    { alert('Selecciona un contratista.'); return; }
-
-  const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to, contratista });
-  if (campo) params.set('campo', campo);
-
-  let data;
+// ── Load filters ──────────────────────────────────────────────────────────
+async function loadFilters() {
   try {
-    const res = await fetch(`/api/despacho/notas?${params}`);
-    if (!res.ok) throw new Error(await res.text());
-    data = await res.json();
-  } catch (e) {
-    alert('Error al cargar datos: ' + e.message);
-    return;
-  }
+    const res = await fetch('/api/tarjas/notas/filters');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { campos, contratistas } = await res.json();
 
-  renderReport(data, from, to, contratista);
+    const selC = document.getElementById('fil-contratista');
+    contratistas.forEach(c => {
+      const o = document.createElement('option');
+      o.value = o.textContent = c;
+      selC.appendChild(o);
+    });
+
+    const selF = document.getElementById('fil-campo');
+    campos.forEach(c => {
+      const o = document.createElement('option');
+      o.value = o.textContent = c;
+      selF.appendChild(o);
+    });
+  } catch (err) {
+    showError('Error cargando filtros: ' + err.message);
+  }
 }
 
-function renderReport(data, from, to, contratista) {
+// ── Generate button ───────────────────────────────────────────────────────
+document.getElementById('btn-apply').addEventListener('click', async () => {
+  const contratista = document.getElementById('fil-contratista').value;
+  const campo       = document.getElementById('fil-campo').value;
+  const from        = document.getElementById('fil-from').value;
+  const to          = document.getElementById('fil-to').value;
+
+  hideError();
+  document.getElementById('oc-document').style.display = 'none';
+  document.getElementById('empty-box').classList.add('hidden');
+
+  if (!contratista) { showError('Selecciona un contratista.'); return; }
+  if (!from || !to)  { showError('Selecciona fechas de inicio y término.'); return; }
+  if (from > to)     { showError('La fecha de inicio no puede ser posterior a la de término.'); return; }
+
+  const btn = document.getElementById('btn-apply');
+  btn.disabled = true;
+  btn.textContent = 'Generando…';
+
+  try {
+    const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to, contratista });
+    if (campo) params.set('campo', campo);
+    _lastParams = { contratista, campo, fecha_inicio: from, fecha_termino: to };
+
+    const res = await fetch('/api/tarjas/notas?' + params);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || res.statusText);
+    }
+    const data = await res.json();
+
+    if (!data.rows.length) {
+      document.getElementById('empty-box').classList.remove('hidden');
+      return;
+    }
+
+    renderDocument(data, from, to, contratista);
+  } catch (err) {
+    showError('Error al generar: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generar nota';
+  }
+});
+
+// ── Render document ───────────────────────────────────────────────────────
+function renderDocument(data, from, to, contratista) {
   const { rows, total_trato, total_aldia, total_general, nombre_campo } = data;
 
-  $('hdr-empresa').textContent     = nombre_campo ? `AGRÍCOLA DONAR — ${nombre_campo}` : 'AGRÍCOLA DONAR UNO SPA';
-  $('hdr-contratista').textContent = contratista.toUpperCase();
-  $('hdr-periodo').textContent     = `Semana desde ${fmtDate(from)} al ${fmtDate(to)}`;
-  $('hdr-fecha-inicio').textContent  = fmtDate(from);
-  $('hdr-fecha-termino').textContent = fmtDate(to);
-  $('glosa-text').textContent = `SERVICIOS DE LABORES AGRÍCOLAS ${fmtDate(from)} AL ${fmtDate(to)}`;
+  document.getElementById('doc-company').textContent    = nombre_campo ? `AGRÍCOLA DONAR — ${nombre_campo}` : 'AGRÍCOLA DONAR UNO SPA';
+  document.getElementById('doc-contractor').textContent = contratista.toUpperCase();
+  document.getElementById('doc-week').textContent       = `Semana desde ${fmtDate(from)} al ${fmtDate(to)}`;
+  document.getElementById('doc-date-from').textContent  = fmtDate(from);
+  document.getElementById('doc-date-to').textContent    = fmtDate(to);
+  document.getElementById('doc-grand-total').textContent = fmtCLP.format(total_general);
 
-  $('tot-trato').textContent   = fmt(total_trato);
-  $('tot-aldia').textContent   = fmt(total_aldia);
-  $('tot-general').textContent = fmt(total_general);
+  document.getElementById('doc-glosa').textContent =
+    `SERVICIOS DE LABORES AGRÍCOLAS ${fmtDate(from)} AL ${fmtDate(to)}`;
 
-  const tbody = $('detail-tbody');
+  document.getElementById('doc-total-trato').textContent = fmtCLP.format(total_trato);
+  document.getElementById('doc-total-aldia').textContent = fmtCLP.format(total_aldia);
+  document.getElementById('doc-total').textContent       = fmtCLP.format(total_general);
+
+  const pctTrato = total_general ? (total_trato / total_general) * 100 : 0;
+  const pctAldia = total_general ? (total_aldia / total_general) * 100 : 0;
+  renderChart(pctTrato, pctAldia);
+
+  const tbody = document.getElementById('doc-tbody');
   tbody.innerHTML = '';
-
-  if (!rows.length) {
-    $('report-section').style.display = 'none';
-    $('empty-state').style.display    = '';
-    $('btn-print').style.display      = 'none';
-    return;
-  }
-
-  rows.forEach(r => {
+  for (const row of rows) {
     const tr = document.createElement('tr');
-    tr.className = isTrato(r.tipo_pago) ? 'tipo-trato-row' : 'tipo-aldia-row';
     tr.innerHTML = `
-      <td>${r.tipo_pago ?? '—'}</td>
-      <td>${r.cc ?? '—'}</td>
-      <td>${r.labor ?? '—'}</td>
-      <td class="num">${r.jornadas ?? '—'}</td>
-      <td class="num">${fmt(r.total_unitario)}</td>
-      <td class="num">${fmt(r.total_pagar)}</td>
+      <td><span class="badge ${isTrato(row.tipo_pago) ? 'badge-trato' : 'badge-aldia'}">${esc(row.tipo_pago)}</span></td>
+      <td>${esc(row.cc)}</td>
+      <td>${esc(row.labor)}</td>
+      <td class="num">${row.jornadas ?? '–'}</td>
+      <td class="num">${fmtCLP.format(row.total_unitario ?? 0)}</td>
+      <td class="num">${fmtCLP.format(row.total_pagar ?? 0)}</td>
     `;
     tbody.appendChild(tr);
-  });
-
-  $('table-total').textContent = fmt(total_general);
-  $('detail-count').textContent = rows.length;
-
-  $('empty-state').style.display    = 'none';
-  $('report-section').style.display = '';
-  $('btn-print').style.display      = '';
-}
-
-// ── Odoo: preview ─────────────────────────────────────────────────────────────
-async function fetchOdooPreview() {
-  const from    = $('odoo-from').value;
-  const to      = $('odoo-to').value;
-  const cliente = $('odoo-cliente').value;
-
-  if (!from || !to) { alert('Selecciona fechas.'); return; }
-
-  const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
-  if (cliente) params.set('cliente', cliente);
-
-  let text;
-  try {
-    const res = await fetch(`/api/despacho/odoo/download?${params}`);
-    if (!res.ok) throw new Error(await res.text());
-    text = await res.text();
-  } catch (e) {
-    alert('Error: ' + e.message);
-    return;
   }
 
-  const lines = text.trim().split('\n').filter(Boolean);
-  if (lines.length <= 1) {
-    $('odoo-preview-section').style.display = 'none';
-    $('odoo-empty').style.display = '';
-    return;
-  }
-
-  const dataRows = lines.slice(1); // skip header
-  const tbody = $('odoo-tbody');
-  tbody.innerHTML = '';
-
-  dataRows.forEach(line => {
-    const cols = parseCSVLine(line);
-    const tr = document.createElement('tr');
-    // Vendedor(0), Producto(1), Cantidad(2), CodDist(3), partner(6), product_id(7), analytic(9)
-    tr.innerHTML = `
-      <td>${cols[0] || ''}</td>
-      <td>${cols[1] || ''}</td>
-      <td class="num">${cols[2] || ''}</td>
-      <td>${cols[3] || ''}</td>
-      <td>${cols[6] || ''}</td>
-      <td>${cols[7] || ''}</td>
-      <td class="dn-analytic">${cols[9] || ''}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  $('odoo-count').textContent = dataRows.length;
-  $('odoo-empty').style.display           = 'none';
-  $('odoo-preview-section').style.display = '';
+  document.getElementById('oc-document').style.display = 'block';
+  document.getElementById('btn-odoo-export').disabled = false;
 }
 
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '', inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQ = !inQ; continue; }
-    if (ch === ',' && !inQ) { result.push(cur); cur = ''; continue; }
-    cur += ch;
-  }
-  result.push(cur);
-  return result;
+function renderChart(pctTrato, pctAldia) {
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  chartInstance = new Chart(
+    document.getElementById('doc-chart').getContext('2d'),
+    {
+      type: 'doughnut',
+      data: {
+        labels: ['A Trato', 'Al Día'],
+        datasets: [{
+          data: [pctTrato, pctAldia],
+          backgroundColor: ['#3b82f6', '#22c55e'],
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        cutout: '60%',
+        plugins: {
+          legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12 } },
+          tooltip: { callbacks: { label: c => `${c.label}: ${Number(c.parsed).toFixed(1)}%` } },
+        },
+      }
+    }
+  );
 }
 
-// ── Odoo: download ────────────────────────────────────────────────────────────
-function downloadOdoo() {
-  const from    = $('odoo-from').value;
-  const to      = $('odoo-to').value;
-  const cliente = $('odoo-cliente').value;
-
-  if (!from || !to) { alert('Selecciona fechas.'); return; }
-
-  const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
-  if (cliente) params.set('cliente', cliente);
-
-  window.location.href = `/api/despacho/odoo/download?${params}`;
+// ── Utils ─────────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('error-box');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError() {
+  document.getElementById('error-box').classList.add('hidden');
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  initTabs();
-  setDefaultDates();
-  await Promise.all([loadNotasFilters(), loadOdooFilters()]);
-
-  $('btn-apply').addEventListener('click', fetchReport);
-  $('btn-print').addEventListener('click', () => window.print());
-  $('btn-odoo-preview').addEventListener('click', fetchOdooPreview);
-  $('btn-odoo-download').addEventListener('click', downloadOdoo);
+// ── Odoo export ───────────────────────────────────────────────────────────
+document.getElementById('btn-odoo-export').addEventListener('click', () => {
+  if (!_lastParams) return;
+  const { contratista, campo, fecha_inicio, fecha_termino } = _lastParams;
+  if (!campo) { showError('Selecciona un campo específico para exportar a Odoo.'); return; }
+  const params = new URLSearchParams({ contratista, campo, fecha_inicio, fecha_termino });
+  const a = document.createElement('a');
+  a.href = '/api/tarjas/notas/odoo-export?' + params;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
+
+// ── Init ──────────────────────────────────────────────────────────────────
+setDefaultDates();
+loadFilters();

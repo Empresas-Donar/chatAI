@@ -54,7 +54,7 @@
         "label": "Despacho",
         "icon": "truck",
         "children": [
-          { "href": "/despacho/notas", "label": "Notas de crédito" },
+          { "href": "/despacho/resumen", "label": "Resumen" },
         ]
       },
     ]
@@ -63,8 +63,21 @@
     "label": "Odoo",
     "icon": "odoo",
     "children": [
-      { "href": "/odoo/tarjas",    "label": "Tarjas contratistas" },
-      { "href": "/odoo/despacho",  "label": "Guía de despacho" },
+      {
+        "label": "Tarjas",
+        "icon": "clipboard",
+        "children": [
+          { "href": "/odoo/tarjas",  "label": "Orden de compra" },
+          { "href": "/tarjas/notas", "label": "Nota de crédito" },
+        ]
+      },
+      {
+        "label": "Despacho",
+        "icon": "truck",
+        "children": [
+          { "href": "/despacho/guia", "label": "Guía de despacho" },
+        ]
+      },
     ]
   },
   {
