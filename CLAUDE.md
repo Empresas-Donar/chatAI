@@ -188,10 +188,15 @@ El cliente **KONTROLAG SPA** (RUT 77235191-7) tiene una instancia de Odoo activa
 |---|---|---|
 | `Cuentas_por_cobrar` | Facturas emitidas (account.move) | 109 |
 | `Remuneraciones` | Liquidaciones de sueldo (hr.payslip) | 1.199 |
-| `Reporte_Analítico_staging_*` | Líneas analíticas contables | 50.000 |
-| `Ordenes_de_aplicación_staging_*` | Órdenes de aplicación agrícola | 1.441 |
+| `Reporte_Analítico_staging_1778157508` | Líneas analíticas contables | 50.000 |
+| `Ordenes_de_aplicación_staging_1778157654` | Órdenes de aplicación agrícola | 1.441 |
 
-> Las tablas sin sufijo `_staging_*` están vacías — los datos reales están en las staging.
+> Las tablas sin sufijo `_staging_*` están vacías — los datos reales están en las staging con sufijos exactos arriba.
+
+### gcloud
+
+- **Cuenta activa:** `gestion@empresasdonar.cl`
+- Autenticar con: `gcloud auth application-default login` o usar la clave JSON del service account
 
 ### Conexión BigQuery desde Python
 
@@ -241,11 +246,44 @@ df = client.query("""
 | `haberes` | Total haberes |
 | `state` | `done` = liquidación cerrada |
 
+### Columnas clave — Reporte_Analítico_staging_1778157508
+
+| Campo | Significado |
+|---|---|
+| `account_id` | Cuenta contable |
+| `analytic_account_id` | Centro de costo / proyecto |
+| `partner_id` | Cliente o proveedor |
+| `date` | Fecha del movimiento |
+| `debit` / `credit` | Debe / Haber |
+| `balance` | Saldo neto |
+| `move_id` | Referencia al asiento contable |
+
+### Columnas clave — Ordenes_de_aplicación_staging_1778157654
+
+| Campo | Significado |
+|---|---|
+| `name` | Código de la orden |
+| `product_id` | Producto/insumo aplicado |
+| `picking_id` | Guía de despacho asociada |
+| `partner_id` | Cliente destinatario |
+| `date` | Fecha de la orden |
+| `product_qty` | Cantidad |
+| `state` | Estado de la orden |
+
 ### Contexto del negocio
 
-- KONTROLAG SPA presta servicios agrícolas de supervisión e instalaciones
+- KONTROLAG SPA presta servicios agrícolas de supervisión e instalaciones a empresas de la zona central de Chile
 - Opera con fuerte estacionalidad: **70 empleados en peak (feb 2025)**, ~10 fuera de temporada
-- Clientes principales: empresas agrícolas de la zona central de Chile
-- **Agricola Donar Dos SpA** es cliente directo de KONTROLAG (empresa del grupo Donar)
 - Facturación concentrada en **diciembre–mayo** (temporada de fruta)
+- **Agricola Donar Dos SpA** es cliente directo de KONTROLAG (empresa del grupo Donar)
 - Los campos con prefijo `x_studio_` son personalizaciones de Odoo Studio del cliente
+
+### Hallazgos financieros (al 07/05/2026)
+
+- **Facturación total histórica:** $858.7 MM — solo 24% cobrado; $650 MM pendiente
+- **Deuda crítica (+90 días):** $171.6 MM
+  - Exportadora Rancagua: $198.8 MM vencidos (~128 días)
+  - Agricola Curico: $107.7 MM vencidos (~145 días)
+  - Agricola Donar Dos SpA: $50.2 MM vencidos (~129 días)
+- **Costo laboral 2025:** ~$2.200 MM acumulado — facturación llegó rezagada en dic 2025
+- **Ratio saludable:** abril 2026 fue el primer mes con 72% costo laboral / facturación neta
