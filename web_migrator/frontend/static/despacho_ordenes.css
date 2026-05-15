@@ -1,0 +1,38 @@
+/* despacho_ordenes.css */
+
+.ov-kpi-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+.ov-kpi-bar.hidden { display: none; }
+
+.ov-kpi-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 120px;
+}
+.ov-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-muted);
+}
+.ov-kpi-val {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+  .ov-kpi-item { min-width: calc(50% - 6px); }
+}

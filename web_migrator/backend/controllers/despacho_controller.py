@@ -224,6 +224,184 @@ async def get_despacho_guia(
     return {"viajes": list(trips.values())}
 
 
+@router.get("/api/despacho/guia/download")
+async def download_despacho_guia(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    cliente: str = Query(None),
+    chofer: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+
+    filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
+    params: list = [fecha_inicio, fecha_termino]
+    if cliente:
+        filters.append("i.cliente = %s")
+        params.append(cliente)
+    if chofer:
+        filters.append("i.nombre_chofer = %s")
+        params.append(chofer)
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT
+                    i.fecha_limpia::date::text          AS fecha,
+                    COALESCE(i.cliente, '')             AS cliente,
+                    COALESCE(cl.nombre_odoo, i.cliente, '') AS nombre_odoo,
+                    COALESCE(i.nombre_chofer, '')       AS chofer,
+                    COALESCE(i.numero_patente, '')      AS patente,
+                    COALESCE(i.destino, '')             AS destino,
+                    COALESCE(i.producto, '')            AS producto,
+                    cc.id_odoo,
+                    COALESCE(i.calidad, '')             AS calidad,
+                    COALESCE(i.total_unidades, 0)       AS total_unidades,
+                    COALESCE(i.cajas, 0)                AS cajas,
+                    COALESCE(i.unidades_caja, 0)        AS unidades_caja,
+                    COALESCE(i.cantidad_de_pallet, 0)   AS pallets,
+                    COALESCE(i.mallas, 0)               AS mallas
+                FROM appsheet.despacho_ingreso i
+                LEFT JOIN appsheet.despacho_cliente cl
+                    ON TRIM(cl.cliente) = TRIM(i.cliente)
+                LEFT JOIN appsheet.despacho_cc cc
+                    ON TRIM(cc.producto) = TRIM(i.producto)
+                {where}
+                ORDER BY i.fecha_limpia DESC, i.cliente, i.producto
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "Fecha", "Cliente", "Cliente Odoo", "Chofer", "Patente", "Destino",
+        "Producto", "Cod. Odoo", "Calidad",
+        "Total Unidades", "Cajas", "Und./Caja", "Pallets", "Mallas",
+    ])
+    for r in rows:
+        product_id, _ = _parse_odoo_id(r["id_odoo"])
+        writer.writerow([
+            r["fecha"], r["cliente"], r["nombre_odoo"],
+            r["chofer"], r["patente"], r["destino"],
+            r["producto"], product_id, r["calidad"],
+            r["total_unidades"], r["cajas"], r["unidades_caja"],
+            r["pallets"], r["mallas"],
+        ])
+
+    output.seek(0)
+    filename = f"guia_despacho_{fecha_inicio}_{fecha_termino}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ===========================================================================
+# Órdenes de venta — despacho_resumen table
+# ===========================================================================
+
+@router.get("/despacho/ordenes", response_class=HTMLResponse)
+async def despacho_ordenes_page(request: Request):
+    return _templates.TemplateResponse(request, "despacho_ordenes.html")
+
+
+@router.get("/api/despacho/ordenes/filters")
+async def get_despacho_ordenes_filters():
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT cliente FROM appsheet.despacho_resumen "
+                "WHERE cliente IS NOT NULL ORDER BY cliente"
+            )
+            clientes = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT chofer FROM appsheet.despacho_resumen "
+                "WHERE chofer IS NOT NULL ORDER BY chofer"
+            )
+            choferes = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT producto FROM appsheet.despacho_resumen "
+                "WHERE producto IS NOT NULL ORDER BY producto"
+            )
+            productos = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return {"clientes": clientes, "choferes": choferes, "productos": productos}
+
+
+@router.get("/api/despacho/ordenes")
+async def get_despacho_ordenes(
+    cliente: str = Query(None),
+    chofer: str = Query(None),
+    producto: str = Query(None),
+):
+    try:
+        conn = get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+
+    filters = []
+    params: list = []
+    if cliente:
+        filters.append("cliente = %s")
+        params.append(cliente)
+    if chofer:
+        filters.append("chofer = %s")
+        params.append(chofer)
+    if producto:
+        filters.append("producto = %s")
+        params.append(producto)
+
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT
+                    COALESCE(cliente, '—')          AS cliente,
+                    COALESCE(producto, '—')         AS producto,
+                    COALESCE(cc, '—')               AS cc,
+                    COALESCE(cantidad, '0')         AS cantidad,
+                    COALESCE(chofer, '—')           AS chofer,
+                    COALESCE(patente, '—')          AS patente,
+                    fecha_cosecha
+                FROM appsheet.despacho_resumen
+                {where}
+                ORDER BY fecha_cosecha DESC, cliente, cc
+            """, params)
+            ordenes = _rows_to_dicts(cur)
+
+            cur.execute(f"""
+                SELECT
+                    COUNT(*)                        AS total_ordenes,
+                    COALESCE(SUM(NULLIF(cantidad, '')::numeric), 0) AS total_cantidad,
+                    COUNT(DISTINCT cliente)         AS total_clientes,
+                    COUNT(DISTINCT cc)              AS total_ccs
+                FROM appsheet.despacho_resumen
+                {where}
+            """, params)
+            kpi = _rows_to_dicts(cur)[0]
+    finally:
+        conn.close()
+
+    return {"ordenes": ordenes, "kpi": kpi}
+
+
 # ===========================================================================
 # Resumen de despacho — dashboard view
 # ===========================================================================
@@ -333,7 +511,7 @@ async def get_despacho_resumen(
             cur.execute(f"""
                 SELECT
                     CASE
-                        WHEN producto LIKE '%-25/26 %'
+                        WHEN producto LIKE '%%-25/26 %%'
                             THEN SPLIT_PART(producto, '-25/26 ', 2)
                         ELSE COALESCE(producto, 'Sin producto')
                     END                                         AS producto,

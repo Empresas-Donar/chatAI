@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Órdenes de Venta — Empresas Donar{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/purchase_orders.css?v=1" />
+<link rel="stylesheet" href="/static/despacho_ordenes.css?v=1" />
+{% endblock %}
+
+{% block body %}
+<div class="container" style="max-width:1100px">
+
+  <div class="page-header" style="margin-bottom:20px">
+    <div>
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Órdenes de Venta</h1>
+      <p style="margin:0;color:var(--text-muted);font-size:14px">
+        Resumen de órdenes de despacho por cliente, producto y CC (centro de costo).
+      </p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-card">
+    <div class="filter-group">
+      <label>Cliente</label>
+      <select id="fil-cliente"><option value="">Todos</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Chofer</label>
+      <select id="fil-chofer"><option value="">Todos</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Producto</label>
+      <select id="fil-producto"><option value="">Todos</option></select>
+    </div>
+    <div class="filter-group" style="flex:0;min-width:auto;justify-content:flex-end">
+      <label>&nbsp;</label>
+      <button class="btn btn-primary" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box hidden"></div>
+
+  <!-- KPI bar -->
+  <div id="kpi-bar" class="ov-kpi-bar hidden">
+    <div class="ov-kpi-item">
+      <span class="ov-kpi-label">Órdenes</span>
+      <span class="ov-kpi-val" id="kpi-ordenes">—</span>
+    </div>
+    <div class="ov-kpi-item">
+      <span class="ov-kpi-label">Total unidades</span>
+      <span class="ov-kpi-val" id="kpi-cantidad">—</span>
+    </div>
+    <div class="ov-kpi-item">
+      <span class="ov-kpi-label">Clientes</span>
+      <span class="ov-kpi-val" id="kpi-clientes">—</span>
+    </div>
+    <div class="ov-kpi-item">
+      <span class="ov-kpi-label">CCs</span>
+      <span class="ov-kpi-val" id="kpi-ccs">—</span>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div id="table-wrap" class="table-card hidden" style="margin-top:16px">
+    <div class="table-header">
+      <span>Detalle de órdenes</span>
+      <span id="row-count" style="font-size:12px;color:var(--text-muted);font-weight:400"></span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="oc-table" id="ordenes-table">
+        <thead><tr>
+          <th>Fecha cosecha</th>
+          <th>Cliente</th>
+          <th>Producto</th>
+          <th>CC</th>
+          <th class="num">Cantidad</th>
+          <th>Chofer</th>
+          <th>Patente</th>
+        </tr></thead>
+        <tbody id="tbody-ordenes"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="empty-box" class="empty-state hidden">
+    <h3>Sin resultados</h3>
+    <p>No hay órdenes para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/despacho_ordenes.js?v=1"></script>
+{% endblock %}

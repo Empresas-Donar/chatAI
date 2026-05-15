@@ -3,8 +3,8 @@
 {% block title %}Guía de Despacho — Empresas Donar{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/purchase_orders.css?v=1" />
-<link rel="stylesheet" href="/static/despacho_guia.css?v=1" />
+<link rel="stylesheet" href="/static/purchase_orders.css?v=2" />
+<link rel="stylesheet" href="/static/despacho_guia.css?v=2" />
 {% endblock %}
 
 {% block body %}
@@ -14,7 +14,7 @@
     <div>
       <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Guía de despacho</h1>
       <p style="margin:0;color:var(--text-muted);font-size:14px">
-        Genera una guía de despacho por cada viaje (fecha + cliente + chofer + patente).
+        Genera una guía de despacho por cada viaje (fecha + cliente).
         Incluye detalle de productos, calidad, cajas, unidades y pallets. Muestra el código de producto Odoo
         cuando está disponible. Listo para imprimir — cada guía ocupa una página.
       </p>
@@ -26,10 +26,6 @@
     <div class="filter-group">
       <label>Cliente</label>
       <select id="fil-cliente"><option value="">Todos</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Chofer</label>
-      <select id="fil-chofer"><option value="">Todos</option></select>
     </div>
     <div class="filter-group">
       <label>Fecha Inicio</label>
@@ -55,6 +51,7 @@
   <!-- Print actions -->
   <div id="print-actions" class="print-actions no-print" style="display:none">
     <span id="trip-count" class="dg-trip-count"></span>
+    <button class="btn btn-secondary" id="btn-download">Descargar CSV</button>
     <button class="btn btn-secondary" onclick="window.print()">Imprimir / PDF</button>
   </div>
 
@@ -65,5 +62,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/despacho_guia.js?v=1"></script>
+<script src="/static/despacho_guia.js?v=2"></script>
 {% endblock %}

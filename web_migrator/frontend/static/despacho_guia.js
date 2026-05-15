@@ -48,17 +48,15 @@ function populate(sel, items, keep) {
   });
 }
 
-async function loadFilters({ cliente = '', chofer = '' } = {}) {
+async function loadFilters({ cliente = '' } = {}) {
   _updatingFilters = true;
   try {
     const params = new URLSearchParams();
     if (cliente) params.set('cliente', cliente);
-    if (chofer)  params.set('chofer',  chofer);
     const res = await fetch('/api/despacho/guia/filters?' + params);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { clientes, choferes } = await res.json();
+    const { clientes } = await res.json();
     populate(document.getElementById('fil-cliente'), clientes, cliente);
-    populate(document.getElementById('fil-chofer'),  choferes, chofer);
   } catch (e) {
     showError('Error cargando filtros: ' + e.message);
   } finally {
@@ -68,12 +66,7 @@ async function loadFilters({ cliente = '', chofer = '' } = {}) {
 
 document.getElementById('fil-cliente').addEventListener('change', function () {
   if (_updatingFilters) return;
-  loadFilters({ cliente: this.value, chofer: document.getElementById('fil-chofer').value });
-});
-
-document.getElementById('fil-chofer').addEventListener('change', function () {
-  if (_updatingFilters) return;
-  loadFilters({ cliente: document.getElementById('fil-cliente').value, chofer: this.value });
+  loadFilters({ cliente: this.value });
 });
 
 // ── Generate ─────────────────────────────────────────────────────────────
@@ -83,7 +76,6 @@ async function fetchGuias() {
   const from    = document.getElementById('fil-from').value;
   const to      = document.getElementById('fil-to').value;
   const cliente = document.getElementById('fil-cliente').value;
-  const chofer  = document.getElementById('fil-chofer').value;
 
   hideError();
   document.getElementById('guias-container').innerHTML = '';
@@ -98,7 +90,6 @@ async function fetchGuias() {
   try {
     const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
     if (cliente) params.set('cliente', cliente);
-    if (chofer)  params.set('chofer', chofer);
 
     const res = await fetch('/api/despacho/guia?' + params);
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || res.statusText); }
@@ -248,6 +239,27 @@ function buildLinea(l, i, hasOdoo) {
     </tr>
   `;
 }
+
+// ── Download CSV ──────────────────────────────────────────────────────────
+function downloadCSV() {
+  const from    = document.getElementById('fil-from').value;
+  const to      = document.getElementById('fil-to').value;
+  const cliente = document.getElementById('fil-cliente').value;
+
+  if (!from || !to) { showError('Selecciona un rango de fechas.'); return; }
+
+  const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
+  if (cliente) params.set('cliente', cliente);
+
+  const a = document.createElement('a');
+  a.href = '/api/despacho/guia/download?' + params;
+  a.download = `guia_despacho_${from}_${to}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+document.getElementById('btn-download').addEventListener('click', downloadCSV);
 
 function showError(msg) { const el = document.getElementById('error-box'); el.textContent = msg; el.classList.remove('hidden'); }
 function hideError()    { document.getElementById('error-box').classList.add('hidden'); }
