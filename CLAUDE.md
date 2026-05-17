@@ -287,3 +287,52 @@ df = client.query("""
   - Agricola Donar Dos SpA: $50.2 MM vencidos (~129 días)
 - **Costo laboral 2025:** ~$2.200 MM acumulado — facturación llegó rezagada en dic 2025
 - **Ratio saludable:** abril 2026 fue el primer mes con 72% costo laboral / facturación neta
+
+---
+
+## Mapa de Datos y Cruces de Negocio
+
+El sistema combina dos fuentes principales para responder preguntas de negocio:
+
+### Fuente 1: AppSheet → PostgreSQL (esquema `appsheet`)
+
+**App `contratistas_isla_maipo`** — gestión de mano de obra agrícola en predios Zuñiga, Isla de Maipo y Talagante:
+- `contratistas` — empresas contratistas con condiciones pactadas (valor jornada, bono, % trato)
+- `trabajadores` — nómina por contratista
+- `tratos` — contratos de labor por campo / centro de costo / período, con valor unitario
+- `registro` / `registro_trato` — movimientos diarios por trabajador (jornadas, horas extra, unidades trato)
+- `pagos` — liquidación diaria: total trabajador, total contratista, total a pagar por empresa/CC/labor
+- `labor` — catálogo de labores agrícolas
+- `cultivos` / `cultivos_detalle` — qué cultivo hay en cada campo y centro de costo
+
+**App `tarjas`** — cuadrillas en campo, integrada con Odoo:
+- `tarjas_reporte_odoo` — view que mapea pagos diarios a líneas de pedido de compra Odoo
+
+**App `medicion_pozos`** — registros de pozos de agua (en proceso de migración)
+
+### Fuente 2: Odoo → BigQuery (`odoo_data`, proyecto `ace-scarab-484515-v1`)
+
+| Tabla | Contenido |
+|---|---|
+| `Cuentas_por_cobrar` | Facturas emitidas a clientes (account.move) |
+| `Remuneraciones` | Liquidaciones de sueldo de empleados KONTROLAG |
+| `Reporte_Analítico_staging_1778157508` | Líneas contables por centro de costo |
+| `Ordenes_de_aplicación_staging_1778157654` | Órdenes de aplicación agrícola |
+
+### Cruces clave entre fuentes
+
+| Pregunta de negocio | Join |
+|---|---|
+| Costo de mano de obra por CC vs lo contabilizado | `pagos."CC"` ↔ `Reporte_Analítico.analytic_account_id` |
+| Costo laboral mensual vs remuneraciones Odoo | `pagos."Mes"` ↔ `Remuneraciones.date_from` |
+| Qué se le facturó al cliente vs lo que costó producirlo | `Cuentas_por_cobrar.partner` ↔ `pagos."Empresa"` |
+| Órdenes de aplicación vs tratos ejecutados en campo | `Ordenes_de_aplicación.partner_id` ↔ `contratistas."Campo"` |
+| Rentabilidad por contratista | `pagos."Total a Pagar"` agrupado por `"Contratista"` vs facturas Odoo |
+
+### Campo → Empresa facturada
+
+| Campo AppSheet | Empresa en Odoo |
+|---|---|
+| Isla de Maipo | Agricola Donar Dos SpA |
+| Zuñiga | Agricola Donar Dos SpA |
+| Talagante | (verificar en Cuentas_por_cobrar) |
