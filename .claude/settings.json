@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "donar-data": {
+      "command": "/Users/bedomax/startups/donar/Appsheet_migration/mcp_server/.venv/bin/python3",
+      "args": [
+        "/Users/bedomax/startups/donar/Appsheet_migration/mcp_server/main.py"
+      ],
+      "env": {
+        "BIGQUERY_KEY_PATH": "/Users/bedomax/startups/donar/bigquery-odoo-key.json"
+      }
+    }
+  }
+}
