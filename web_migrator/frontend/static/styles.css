@@ -112,6 +112,14 @@
   gap: 0;
 }
 
+/* ── Simple dropdown (direct leaves only, e.g. Sensores, Odoo, Utilidades) ── */
+.nav-dropdown-menu-inner--simple {
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  min-width: 200px;
+}
+
 /* ── Group (e.g. "Tarjas", "Despacho") inside dropdown ── */
 
 .nav-group {

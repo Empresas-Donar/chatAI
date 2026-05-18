@@ -419,6 +419,14 @@
   line-height: 1.4;
 }
 
+/* ── Links dentro de burbujas ───────────────────────────────────── */
+.chat-bubble--assistant a {
+  color: var(--gold);
+  text-decoration: underline;
+  word-break: break-all;
+}
+.chat-bubble--assistant a:hover { opacity: 0.8; }
+
 /* ── Input bar ───────────────────────────────────────────────────── */
 .chat-input-bar {
   border-top: 1px solid var(--border);
@@ -621,6 +629,14 @@ function renderMarkdown(text) {
   // bold / italic
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g,     '<em>$1</em>');
+
+  // links [texto](url)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+
+  // bare URLs que quedaron sin formato (ej: https://lookerstudio...)
+  html = html.replace(/(?<![">])(https?:\/\/[^\s<"]+)/g,
+    url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
 
   // inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');

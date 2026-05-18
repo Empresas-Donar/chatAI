@@ -23,7 +23,7 @@
     "icon": "pulse",
   },
   {
-    "label": "Reportería",
+    "label": "Catálogo de Reportes",
     "icon": "apps",
     "children": [
       {
@@ -65,30 +65,30 @@
           { "href": "/despacho/ordenes", "label": "Órdenes de venta" },
         ]
       },
-      {
-        "label": "Sensores",
-        "icon": "pulse",
-        "children": [
-          { "href": "/sensors",        "label": "Inventario" },
-          { "href": "/sensors/status", "label": "Estado Diario" },
-        ]
-      },
-      {
-        "label": "Odoo",
-        "icon": "odoo",
-        "children": [
-          { "href": "/odoo/tarjas",   "label": "Orden de compra" },
-          { "href": "/tarjas/notas",  "label": "Nota de crédito" },
-          { "href": "/despacho/guia", "label": "Guía de despacho" },
-        ]
-      },
-      {
-        "label": "Utilidades",
-        "icon": "tools",
-        "children": [
-          { "href": "/migrador", "label": "Appsheet to PostgreSQL" },
-        ]
-      },
+    ]
+  },
+  {
+    "label": "Sensores",
+    "icon": "pulse",
+    "children": [
+      { "href": "/sensors",        "label": "Inventario" },
+      { "href": "/sensors/status", "label": "Estado Diario" },
+    ]
+  },
+  {
+    "label": "Odoo",
+    "icon": "odoo",
+    "children": [
+      { "href": "/odoo/tarjas",   "label": "Orden de compra" },
+      { "href": "/tarjas/notas",  "label": "Nota de crédito" },
+      { "href": "/despacho/guia", "label": "Guía de despacho" },
+    ]
+  },
+  {
+    "label": "Utilidades",
+    "icon": "tools",
+    "children": [
+      { "href": "/migrador", "label": "Appsheet to PostgreSQL" },
     ]
   },
 ] %}
@@ -146,8 +146,13 @@
             <svg class="chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
 
+          {# simple = all children are direct leaves (no subgroups) #}
+          {% set ns2 = namespace(has_groups=false) %}
+          {% for child in item.children %}
+            {% if child.children is defined %}{% set ns2.has_groups = true %}{% endif %}
+          {% endfor %}
           <div class="nav-dropdown-menu">
-            <div class="nav-dropdown-menu-inner">
+            <div class="nav-dropdown-menu-inner{% if not ns2.has_groups %} nav-dropdown-menu-inner--simple{% endif %}">
               {% for child in item.children %}
 
                 {% if child.children is defined %}
