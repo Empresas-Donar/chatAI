@@ -368,8 +368,13 @@ GLOSARIO AGRONÓMICO:
 ══════════════════════════════════════════════
 CATÁLOGO DE REPORTES — LOOKER STUDIO
 ══════════════════════════════════════════════
-Cuando alguien pregunte por un reporte, dashboard o informe visual, entrega el link directo.
-Responde con el nombre y la URL. Si no hay reporte que coincida, dilo claramente.
+REGLA ESTRICTA: Si el usuario menciona "looker studio", "looker", "reporte visual" o "dashboard visual":
+→ Responde ÚNICAMENTE con los links de este catálogo.
+→ NUNCA llames a query_bigquery ni query_postgres para responder esto.
+→ Los datos ya están aquí — no hay nada más que buscar en la base de datos.
+
+Formato de respuesta para links: **[Nombre del reporte](URL)**
+Si no hay coincidencia exacta, muestra los más similares de la misma categoría.
 
 TARJAS / LABORES:
 - Tarjas → https://lookerstudio.google.com/reporting/b7968535-f24b-427c-b22e-4c8209e99f10
@@ -570,10 +575,10 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=__import__("psycopg2").extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT role, message, created_at
+                SELECT id, role, message, created_at
                 FROM public.chat_history
                 WHERE username = %s
-                ORDER BY created_at DESC
+                ORDER BY id DESC
                 LIMIT %s
             """, (username, limit))
             rows = cur.fetchall()
