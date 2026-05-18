@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 import re
 import sys
 from pathlib import Path
+
+_log = logging.getLogger("chat_controller")
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -630,10 +633,20 @@ async def clear_history(request: Request):
 @router.post("/ask")
 async def chat_ask(request: Request):
     from auth import get_current_user
+    from fastapi import HTTPException
     username = get_current_user(request) or "anonymous"
 
     body = await request.json()
     messages = body.get("messages", [])
+
+    if not messages:
+        raise HTTPException(status_code=400, detail="No messages provided")
+
+    user_question = messages[-1].get("parts", "")
+    if not isinstance(user_question, str) or len(user_question) > 4000:
+        raise HTTPException(status_code=400, detail="Mensaje inválido o demasiado largo")
+
+    _log.info("chat/ask user=%s question_len=%d", username, len(user_question))
 
     history = []
     for m in messages[:-1]:
@@ -681,7 +694,11 @@ async def chat_ask(request: Request):
 
         response = chat.send_message(tool_parts)
 
-    final_text = response.candidates[0].content.parts[0].text
+    try:
+        final_text = response.candidates[0].content.parts[0].text
+    except (IndexError, AttributeError) as e:
+        _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
+        raise HTTPException(status_code=502, detail="No se pudo obtener respuesta del modelo")
 
     # Backend safety net: if Gemini omitted the source badge, append it
     if collected_badges:
@@ -690,6 +707,6 @@ async def chat_ask(request: Request):
             final_text = final_text.rstrip() + "\n\n" + "\n".join(missing)
 
     # Persist to DB (fire and forget — don't block the response)
-    _save_messages(username, messages[-1]["parts"], final_text)
+    _save_messages(username, user_question, final_text)
 
     return JSONResponse({"reply": final_text})

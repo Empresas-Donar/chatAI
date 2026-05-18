@@ -69,7 +69,7 @@ async def get_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -109,7 +109,7 @@ async def get_purchase_order(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     try:
         with conn.cursor() as cur:
@@ -179,7 +179,7 @@ async def export_odoo_csv(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     try:
         with conn.cursor() as cur:

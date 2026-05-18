@@ -107,7 +107,7 @@ async def get_tarjas_general_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -175,7 +175,7 @@ async def get_tarjas_general(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     where, params = _build_pagos_where(
         fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor
@@ -264,7 +264,7 @@ async def get_tarjas_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute('SELECT DISTINCT contratista FROM appsheet.tarjas_reporte ORDER BY contratista')
@@ -305,7 +305,7 @@ async def get_tarjas_detail(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -400,7 +400,7 @@ async def get_tarjas_detalle_tractorista_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -453,7 +453,7 @@ async def get_tarjas_detalle_tractorista(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
     params: list = [fecha_inicio, fecha_termino]
@@ -534,7 +534,7 @@ async def get_tarjas_contractor_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -587,7 +587,7 @@ async def get_tarjas_contractor_data(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -642,7 +642,7 @@ async def get_tarjas_contractor_tractorista_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             maq_col = _resolve_maquina_column(cur)
@@ -704,7 +704,7 @@ async def get_tarjas_contractor_tractorista_data(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
@@ -761,7 +761,7 @@ async def get_tarjas_resumen_persona_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -800,7 +800,7 @@ async def get_tarjas_resumen_persona(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -849,7 +849,7 @@ async def get_tarjas_resumen_horas_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -888,7 +888,7 @@ async def get_tarjas_resumen_horas(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -938,7 +938,7 @@ async def get_tarjas_resumen_persona_tractorista_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             maq_col = _resolve_maquina_column(cur)
@@ -993,7 +993,7 @@ async def get_tarjas_resumen_persona_tractorista(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
@@ -1053,7 +1053,7 @@ async def get_tarjas_general_tractorista_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             maq_col = _resolve_maquina_column(cur)
@@ -1106,7 +1106,7 @@ async def get_tarjas_general_tractorista(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
@@ -1201,7 +1201,7 @@ async def get_tarjas_notas_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -1234,7 +1234,7 @@ async def get_tarjas_notas(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s"]
     params: list = [fecha_inicio, fecha_termino, contratista]
@@ -1328,7 +1328,7 @@ async def export_tarjas_notas_odoo(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     try:
         with conn.cursor() as cur:

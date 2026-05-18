@@ -99,7 +99,7 @@ async def get_despacho_guia_filters(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             # Clientes — filtered by chofer if selected
@@ -147,7 +147,7 @@ async def get_despacho_guia(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
     params: list = [fecha_inicio, fecha_termino]
@@ -237,7 +237,7 @@ async def download_despacho_guia(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
     params: list = [fecha_inicio, fecha_termino]
@@ -319,7 +319,7 @@ async def get_despacho_ordenes_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -353,7 +353,7 @@ async def get_despacho_ordenes(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = []
     params: list = []
@@ -416,7 +416,7 @@ async def get_despacho_resumen_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -441,7 +441,7 @@ async def get_despacho_resumen(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     base_filters = ["fecha_limpia::date BETWEEN %s AND %s"]
     base_params: list = [fecha_inicio, fecha_termino]
@@ -603,7 +603,7 @@ async def get_despacho_odoo_filters():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -629,7 +629,7 @@ async def download_despacho_odoo(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]

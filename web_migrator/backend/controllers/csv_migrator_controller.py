@@ -56,8 +56,12 @@ async def upload(
     app_name: str = Form(...),
     files: list[UploadFile] = File(...),
 ):
-    if not app_name.strip():
+    import re
+    app_name = app_name.strip()
+    if not app_name:
         raise HTTPException(status_code=400, detail="app_name is required")
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', app_name):
+        raise HTTPException(status_code=400, detail="app_name must contain only letters, digits, underscores and hyphens")
 
     session_id = str(uuid.uuid4())
     session_dir = _upload_dir / session_id

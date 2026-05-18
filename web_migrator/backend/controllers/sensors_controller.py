@@ -70,7 +70,7 @@ async def get_inventory_summary():
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -114,7 +114,7 @@ async def get_inventory(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = []
     params = []
@@ -161,7 +161,7 @@ async def get_system_status(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     filters = ["date >= CURRENT_DATE - %s::int"]
     params: list = [days]

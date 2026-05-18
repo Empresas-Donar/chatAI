@@ -35,13 +35,21 @@ def _serialize(v):
 
 
 _WRITE_PATTERN = re.compile(
-    r"^\s*(insert|update|delete|drop|truncate|alter|create|grant|revoke|copy)\b",
+    r"^\s*(insert|update|delete|drop|truncate|alter|create|grant|revoke|copy|call|do|execute|vacuum|analyze|lock)\b",
+    re.IGNORECASE,
+)
+# Also block CTEs that write: WITH ... INSERT/UPDATE/DELETE
+_WRITE_CTE_PATTERN = re.compile(
+    r"\b(insert|update|delete|drop|truncate|alter|create|grant|revoke)\b",
     re.IGNORECASE,
 )
 
 
 def run_pg_query(sql: str, max_rows: int = 200) -> list[dict]:
     if _WRITE_PATTERN.match(sql):
+        raise ValueError("Solo se permiten consultas SELECT en el chat")
+    # Block write operations inside CTEs (WITH ... INSERT/UPDATE/DELETE)
+    if _WRITE_CTE_PATTERN.search(sql):
         raise ValueError("Solo se permiten consultas SELECT en el chat")
     conn = _get_conn()
     try:

@@ -67,7 +67,7 @@ async def get_dashboard_data(
     try:
         conn = get_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB connection failed: {exc}")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     data = {}
     try:
