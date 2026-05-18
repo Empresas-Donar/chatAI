@@ -28,7 +28,38 @@ KEY_PATH     = os.environ.get(
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json",
 )
 
-_SYSTEM = """Eres un analista de datos experto para Empresas Donar y KONTROLAG SPA.
+_SYSTEM = """═══════════════════════════════════════════════════════
+⚠️  INTEGRIDAD DE DATOS — LEE ESTO ANTES DE CUALQUIER COSA
+═══════════════════════════════════════════════════════
+Este sistema es usado por directores y gerentes para tomar decisiones de negocio.
+Un dato inventado o incorrecto puede causar daño real. Por eso estas reglas son ABSOLUTAS:
+
+PROHIBIDO ABSOLUTAMENTE:
+• NUNCA inventes registros, empresas, nombres, montos, fechas ni valores.
+• NUNCA completes ni rellenes datos que no vinieron de una query.
+• NUNCA respondas sobre datos sin haber ejecutado una query primero.
+• NUNCA supongas que un registro existe — si no aparece en la query, NO EXISTE.
+• NUNCA uses tu conocimiento previo para completar datos de negocio.
+
+ANTE CERO RESULTADOS:
+→ Responde exactamente: "No encontré registros para [X] en la base de datos."
+→ No expliques, no sugiereas alternativas, no adivines. Solo eso.
+
+ANTE ERRORES SQL:
+→ Lee el mensaje de error completo, corrige el SQL y reintenta (hasta 3 veces).
+→ Si sigue fallando, explica qué intentaste y por qué falló.
+
+ANTE PREGUNTAS SIN DATOS:
+→ Si la pregunta no requiere datos (saludo, contexto general), responde normalmente.
+→ Si la pregunta SÍ requiere datos, ejecuta la query ANTES de escribir cualquier número.
+
+FUENTE OBLIGATORIA:
+→ Cada respuesta con datos DEBE terminar con la línea __source_badge__ que viene en el resultado de la tool.
+→ Cópiala textualmente al final. Si son múltiples queries, una línea por cada una.
+→ Si __source_badge__ está vacío (0 resultados), NO pongas fuente — solo di que no hay datos.
+═══════════════════════════════════════════════════════
+
+Eres un analista de datos para Empresas Donar y KONTROLAG SPA.
 Tienes acceso a DOS fuentes de datos:
   1. BigQuery (Odoo) — datos financieros y contables
   2. PostgreSQL (AppSheet) — operaciones de campo: tarjas, despacho, sensores
@@ -38,37 +69,17 @@ Usa formato de miles con puntos (ej: $1.234.567).
 Explica brevemente qué encontraste antes de mostrar los datos.
 Cuando la pregunta involucre datos de ambas fuentes, úsalas juntas para dar una respuesta más completa.
 
-REGLA OBLIGATORIA — FUENTE DE DATOS CON TRAZABILIDAD:
-Al final de CADA respuesta que incluya datos, agrega una línea con el formato exacto:
-  📊 Fuente: [tabla] · [sistema] · [N registros] · IDs: [lista de IDs o PKs]
-
-Reglas estrictas:
-- Siempre incluir el nombre exacto de la tabla (con schema si es PostgreSQL)
-- Siempre incluir la cantidad de registros que se usaron
-- Siempre incluir los IDs o PKs de los registros (ej: id_Resumen, name, id)
-  Si son más de 5 registros, mostrar los primeros 3 y agregar "... (+N más)"
-- Si la respuesta usa múltiples tablas, una línea por tabla
-- Si la query devolvió 0 registros, NO mostrar fuente — solo decir que no hay datos
-
-Ejemplos correctos:
-  📊 Fuente: Cuentas_por_cobrar · BigQuery (Odoo) · 3 registros · IDs: FAC 000135, FAC 000136, FAC 000137
-  📊 Fuente: appsheet.tarjas_pagos · PostgreSQL (AppSheet) · 12 registros · IDs: RES-001, RES-002, RES-003 ... (+9 más)
-  📊 Fuente: public.status_system · PostgreSQL (AppSheet) · 2 registros · IDs: (ISLA DE MAIPO, 2026-05-17), (ZUÑIGA, 2026-05-17)
-
-IMPORTANTE: Si no puedes identificar los IDs concretos de los registros usados, NO muestres fuente.
-Un director que lea esta respuesta debe poder ir a la base de datos y verificar exactamente esos registros.
-
-REGLAS CRÍTICAS — INTEGRIDAD DE DATOS (MUY IMPORTANTE):
-1. NUNCA inventes, supongas ni completes datos. Solo reporta lo que las herramientas devuelven.
-2. Si una query devuelve 0 filas, responde EXACTAMENTE: "No encontré registros para [X] en la base de datos." No expliques ni sugieras datos alternativos.
-3. Si no sabes en qué tabla buscar, usa query_postgres o query_bigquery para explorar — nunca asumas que un dato existe.
-4. SIEMPRE ejecuta la query antes de responder sobre datos. Nunca respondas sobre datos sin haber llamado una tool primero.
-5. Si el resultado de una tool es una lista vacía [], indica claramente que no hay datos.
-6. Nunca "completes" una tabla con filas que no vinieron del resultado de la query.
-7. Nunca reportes valores 0.0 como datos válidos de temperatura — son lecturas fallidas. Filtra con WHERE columna > 0.
-8. Para temperatura diaria por campo: USA public.status_system primero.
-9. "ayer" = CURRENT_DATE - 1, "hoy" = CURRENT_DATE.
-10. Si una query falla con error de PostgreSQL, lee el error, corrige el SQL y reintenta.
+FUNCIONES SQL POSTGRESQL PERMITIDAS (versión 16):
+- Fechas: CURRENT_DATE, NOW(), DATE_TRUNC('month', fecha), EXTRACT(YEAR FROM fecha), TO_CHAR(fecha, 'YYYY-MM'), fecha::date, fecha::text
+- Agregados: SUM, COUNT, AVG, MIN, MAX, COALESCE
+- Texto: LOWER, UPPER, TRIM, CONCAT, LIKE, ILIKE
+- NO usar: DATE() — no existe en PostgreSQL (es de MySQL/BigQuery). Usar ::date en su lugar.
+- NO usar: STRFTIME() — no existe en PostgreSQL. Usar DATE_TRUNC o TO_CHAR.
+- NO usar: FORMAT() para fechas — usar TO_CHAR.
+- Columnas TEXT que contienen fechas: castear con ::date o ::timestamp antes de comparar.
+- Para temperatura: NUNCA reportes valores 0.0 — son lecturas fallidas. Filtrar siempre con WHERE columna > 0.
+- Para temperatura diaria: usar public.status_system (⭐ tabla principal).
+- "ayer" = CURRENT_DATE - 1, "hoy" = CURRENT_DATE.
 
 FUNCIONES SQL POSTGRESQL PERMITIDAS (versión 16):
 - Fechas: CURRENT_DATE, NOW(), DATE_TRUNC('month', fecha), EXTRACT(YEAR FROM fecha), TO_CHAR(fecha, 'YYYY-MM'), fecha::date, fecha::text
@@ -418,6 +429,36 @@ _WRITE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PK_CANDIDATES = ["id", "name", "id_Resumen", "id_resumen", "id_guia", "id_venta",
+                  "id_conteo", "id_contratista", "id_personal", "id_labor",
+                  "channel_id", "sensor_id", "zone_id"]
+
+
+def _build_source_badge(sql: str, rows: list[dict], system: str) -> str:
+    """Generate a source attribution line from query results."""
+    if not rows:
+        return ""
+    # Extract table name from SQL (first FROM/JOIN token)
+    table_match = re.search(r'\bFROM\s+([`"\w\.]+)', sql, re.IGNORECASE)
+    table = table_match.group(1).strip('`"') if table_match else "tabla desconocida"
+    # Remove BQ project prefix for display
+    if "." in table:
+        parts = table.split(".")
+        table = parts[-1] if len(parts) >= 3 else table
+
+    n = len(rows)
+    # Find best PK column
+    pk_col = next((c for c in _PK_CANDIDATES if c in rows[0]), None)
+    if pk_col is None:
+        pk_col = list(rows[0].keys())[0]
+
+    sample = rows[:3]
+    ids = ", ".join(str(r[pk_col]) for r in sample)
+    if n > 3:
+        ids += f" ... (+{n - 3} más)"
+
+    return f"\n\n📊 Fuente: {table} · {system} · {n} registro{'s' if n != 1 else ''} · IDs: {ids}"
+
 
 def _call_tool(name: str, args: dict) -> str:
     try:
@@ -426,10 +467,14 @@ def _call_tool(name: str, args: dict) -> str:
             if _WRITE_RE.match(sql):
                 return json.dumps({"error": "Solo se permiten consultas SELECT"})
             rows = bq.run_query(sql, int(args.get("max_rows", 100)))
-            return json.dumps(rows, ensure_ascii=False, default=str)
+            badge = _build_source_badge(sql, rows, "BigQuery (Odoo)")
+            result = json.loads(json.dumps(rows, ensure_ascii=False, default=str))
+            return json.dumps({"rows": result, "__source_badge__": badge}, ensure_ascii=False)
         if name == "query_postgres":
             rows = pg.run_pg_query(args["sql"], int(args.get("max_rows", 200)))
-            return json.dumps(rows, ensure_ascii=False, default=str)
+            badge = _build_source_badge(args["sql"], rows, "PostgreSQL (AppSheet)")
+            result = json.loads(json.dumps(rows, ensure_ascii=False, default=str))
+            return json.dumps({"rows": result, "__source_badge__": badge}, ensure_ascii=False)
         if name == "list_tables":
             return json.dumps(bq.list_tables(), ensure_ascii=False)
         if name == "describe_table":
@@ -546,6 +591,7 @@ async def chat_ask(request: Request):
     response = chat.send_message(messages[-1]["parts"])
 
     # Agentic loop — Gemini may call multiple tools before answering
+    collected_badges: list[str] = []
     for _ in range(8):
         fn_calls = [p for p in response.candidates[0].content.parts if p.function_call]
         if not fn_calls:
@@ -555,6 +601,14 @@ async def chat_ask(request: Request):
         for part in fn_calls:
             fn = part.function_call
             result = _call_tool(fn.name, dict(fn.args))
+            # Collect source badges generated by the backend
+            try:
+                parsed = json.loads(result)
+                badge = parsed.get("__source_badge__", "")
+                if badge:
+                    collected_badges.append(badge.strip())
+            except Exception:
+                pass
             tool_parts.append(
                 types.Part(
                     function_response=types.FunctionResponse(
@@ -567,6 +621,12 @@ async def chat_ask(request: Request):
         response = chat.send_message(tool_parts)
 
     final_text = response.candidates[0].content.parts[0].text
+
+    # Backend safety net: if Gemini omitted the source badge, append it
+    if collected_badges:
+        missing = [b for b in collected_badges if b not in final_text]
+        if missing:
+            final_text = final_text.rstrip() + "\n\n" + "\n".join(missing)
 
     # Persist to DB (fire and forget — don't block the response)
     _save_messages(username, messages[-1]["parts"], final_text)
