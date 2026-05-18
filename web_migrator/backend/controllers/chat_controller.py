@@ -384,7 +384,7 @@ def init(templates: Jinja2Templates):
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def chat_page(request: Request):
-    return _templates.TemplateResponse("chat.html", {"request": request})
+    return _templates.TemplateResponse(request, "chat.html")
 
 
 @router.get("/history")
