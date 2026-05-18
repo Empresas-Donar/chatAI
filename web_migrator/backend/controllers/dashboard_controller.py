@@ -45,7 +45,7 @@ def _rows_to_dicts(cur):
     return [{k: _serialize(v) for k, v in zip(cols, r)} for r in cur.fetchall()]
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     return _templates.TemplateResponse(request, "dashboard.html")
 

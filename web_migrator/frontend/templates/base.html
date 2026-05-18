@@ -18,87 +18,61 @@
 #}
 {% set nav_menu = [
   {
-    "href": "/",
-    "label": "Dashboard",
-    "icon": "home",
-  },
-  {
-    "label": "Apps",
-    "icon": "apps",
-    "children": [
-      {
-        "label": "Tarjas",
-        "icon": "clipboard",
-        "children": [
-          {
-            "label": "Contratistas",
-            "children": [
-              { "href": "/tarjas/detalle",         "label": "Detalle operacional" },
-              { "href": "/tarjas/contratista",     "label": "Por persona operacional" },
-              { "href": "/tarjas/general",         "label": "General operacional" },
-              { "href": "/tarjas/resumen-persona", "label": "Resumen por persona operacional" },
-              { "href": "/tarjas/resumen-horas",   "label": "Resumen hora extra por persona" },
-            ]
-          },
-          {
-            "label": "Tractoristas",
-            "children": [
-              { "href": "/tarjas/detalle-tractorista",          "label": "Detalle tractorista" },
-              { "href": "/tarjas/general-tractorista",          "label": "General tractorista" },
-              { "href": "/tarjas/resumen-persona-tractorista",  "label": "Resumen por persona tractorista" },
-            ]
-          },
-        ]
-      },
-      {
-        "label": "Despacho",
-        "icon": "truck",
-        "children": [
-          { "href": "/despacho/resumen", "label": "Resumen" },
-          { "href": "/despacho/ordenes", "label": "Órdenes de venta" },
-        ]
-      },
-    ]
-  },
-  {
-    "label": "Odoo",
-    "icon": "odoo",
-    "children": [
-      {
-        "label": "Tarjas",
-        "icon": "clipboard",
-        "children": [
-          { "href": "/odoo/tarjas",  "label": "Orden de compra" },
-          { "href": "/tarjas/notas", "label": "Nota de crédito" },
-        ]
-      },
-      {
-        "label": "Despacho",
-        "icon": "truck",
-        "children": [
-          { "href": "/despacho/guia", "label": "Guía de despacho" },
-        ]
-      },
-    ]
-  },
-  {
-    "label": "Sensores",
-    "icon": "pulse",
-    "children": [
-      { "href": "/sensors",        "label": "Inventario" },
-      { "href": "/sensors/status", "label": "Estado Diario" },
-    ]
-  },
-  {
     "href": "/chat",
     "label": "Chat IA",
     "icon": "pulse",
   },
   {
-    "label": "Utilidades",
-    "icon": "tools",
+    "label": "Reportería",
+    "icon": "apps",
     "children": [
-      { "href": "/migrador", "label": "Appsheet to PostgreSQL" },
+      {
+        "label": "Dashboard",
+        "children": [
+          { "href": "/dashboard", "label": "Resumen general" },
+        ]
+      },
+      {
+        "label": "Tarjas",
+        "children": [
+          { "href": "/tarjas/detalle",         "label": "Detalle operacional" },
+          { "href": "/tarjas/contratista",     "label": "Por persona operacional" },
+          { "href": "/tarjas/general",         "label": "General operacional" },
+          { "href": "/tarjas/resumen-persona", "label": "Resumen por persona" },
+          { "href": "/tarjas/resumen-horas",   "label": "Horas extra por persona" },
+          { "href": "/tarjas/detalle-tractorista",         "label": "Detalle tractorista" },
+          { "href": "/tarjas/general-tractorista",         "label": "General tractorista" },
+          { "href": "/tarjas/resumen-persona-tractorista", "label": "Resumen tractorista" },
+        ]
+      },
+      {
+        "label": "Despacho",
+        "children": [
+          { "href": "/despacho/resumen", "label": "Resumen" },
+          { "href": "/despacho/ordenes", "label": "Órdenes de venta" },
+        ]
+      },
+      {
+        "label": "Sensores",
+        "children": [
+          { "href": "/sensors",        "label": "Inventario" },
+          { "href": "/sensors/status", "label": "Estado Diario" },
+        ]
+      },
+      {
+        "label": "Odoo",
+        "children": [
+          { "href": "/odoo/tarjas",    "label": "Orden de compra" },
+          { "href": "/tarjas/notas",   "label": "Nota de crédito" },
+          { "href": "/despacho/guia",  "label": "Guía de despacho" },
+        ]
+      },
+      {
+        "label": "Utilidades",
+        "children": [
+          { "href": "/migrador", "label": "Appsheet to PostgreSQL" },
+        ]
+      },
     ]
   },
 ] %}

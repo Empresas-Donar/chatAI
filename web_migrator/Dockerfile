@@ -5,9 +5,10 @@ WORKDIR /app
 COPY web_migrator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app source and shared core module
+# Copy app source, shared modules, and BigQuery client used by chat
 COPY web_migrator/ ./web_migrator/
 COPY core/ ./core/
+COPY mcp_server/bigquery_client.py ./mcp_server/bigquery_client.py
 
 RUN mkdir -p /app/uploads
 

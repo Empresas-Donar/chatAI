@@ -18,11 +18,13 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 _SESSION_COOKIE = "donar_session"
-_MAX_AGE = 60 * 60 * 12  # 12 hours
+_MAX_AGE = 60 * 60 * 8  # 8 hours
 
 
 def _signer() -> URLSafeTimedSerializer:
-    secret = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
+    secret = os.environ.get("SECRET_KEY")
+    if not secret:
+        raise RuntimeError("SECRET_KEY env var is required and not set")
     return URLSafeTimedSerializer(secret)
 
 
@@ -33,7 +35,8 @@ def set_session(response: RedirectResponse, username: str) -> None:
         value=token,
         max_age=_MAX_AGE,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
+        secure=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
     )
 
 

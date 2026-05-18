@@ -11,6 +11,7 @@ Architecture (MVC):
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -51,7 +53,22 @@ STATIC_DIR    = BASE_DIR / "frontend" / "static"
 app = FastAPI(
     title="Donar Integraciones",
     version="2.0.0",
+    docs_url=None,    # disable Swagger UI in production
+    redoc_url=None,   # disable ReDoc in production
 )
+
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "ALLOWED_ORIGINS", "http://localhost:8000"
+).split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -85,6 +102,11 @@ app.include_router(despacho.router,        dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
 
 
-@app.get("/health")
+@app.get("/", dependencies=_auth)
+async def root_redirect():
+    return RedirectResponse(url="/chat", status_code=302)
+
+
+@app.get("/health", dependencies=_auth)
 async def health():
     return {"status": "ok"}
