@@ -227,6 +227,67 @@ ADVERTENCIA: muchos valores son 0.0 cuando el sensor no tiene lectura — filtra
 - id, field, farm_id, irrigation_sector, wc_zone_id
 - orchard, crop_type, ubibot_channel_ids (ARRAY)
 
+### public.ubi_chill_hours — ⭐ Horas frío acumuladas por huerto (CLAVE PARA AGRONOMÍA)
+Registros horarios de temperatura y acumulación de frío por modelo. Fundamental para estimar
+fecha de brotación y necesidades de frío de cada variedad de cerezo.
+- channel_id, channel_name, field_sector_id
+- field: "ISLA DE MAIPO" | "ZUÑIGA"
+- irrigation_sector, orchard, crop_type
+- date (DATE), hour (TIME)
+- temperature (NUMERIC): temperatura en °C en esa hora
+- hf_value (INTEGER): horas frío modelo HF en esa hora (1 = sí cuenta, 0 = no)
+- hf_accumulated (INTEGER): horas frío HF acumuladas en la temporada
+- utah_value (NUMERIC): unidades frío modelo Utah en esa hora (puede ser negativo)
+- utah_accumulated (NUMERIC): unidades frío Utah acumuladas en la temporada
+- gda_value (NUMERIC): valor GDA (grados-día de acumulación) en esa hora
+- gda_accumulated (NUMERIC): GDA acumulado en la temporada
+- gda_season (TEXT): temporada para GDA (ej: "2025-2026")
+- season (TEXT): temporada para HF/Utah (ej: "2026-2027")
+- rn (INTEGER): número de hora en la temporada
+
+MODELOS DE FRÍO:
+  - HF (Horas Frío): cuenta horas con temperatura entre 0°C y 7.2°C. Simple y usado en Chile.
+  - Utah: modelo más preciso, pondera positivo y negativo según rango de temperatura.
+    Valores óptimos: 0-7.2°C = +1, 7.3-12.4°C = +0.5, 12.5-15.9°C = 0, 16-18°C = -0.5, >18°C = -1
+  - GDA (Grados Día de Acumulación): calor acumulado desde inicio de temporada,
+    indica avance fenológico post-reposo.
+
+REQUERIMIENTOS TÍPICOS CEREZOS (referencia):
+  - Bing/Lapins: 1.000-1.200 HF
+  - Santina: 800-1.000 HF
+  - Regina: 1.200-1.400 HF
+
+EJEMPLO — horas frío acumuladas hoy por huerto:
+  SELECT DISTINCT ON (field, orchard)
+    field, orchard, date, hf_accumulated, utah_accumulated, gda_accumulated, season
+  FROM public.ubi_chill_hours
+  ORDER BY field, orchard, date DESC, hour DESC;
+
+### public.ubi_chill_portions — Porciones de frío (Dynamic Model) por huerto
+El Dynamic Model es el más preciso para predecir brotación. Muy usado en cerezos.
+- channel_id, channel_name, field_sector_id
+- field, irrigation_sector, orchard, crop_type
+- date (DATE), hour (TIME), temperature (NUMERIC)
+- dm_season (TEXT): temporada (ej: "2026")
+- dm_state (NUMERIC): estado interno del modelo en esa hora
+- dm_value (NUMERIC): porciones de frío generadas en esa hora
+- dm_accumulated (NUMERIC): porciones de frío acumuladas en la temporada
+
+REQUERIMIENTOS TÍPICOS (porciones Dynamic Model):
+  - Santina: 40-50 porciones
+  - Bing: 55-65 porciones
+  - Regina: 65-80 porciones
+
+### public.wc_ema — Estación meteorológica WiseConn (datos diarios por campo)
+- date (DATE), farm_id, field ("ISLA DE MAIPO" | "ZUÑIGA")
+- temperatura_c (NUMERIC): temperatura promedio diaria °C
+- humedad_relativa_pct (NUMERIC): humedad relativa %
+- presion_atmosferica_pa (NUMERIC): presión atmosférica en Pascales
+- radiacion_solar_wm2 (NUMERIC): radiación solar W/m²
+- pluviometria_mm (NUMERIC): lluvia en mm
+- velocidad_viento_kmh (NUMERIC): velocidad viento km/h
+- direccion_viento_deg (NUMERIC): dirección viento en grados
+
 ══════════════════════════════════════════════
 CRUCES DE NEGOCIO
 ══════════════════════════════════════════════
@@ -237,7 +298,44 @@ CRUCES DE NEGOCIO
 
 CAMPOS Y EMPRESA:
   - "Isla de Maipo" → Agricola Donar Dos SpA
-  - "Zuñiga" → Agricola Donar Dos SpA"""
+  - "Zuñiga" → Agricola Donar Dos SpA
+
+══════════════════════════════════════════════
+CONTEXTO AGRONÓMICO — CEREZOS
+══════════════════════════════════════════════
+Los campos cultivan principalmente CEREZOS. El frío invernal es crítico para romper
+la dormancia y garantizar una brotación uniforme en primavera.
+
+PREGUNTAS FRECUENTES Y CÓMO RESPONDERLAS:
+
+1. "¿Cuántas horas frío llevamos?" o "¿Cómo vamos de frío?"
+   → Consultar ubi_chill_hours: último hf_accumulated, utah_accumulated por field/orchard
+   → Comparar con requerimientos de la variedad si se menciona
+   → Indicar si el acumulado es suficiente, bajo o alto para la fecha
+
+2. "¿Hubo helada?" o "¿Cuándo heló?"
+   → Consultar ubi_chill_hours o status_system: temp_min < 0°C
+   → Una helada agronómica es temp < 0°C. Helada dañina en flores/frutos: < -2°C
+
+3. "¿Cómo están las porciones de frío?" (Dynamic Model)
+   → Consultar ubi_chill_portions: último dm_accumulated por field/orchard
+
+4. "¿Cuánto llovió?" o "¿Hubo lluvia?"
+   → Consultar wc_ema: pluviometria_mm por campo y fecha
+
+5. "¿Cómo está el clima?" o preguntas meteorológicas generales
+   → Consultar wc_ema para datos diarios completos (temp, humedad, viento, radiación)
+   → Complementar con status_system para temp_min/max
+
+GLOSARIO AGRONÓMICO:
+- Dormancia: período de reposo invernal del árbol que requiere frío para completarse
+- Brotación: inicio del crecimiento vegetativo en primavera tras completar el frío
+- HF: Horas Frío — método más simple, cuenta horas entre 0°C y 7.2°C
+- Utah: modelo ponderado más preciso que HF para zonas con inviernos irregulares
+- Dynamic Model / Porciones: modelo más moderno y preciso, especialmente para climas mediterráneos
+- GDA: Grados Día Acumulados — mide calor acumulado desde inicio de temporada
+- Helada: temperatura menor a 0°C a nivel del suelo
+- ETo: evapotranspiración de referencia (no disponible actualmente en la DB)"""
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
