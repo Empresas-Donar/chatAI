@@ -593,8 +593,21 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
 def init(templates: Jinja2Templates):
     global _templates, _client
     _templates = templates
+
+    # Support credentials from env var (base64 JSON) or local file path
+    key_b64 = os.environ.get("BIGQUERY_KEY_B64")
+    if key_b64:
+        import base64, tempfile
+        key_json = base64.b64decode(key_b64)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        tmp.write(key_json)
+        tmp.close()
+        key_file = tmp.name
+    else:
+        key_file = KEY_PATH
+
     credentials = service_account.Credentials.from_service_account_file(
-        KEY_PATH,
+        key_file,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
     _client = genai.Client(
