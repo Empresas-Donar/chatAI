@@ -23,6 +23,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 ALLOWED_DOMAIN = "empresasdonar.cl"
 
+# Fixed redirect URI — must match exactly what's registered in Google Cloud Console
+_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/auth/callback",
+)
+
 _config = Config()
 _oauth = OAuth(_config)
 _oauth.register(
@@ -32,21 +38,20 @@ _oauth.register(
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={
         "scope": "openid email profile",
-        "hd": ALLOWED_DOMAIN,  # hint to Google to show only empresasdonar.cl accounts
+        "hd": ALLOWED_DOMAIN,
     },
 )
 
 
 @router.get("/google")
 async def google_login(request: Request):
-    redirect_uri = str(request.url_for("google_callback"))
-    return await _oauth.google.authorize_redirect(request, redirect_uri)
+    return await _oauth.google.authorize_redirect(request, _REDIRECT_URI)
 
 
 @router.get("/callback", name="google_callback")
 async def google_callback(request: Request):
     try:
-        token = await _oauth.google.authorize_access_token(request)
+        token = await _oauth.google.authorize_access_token(request, redirect_uri=_REDIRECT_URI)
     except Exception as e:
         logger.warning("OAuth token error: %s", e)
         return RedirectResponse(url="/login?error=oauth", status_code=302)
