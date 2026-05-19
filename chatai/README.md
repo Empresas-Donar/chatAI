@@ -1,6 +1,6 @@
-# AppSheet → PostgreSQL Web Migrator
+# Chat AI — Donar Integraciones
 
-Internal web tool for migrating CSV exports from AppSheet to PostgreSQL, with an AI chat assistant to query business data.
+Plataforma interna con chat de inteligencia artificial para consultar datos del negocio, más herramienta de migración de AppSheet a PostgreSQL.
 
 ---
 

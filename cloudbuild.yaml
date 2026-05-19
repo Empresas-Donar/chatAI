@@ -3,7 +3,7 @@ steps:
     args:
       - build
       - -f
-      - web_migrator/Dockerfile
+      - chatai/Dockerfile
       - -t
       - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest
       - .

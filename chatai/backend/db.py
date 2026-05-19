@@ -1,7 +1,7 @@
 """
 core_db.py
 ----------
-Lightweight DB connection helper for the web_migrator backend.
+Lightweight DB connection helper for the chatai backend.
 Uses psycopg2 (same driver as the root core/db.py) reading env vars already
 loaded by main.py via dotenv.
 """

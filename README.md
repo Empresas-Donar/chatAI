@@ -164,7 +164,7 @@ El servicio escala a cero cuando no está en uso — sin costo cuando está inac
 ### Actualizar el servidor tras cambios en el código
 
 ```bash
-cd web_migrator/
+cd chatai/
 
 # 1. Reconstruir y subir la imagen
 gcloud builds submit \
@@ -199,7 +199,7 @@ Se configuran en Cloud Run desde la consola de Google Cloud o con `--set-env-var
 ### 1. Instalar dependencias
 
 ```bash
-cd web_migrator/
+cd chatai/
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -208,14 +208,14 @@ pip install -r requirements.txt
 ### 2. Configurar credenciales
 
 ```bash
-cp web_migrator/.env.example web_migrator/.env
+cp chatai/.env.example chatai/.env
 # Editar .env con los valores reales — nunca subir este archivo al repositorio
 ```
 
 ### 3. Iniciar el servidor
 
 ```bash
-cd web_migrator/
+cd chatai/
 source .venv/bin/activate
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -240,7 +240,7 @@ Para detener: `Ctrl+C`. Si el puerto está ocupado: `lsof -ti :8000 | xargs kill
 
 ```
 Appsheet_migration/
-├── web_migrator/                   # Herramienta web principal (FastAPI)
+├── chatai/                   # Herramienta web principal (FastAPI)
 │   ├── backend/
 │   │   ├── main.py                 # Rutas FastAPI + streaming de logs
 │   │   ├── auth.py                 # Autenticación Basic Auth
