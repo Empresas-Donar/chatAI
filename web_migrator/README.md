@@ -1,6 +1,98 @@
 # AppSheet → PostgreSQL Web Migrator
 
-Internal web tool for migrating multiple CSV exports from AppSheet to PostgreSQL.
+Internal web tool for migrating CSV exports from AppSheet to PostgreSQL, with an AI chat assistant to query business data.
+
+---
+
+## Chat IA — Cómo funciona
+
+El chat permite hacer preguntas en lenguaje natural sobre los datos del negocio (tarjas, pagos, contratistas, despacho, etc.) sin saber SQL.
+
+### Flujo de una pregunta
+
+```
+Tú → Gemini → ¿necesita datos?
+                 ├── Sí → genera SQL → PostgreSQL → resultados → Gemini → respuesta
+                 └── No → responde directo (Looker Studio, preguntas generales)
+```
+
+1. **El usuario escribe una pregunta** en el chat
+2. **El backend se la pasa a Gemini 2.5 Pro** junto con un *system prompt* que describe las tablas disponibles (columnas, tipos, relaciones)
+3. **Gemini decide si necesita consultar datos** — si sí, llama una herramienta (*function calling*) con el SQL que necesita
+4. **El backend ejecuta el SQL** en PostgreSQL (solo lectura — escrituras bloqueadas) y devuelve los resultados a Gemini
+5. **Gemini redacta la respuesta** en español, analizando los datos recibidos
+6. **El backend inyecta la fuente** automáticamente: `📊 Fuente: tabla · N registros · IDs: ...` para trazabilidad
+
+### Caso especial: reportes Looker Studio
+
+Si la pregunta menciona "looker studio" o pide reportes, Gemini responde **directamente sin consultar la base de datos** — los 38 links de reportes están incluidos en el system prompt.
+
+### Anti-alucinación
+
+- Las reglas de integridad están al inicio del system prompt (mayor peso para el modelo)
+- Gemini tiene prohibido inventar datos, estimar, o responder sin fuente
+- Si no hay datos suficientes, debe decirlo explícitamente
+- El backend agrega el badge de fuente aunque Gemini lo omita
+
+### Tecnologías
+
+| Componente | Tecnología |
+|---|---|
+| Modelo IA | Gemini 2.5 Pro (Vertex AI) |
+| Protocolo | Function calling (agentic loop) |
+| Base de datos | PostgreSQL (esquema `appsheet`) |
+| Historial | `public.chat_history` por usuario |
+| Autenticación | Google OAuth2 restringido a `@empresasdonar.cl` |
+
+---
+
+## Servicios de Google Cloud
+
+### Cloud Run
+Ejecuta la aplicación FastAPI en un contenedor Docker. Recibe todas las peticiones HTTP (chat, login, migrador). Escala automáticamente según el tráfico. Configurado con mínimo 1 instancia para que el login OAuth funcione correctamente.
+
+### Cloud Build + Artifact Registry
+CI/CD del proyecto. Cloud Build lee `cloudbuild.yaml`, construye la imagen Docker, la sube a Artifact Registry y despliega la nueva versión en Cloud Run con un solo comando: `gcloud builds submit`.
+
+### Cloud SQL (PostgreSQL)
+Base de datos principal. Almacena los datos migrados desde AppSheet (esquema `appsheet`) y el historial de chat por usuario (`public.chat_history`). Cloud Run se conecta via Cloud SQL Connector sin exponer la DB a internet.
+
+### Secret Manager
+Guarda las credenciales de forma segura:
+- `SECRET_KEY` — clave para firmar las cookies de sesión
+- `GOOGLE_CLIENT_SECRET` — clave OAuth de Google
+- `BIGQUERY_KEY_B64` — credenciales de BigQuery en base64
+
+### Vertex AI
+**Vertex AI es el puente entre la aplicación y Gemini.** Sin él, habría que entrar a google.com y preguntar manualmente. Con Vertex AI, la aplicación habla con Gemini por código: le manda la pregunta y recibe la respuesta automáticamente.
+
+Google ofrece dos formas de acceder a Gemini:
+
+| | Vertex AI | Google AI Studio |
+|---|---|---|
+| Para | Empresas / producción | Desarrollo / pruebas |
+| Autenticación | Cuenta GCP (gcloud) | API key |
+| Integración | Con el resto de GCP | Independiente |
+
+Como toda la infraestructura ya está en Google Cloud, Vertex AI se autentica con la misma cuenta de GCP sin API keys adicionales.
+
+### Google OAuth2
+Autenticación de usuarios restringida a cuentas `@empresasdonar.cl`. No es un servicio separado — usa las APIs de Google Identity directamente.
+
+### Diagrama
+
+```
+Usuario
+  │
+  ▼
+Cloud Run (FastAPI)
+  ├── Cloud SQL       → datos del negocio + historial chat
+  ├── Vertex AI       → Gemini 2.5 Pro (razonamiento + SQL)
+  ├── Secret Manager  → credenciales
+  └── Google OAuth2   → autenticación @empresasdonar.cl
+
+Cloud Build + Artifact Registry → deploy
+```
 
 ---
 

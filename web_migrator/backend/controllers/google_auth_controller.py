@@ -8,13 +8,16 @@ Routes:
   GET /auth/callback  → handle Google callback, verify domain, set session
 """
 
+import hashlib
+import hmac
+import json
 import logging
 import os
+import secrets
 
-from authlib.integrations.starlette_client import OAuth
+import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from starlette.config import Config
 
 from auth import set_session
 
@@ -23,42 +26,89 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 ALLOWED_DOMAIN = "empresasdonar.cl"
 
-# Fixed redirect URI — must match exactly what's registered in Google Cloud Console
-_REDIRECT_URI = os.environ.get(
+CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+REDIRECT_URI = os.environ.get(
     "GOOGLE_REDIRECT_URI",
     "http://localhost:8000/auth/callback",
 )
 
-_config = Config()
-_oauth = OAuth(_config)
-_oauth.register(
-    name="google",
-    client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
-    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={
-        "scope": "openid email profile",
-        "hd": ALLOWED_DOMAIN,
-    },
-)
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 @router.get("/google")
 async def google_login(request: Request):
-    return await _oauth.google.authorize_redirect(request, _REDIRECT_URI)
+    state = secrets.token_urlsafe(24)
+    request.session["oauth_state"] = state
+
+    params = {
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "hd": ALLOWED_DOMAIN,
+        "access_type": "online",
+    }
+    url = _GOOGLE_AUTH_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+    return RedirectResponse(url=url, status_code=302)
 
 
 @router.get("/callback", name="google_callback")
 async def google_callback(request: Request):
-    try:
-        token = await _oauth.google.authorize_access_token(request, redirect_uri=_REDIRECT_URI)
-    except Exception as e:
-        logger.warning("OAuth token error: %s", e)
+    # CSRF check
+    state_in_session = request.session.pop("oauth_state", None)
+    state_from_google = request.query_params.get("state")
+    if not state_in_session or state_in_session != state_from_google:
+        logger.warning("OAuth state mismatch — possible CSRF")
         return RedirectResponse(url="/login?error=oauth", status_code=302)
 
-    userinfo = token.get("userinfo") or {}
-    email = userinfo.get("email", "")
+    code = request.query_params.get("code")
+    if not code:
+        logger.warning("No authorization code in callback")
+        return RedirectResponse(url="/login?error=oauth", status_code=302)
 
+    # Exchange code for token
+    async with httpx.AsyncClient() as client:
+        try:
+            token_resp = await client.post(
+                _GOOGLE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                    "redirect_uri": REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+                timeout=10,
+            )
+            token_resp.raise_for_status()
+            token_data = token_resp.json()
+        except Exception as e:
+            logger.warning("Token exchange error: %s", e)
+            return RedirectResponse(url="/login?error=oauth", status_code=302)
+
+        access_token = token_data.get("access_token")
+        if not access_token:
+            logger.warning("No access_token in token response")
+            return RedirectResponse(url="/login?error=oauth", status_code=302)
+
+        # Get user info
+        try:
+            userinfo_resp = await client.get(
+                _GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            userinfo_resp.raise_for_status()
+            userinfo = userinfo_resp.json()
+        except Exception as e:
+            logger.warning("Userinfo fetch error: %s", e)
+            return RedirectResponse(url="/login?error=oauth", status_code=302)
+
+    email = userinfo.get("email", "")
     if not email.endswith(f"@{ALLOWED_DOMAIN}"):
         logger.warning("Rejected login from unauthorized domain: %s", email)
         return RedirectResponse(url="/login?error=domain", status_code=302)
