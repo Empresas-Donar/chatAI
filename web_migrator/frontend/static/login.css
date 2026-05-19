@@ -186,6 +186,28 @@
   transform: scale(0.98);
 }
 
+/* ── Google button ── */
+.login-btn--google {
+  background: #fff;
+  color: #3c4043;
+  border: 1px solid #dadce0;
+  font-weight: 500;
+  text-decoration: none;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0;
+}
+.login-btn--google:hover {
+  background: #f8f9fa;
+  border-color: #c6c6c6;
+}
+.login-domain-hint {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
 /* ── Footer ── */
 .login-footer {
   font-size: 0.78rem;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Donar Integraciones{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=9" />
+  <link rel="stylesheet" href="/static/styles.css?v=11" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -202,6 +202,29 @@
 
   <div class="navbar-end">
     {% block navbar_end_extra %}{% endblock %}
+    {% if current_user %}
+    <div class="nav-user-menu">
+      <button class="nav-user-trigger" aria-label="Menú de usuario">
+        <div class="nav-user-avatar">{{ current_user[0].upper() }}</div>
+        <span class="nav-user-name">{{ current_user.split('@')[0] }}</span>
+        <svg class="nav-user-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="nav-user-card">
+        <div class="nav-user-card-header">
+          <div class="nav-user-card-avatar">{{ current_user[0].upper() }}</div>
+          <div>
+            <div class="nav-user-card-name">{{ current_user.split('@')[0] }}</div>
+            <div class="nav-user-card-email">{{ current_user }}</div>
+          </div>
+        </div>
+        <div class="nav-user-card-divider"></div>
+        <a href="/logout" class="nav-user-card-logout">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Cerrar sesión
+        </a>
+      </div>
+    </div>
+    {% endif %}
     <button class="nav-hamburger" id="navHamburger" aria-label="Menú">
       <span></span><span></span><span></span>
     </button>
@@ -282,6 +305,16 @@ function closeDrawer() { drawer.classList.remove('open'); overlay.classList.remo
 hamburger.addEventListener('click', openDrawer);
 closeBtn.addEventListener('click', closeDrawer);
 overlay.addEventListener('click', closeDrawer);
+
+// ── User menu ──
+const userMenu = document.querySelector('.nav-user-menu');
+if (userMenu) {
+  userMenu.querySelector('.nav-user-trigger').addEventListener('click', e => {
+    e.stopPropagation();
+    userMenu.classList.toggle('open');
+  });
+  document.addEventListener('click', () => userMenu.classList.remove('open'));
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>

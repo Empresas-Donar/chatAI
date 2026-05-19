@@ -8,6 +8,15 @@
   <div class="chat-sidebar" id="chatSidebar">
     <div class="chat-sidebar-header">
       <h2 class="chat-sidebar-title">Chat IA</h2>
+      {% if current_user %}
+      <div class="chat-sidebar-user">
+        <div class="chat-sidebar-user-avatar">{{ current_user[0].upper() }}</div>
+        <div>
+          <div class="chat-sidebar-user-name">{{ current_user.split('@')[0] }}</div>
+          <div class="chat-sidebar-user-label">Historial personal</div>
+        </div>
+      </div>
+      {% endif %}
       <p class="chat-sidebar-sub">Consultas de negocio en lenguaje natural</p>
       <button class="chat-clear-btn" id="clearHistoryBtn" title="Borrar historial">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
@@ -149,6 +158,39 @@
   color: var(--text-muted);
   margin: 0 0 8px;
   line-height: 1.4;
+}
+
+.chat-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 4px 0 8px;
+}
+.chat-sidebar-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--terra);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-sidebar-user-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.chat-sidebar-user-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 
 .chat-clear-btn {

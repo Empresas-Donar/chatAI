@@ -28,9 +28,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from auth import _LoginRedirect, require_auth
 import controllers.login_controller as login
+import controllers.google_auth_controller as google_auth
 import controllers.dashboard_controller as dashboard
 import controllers.csv_migrator_controller as csv_migrator
 import controllers.tarjas_controller as tarjas
@@ -69,9 +71,34 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+# SessionMiddleware must be added last (runs first) so the OAuth state cookie
+# is available before CORS processing. samesite="lax" is required — "strict"
+# blocks the cookie on the cross-origin redirect back from Google.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("SECRET_KEY", ""),
+    https_only=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
+    same_site="lax",
+)
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# Inject current_user into every template context automatically
+from auth import get_current_user as _get_current_user
+_orig_response = templates.TemplateResponse
+
+def _template_response_with_user(request, name=None, context=None, *args, **kwargs):
+    # Support both positional and keyword calling conventions
+    if name is None and isinstance(request, str):
+        name, request = request, context
+        context = args[0] if args else {}
+    context = context or {}
+    context.setdefault("current_user", _get_current_user(request))
+    return _orig_response(request, name, context, **kwargs)
+
+templates.TemplateResponse = _template_response_with_user
 
 
 @app.exception_handler(_LoginRedirect)
@@ -93,6 +120,7 @@ chat.init(templates=templates)
 _auth = [Depends(require_auth)]
 
 app.include_router(login.router)
+app.include_router(google_auth.router)  # no auth required — it IS the auth
 app.include_router(dashboard.router,       dependencies=_auth)
 app.include_router(csv_migrator.router,    dependencies=_auth)
 app.include_router(tarjas.router,          dependencies=_auth)

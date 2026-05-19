@@ -35,7 +35,7 @@ def set_session(response: RedirectResponse, username: str) -> None:
         value=token,
         max_age=_MAX_AGE,
         httponly=True,
-        samesite="strict",
+        samesite="lax",
         secure=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
     )
 
