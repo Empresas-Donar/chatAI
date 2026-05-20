@@ -24,8 +24,11 @@
       </button>
     </div>
     <div class="chat-sidebar-section">
-      <p class="chat-sidebar-label">BigQuery · Odoo</p>
-      <ul class="chat-source-list">
+      <button class="chat-source-toggle" data-target="bq-list">
+        <span class="chat-sidebar-label">BigQuery · Odoo</span>
+        <svg class="chat-source-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul class="chat-source-list" id="bq-list">
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--green"></span>
           Facturas
@@ -36,17 +39,47 @@
         </li>
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--green"></span>
-          Reporte Analítico
+          Nómina (detalle)
         </li>
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--green"></span>
+          Reporte Analítico
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
           Órdenes de aplicación
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Contactos
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Cuentas Contables
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Diarios Contables
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Productos / Stock
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Movimientos de Stock
+        </li>
+        <li class="chat-source-item chat-source-more-btn" id="bq-more">
+          <button class="chat-source-show-more" data-list="bq-list">+ 6 más</button>
         </li>
       </ul>
     </div>
     <div class="chat-sidebar-section">
-      <p class="chat-sidebar-label">PostgreSQL · Apps</p>
-      <ul class="chat-source-list">
+      <button class="chat-source-toggle" data-target="pg-list">
+        <span class="chat-sidebar-label">PostgreSQL · Apps</span>
+        <svg class="chat-source-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul class="chat-source-list" id="pg-list">
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--blue"></span>
           Tarjas / Pagos
@@ -63,17 +96,20 @@
           <span class="chat-source-dot chat-source-dot--blue"></span>
           Sensores
         </li>
-        <li class="chat-source-item">
+        <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--blue"></span>
           Horas frío / Utah / GDA
         </li>
-        <li class="chat-source-item">
+        <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--blue"></span>
           Dynamic Model (porciones)
         </li>
-        <li class="chat-source-item">
+        <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--blue"></span>
           Estación meteorológica
+        </li>
+        <li class="chat-source-item chat-source-more-btn" id="pg-more">
+          <button class="chat-source-show-more" data-list="pg-list">+ 3 más</button>
         </li>
       </ul>
     </div>
@@ -252,6 +288,56 @@
 
 .chat-source-dot--green { background: var(--green); }
 .chat-source-dot--blue  { background: #3b82f6; }
+
+/* ── Source toggle ───────────────────────────────────────────────── */
+.chat-source-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  width: 100%;
+}
+.chat-source-toggle .chat-sidebar-label {
+  margin: 0;
+}
+.chat-source-chevron {
+  color: var(--text-light);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.chat-source-toggle.collapsed .chat-source-chevron {
+  transform: rotate(-90deg);
+}
+.chat-source-list.collapsed {
+  display: none;
+}
+.chat-source-extra {
+  display: none;
+}
+.chat-source-list.expanded .chat-source-extra {
+  display: flex;
+}
+.chat-source-more-btn {
+  display: flex !important;
+}
+.chat-source-list.expanded .chat-source-more-btn {
+  display: flex !important;
+}
+.chat-source-show-more {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--earth);
+  cursor: pointer;
+  text-align: left;
+}
+.chat-source-show-more:hover {
+  color: var(--terra);
+}
 
 .chat-example {
   background: var(--bg-warm);
@@ -851,6 +937,35 @@ form.addEventListener('submit', async (e) => {
     sendBtn.disabled = false;
     input.focus();
   }
+});
+
+// ── Source list toggle (collapse/expand section) ─────────────────
+document.querySelectorAll('.chat-source-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetId = btn.dataset.target;
+    const list = document.getElementById(targetId);
+    if (!list) return;
+    list.classList.toggle('collapsed');
+    btn.classList.toggle('collapsed');
+  });
+});
+
+// ── Show more / show less ────────────────────────────────────────
+document.querySelectorAll('.chat-source-show-more').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const listId = btn.dataset.list;
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const expanded = list.classList.toggle('expanded');
+    const moreRow = list.querySelector('.chat-source-more-btn button');
+    if (expanded) {
+      btn.textContent = 'Ver menos';
+    } else {
+      // restore original count label
+      const count = list.querySelectorAll('.chat-source-extra').length;
+      btn.textContent = `+ ${count} más`;
+    }
+  });
 });
 </script>
 {% endblock body %}
