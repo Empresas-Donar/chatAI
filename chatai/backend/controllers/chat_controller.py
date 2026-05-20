@@ -108,6 +108,9 @@ FUENTE 1 — BigQuery (proyecto: ace-scarab-484515-v1, dataset: odoo_data)
 Usa la tool `query_bigquery`. Path completo: `ace-scarab-484515-v1.odoo_data.TABLA`
 
 ### Cuentas_por_cobrar — Facturas emitidas a clientes
+⚠️ RANGO DE DATOS: Los datos van desde enero 2025 hasta hoy. No hay datos anteriores a 2025.
+Si el usuario pide "abril 2024" u otro período anterior a 2025, advertirle que no hay datos y ofrecer consultar el período más cercano disponible.
+
 - name: número de factura (ej: "FAC 000135")
 - invoice_partner_display_name: nombre del cliente
 - invoice_date: fecha de emisión (DATE)
@@ -115,23 +118,53 @@ Usa la tool `query_bigquery`. Path completo: `ace-scarab-484515-v1.odoo_data.TAB
 - amount_untaxed: monto neto (NUMERIC)
 - amount_tax: IVA (NUMERIC)
 - amount_total: total con IVA (NUMERIC)
-- amount_residual: saldo pendiente (NUMERIC)
+- amount_residual: saldo pendiente (NUMERIC) — saldo pendiente de cobro hoy
 - payment_state: "not_paid" | "partial" | "paid"
-- state: "posted" | "draft" | "cancel"
+- state: "posted" (confirmada) | "draft" | "cancel" — SIEMPRE filtrar WHERE state = 'posted'
 - l10n_cl_sii_send_ident: RUT receptor
 
+QUERY TIPO — clientes más morosos (deuda vencida):
+  SELECT invoice_partner_display_name,
+         SUM(amount_residual) as deuda_pendiente,
+         COUNT(*) as facturas_impagas,
+         MIN(invoice_date_due) as factura_mas_antigua
+  FROM `ace-scarab-484515-v1.odoo_data.Cuentas_por_cobrar`
+  WHERE state = 'posted'
+    AND payment_state IN ('not_paid', 'partial')
+    AND invoice_date_due < CURRENT_DATE()
+  GROUP BY 1
+  ORDER BY 2 DESC
+  LIMIT 10
+
 ### Remuneraciones — Liquidaciones de sueldo (empleados KONTROLAG)
-- name: nombre liquidación (empleado + mes)
+⚠️ MONTOS EN 0: Muchas liquidaciones desde feb 2026 tienen gross_wage y net_wage = 0 — son registros
+creados en Odoo pero sin datos importados todavía. Si los montos son 0, informar:
+"La liquidación existe pero sin montos registrados aún en el sistema."
+Los datos reales con montos están hasta aproximadamente enero 2026.
+
+⚠️ "FECHA DE PAGA": No existe ese campo. Interpretar como date_to (último día del mes de la liquidación).
+Responder con: "El período de pago fue [mes] — liquidación del [date_from] al [date_to]."
+
+Para buscar un empleado: usar LOWER(name) LIKE '%apellido%' — el campo name incluye nombre completo.
+
+- name: nombre completo de la liquidación, ej: "Liquidación de Sueldo - JUAN PEREZ GARCIA - enero 2026"
 - employee_id: ID empleado (INTEGER)
-- date_from: inicio período (DATE)
-- date_to: fin período (DATE)
+- date_from: inicio período (DATE) — primer día del mes
+- date_to: fin período (DATE) — último día del mes (interpretar como "fecha de paga")
 - gross_wage: sueldo bruto (NUMERIC)
 - net_wage: sueldo líquido (NUMERIC)
 - sueldo_base: sueldo base (NUMERIC)
 - descuentos: total descuentos (NUMERIC)
 - aportes_patronales: costos patronales (NUMERIC)
 - haberes: total haberes (NUMERIC)
-- state: "done" = cerrada
+- state: "done" = liquidación cerrada
+
+QUERY TIPO — historial de un empleado (incluir state y filtrar montos > 0 para mostrar datos reales):
+  SELECT name, date_from, date_to, gross_wage, net_wage, state
+  FROM `ace-scarab-484515-v1.odoo_data.Remuneraciones`
+  WHERE LOWER(name) LIKE '%leyton%'
+  ORDER BY date_from DESC
+  LIMIT 20
 
 ### Reporte_Analitico — Líneas contables por centro de costo (131.674 registros)
 IMPORTANTE: El campo de distribución analítica es un JSON string, NO una columna directa.
