@@ -547,6 +547,156 @@
   line-height: 1.4;
 }
 
+/* ── Trace panel (data provenance) ──────────────────────────────── */
+.chat-trace-wrap {
+  margin-top: 8px;
+}
+
+.chat-trace-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  line-height: 1.4;
+}
+.chat-trace-toggle:hover {
+  background: var(--earth-light);
+  border-color: var(--earth);
+  color: var(--text);
+}
+.chat-trace-toggle svg {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.chat-trace-toggle.open svg {
+  transform: rotate(180deg);
+}
+
+.chat-trace-panel {
+  display: none;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  background: var(--bg);
+}
+.chat-trace-panel.open {
+  display: block;
+}
+
+.chat-trace-entry {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.chat-trace-entry:last-child {
+  border-bottom: none;
+}
+
+.chat-trace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 7px;
+  align-items: center;
+}
+
+.chat-trace-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.chat-trace-tag--bq {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+.chat-trace-tag--pg {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+}
+.chat-trace-table {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 12.5px;
+}
+.chat-trace-rows {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.chat-trace-sql-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-light);
+  margin-bottom: 4px;
+}
+.chat-trace-sql {
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-family: monospace;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.chat-trace-preview-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-light);
+  margin: 8px 0 4px;
+}
+.chat-trace-preview-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.chat-trace-preview-wrap table {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 100%;
+  white-space: nowrap;
+}
+.chat-trace-preview-wrap th {
+  background: var(--bg-warm);
+  font-weight: 700;
+  text-align: left;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.chat-trace-preview-wrap td {
+  padding: 3px 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-trace-preview-wrap tr:last-child td { border-bottom: none; }
+
 /* ── Links dentro de burbujas ───────────────────────────────────── */
 .chat-bubble--assistant a {
   color: var(--gold);
@@ -794,7 +944,93 @@ function formatTs(ts) {
   return d.toLocaleString('es-CL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
 
-function addRow(role, text, timestamp) {
+function buildTracePanel(traces) {
+  if (!traces || traces.length === 0) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-trace-wrap';
+
+  const toggle = document.createElement('button');
+  toggle.className = 'chat-trace-toggle';
+  toggle.innerHTML = `
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    📎 Ver fuente${traces.length > 1 ? ` (${traces.length} consultas)` : ''}`;
+
+  const panel = document.createElement('div');
+  panel.className = 'chat-trace-panel';
+
+  for (const trace of traces) {
+    const entry = document.createElement('div');
+    entry.className = 'chat-trace-entry';
+
+    const isBQ = trace.system && trace.system.includes('BigQuery');
+    const tagClass = isBQ ? 'chat-trace-tag--bq' : 'chat-trace-tag--pg';
+    const tagLabel = isBQ ? 'BigQuery · Odoo' : 'PostgreSQL · Apps';
+
+    // Meta line
+    const meta = document.createElement('div');
+    meta.className = 'chat-trace-meta';
+    meta.innerHTML = `
+      <span class="chat-trace-tag ${tagClass}">${tagLabel}</span>
+      <span class="chat-trace-table">${escHtml(trace.table || '—')}</span>
+      <span class="chat-trace-rows">${trace.row_count ?? 0} fila${trace.row_count !== 1 ? 's' : ''} devuelta${trace.row_count !== 1 ? 's' : ''}</span>`;
+    entry.appendChild(meta);
+
+    // SQL block
+    if (trace.sql) {
+      const sqlLabel = document.createElement('div');
+      sqlLabel.className = 'chat-trace-sql-label';
+      sqlLabel.textContent = 'Query ejecutada';
+      entry.appendChild(sqlLabel);
+
+      const sqlBlock = document.createElement('pre');
+      sqlBlock.className = 'chat-trace-sql';
+      sqlBlock.textContent = trace.sql;
+      entry.appendChild(sqlBlock);
+    }
+
+    // Preview table
+    if (trace.preview && trace.preview.length > 0) {
+      const previewLabel = document.createElement('div');
+      previewLabel.className = 'chat-trace-preview-label';
+      previewLabel.textContent = `Primeras ${trace.preview.length} fila${trace.preview.length !== 1 ? 's' : ''}`;
+      entry.appendChild(previewLabel);
+
+      const previewWrap = document.createElement('div');
+      previewWrap.className = 'chat-trace-preview-wrap';
+
+      const cols = Object.keys(trace.preview[0]);
+      let tableHtml = '<table><tr>' + cols.map(c => `<th>${escHtml(c)}</th>`).join('') + '</tr>';
+      for (const row of trace.preview) {
+        tableHtml += '<tr>' + cols.map(c => `<td title="${escHtml(String(row[c] ?? ''))}">${escHtml(String(row[c] ?? ''))}</td>`).join('') + '</tr>';
+      }
+      tableHtml += '</table>';
+      previewWrap.innerHTML = tableHtml;
+      entry.appendChild(previewWrap);
+    }
+
+    panel.appendChild(entry);
+  }
+
+  toggle.addEventListener('click', () => {
+    const open = panel.classList.toggle('open');
+    toggle.classList.toggle('open', open);
+  });
+
+  wrap.appendChild(toggle);
+  wrap.appendChild(panel);
+  return wrap;
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function addRow(role, text, timestamp, traces) {
   const row = document.createElement('div');
   row.className = `chat-row chat-row--${role}`;
 
@@ -818,6 +1054,12 @@ function addRow(role, text, timestamp) {
     bubble.textContent = text;
   }
   wrap.appendChild(bubble);
+
+  // Trace panel — only for assistant messages with data provenance
+  if (role === 'assistant' && traces && traces.length > 0) {
+    const tracePanel = buildTracePanel(traces);
+    if (tracePanel) wrap.appendChild(tracePanel);
+  }
 
   if (timestamp && role !== 'thinking') {
     const ts = document.createElement('div');
@@ -928,7 +1170,8 @@ form.addEventListener('submit', async (e) => {
     thinking.remove();
 
     const reply = data.reply || 'Sin respuesta.';
-    addRow('assistant', reply, new Date().toISOString());
+    const traces = data.traces || [];
+    addRow('assistant', reply, new Date().toISOString(), traces);
     history.push({ role: 'model', parts: reply });
   } catch {
     thinking.remove();
