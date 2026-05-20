@@ -153,7 +153,7 @@ Columnas reales:
 ⭐ CÓMO CONSULTAR COSTOS POR CENTRO DE COSTO ANALÍTICO:
 Usar JSON_EXTRACT_SCALAR para extraer el porcentaje y ponderarlo sobre el balance:
 
-  -- Costo total asignado al CC 407 (Santina 2014), ponderado por su % de distribución:
+  -- Costo total asignado al CC Santina 2014 (ID Odoo: 407), ponderado por % de distribución:
   SELECT
     SUM(balance * CAST(JSON_EXTRACT_SCALAR(analytic_distribution, '$.407') AS FLOAT64) / 100.0) AS costo_cc
   FROM `ace-scarab-484515-v1.odoo_data.Reporte_Analitico`
@@ -161,19 +161,100 @@ Usar JSON_EXTRACT_SCALAR para extraer el porcentaje y ponderarlo sobre el balanc
     AND parent_state = 'posted'
     AND JSON_EXTRACT_SCALAR(analytic_distribution, '$.407') IS NOT NULL
 
-⭐ CÓMO ENCONTRAR EL ID DE UN CENTRO DE COSTO:
-Los IDs de centros de costo analíticos NO están en Reporte_Analitico directamente.
-Para encontrar el ID del CC, revisar la columna analytic_distribution buscando patrones,
-o preguntar al usuario si conoce el ID (aparece en Odoo como "Distribuciones Analíticas").
-IDs conocidos:
-- 407 = Santina 2014
-(agregar más cuando el usuario los confirme)
+⭐ TABLA DE MAPEO: CC AppSheet (id_cc) → ID Analítico Odoo (para usar en LIKE y JSON_EXTRACT_SCALAR)
+IMPORTANTE: El id_cc del usuario (de AppSheet/tarjas) NO es el mismo que el ID en Odoo.
+Usar SIEMPRE el ID Odoo de esta tabla para consultar Reporte_Analitico y Ordenes_de_aplicacion:
 
-### Ordenes_de_aplicacion — Órdenes de aplicación agrícola
-- name: código de orden
-- product_id, product_qty, state
-- date_start (TIMESTAMP) — usar DATE(date_start) para filtrar por fecha
-- analytic_distribution: JSON con centros de costo
+Campo 2 — Isla de Maipo:
+| id_cc | Cultivo                          | ID Odoo principal |
+| 420   | CEREZOS ISLA DE MAIPO            | 397,398,399,400,401,402,403 (distribuido) |
+| 422   | CEREZOS SWEET ARYANA 2023        | 398 |
+| 423   | CEREZOS REINIER/LAPINS 2023      | 399 |
+| 424   | CEREZOS SANTINA 2023             | 401 |
+| 425   | CEREZOS GLOW + TREAT/LAPINS 2023 | 402,403 |
+| 426   | CEREZOS GLOW 2023                | 402 |
+| 427   | CEREZOS TREAT/LAPINS             | 403 |
+| 428   | CEREZOS RED PACIFIC 2023         | 724,725 |
+| 429   | CEREZOS RED PACIFIC 2023-ORIENTE | 724 |
+| 430   | CEREZOS RED PACIFIC 2023-PONIENTE| 725 |
+| 431   | CEREZOS RAINIER 2023             | 399 |
+| 432   | CEREZOS LAPINS 2023              | 400 |
+| 451   | CIRUELAS D`AGEN ORIENTE          | 730 |
+| 452   | CIRUELAS D`AGEN PONIENTE         | 731 |
+| 453   | CIRUELAS D`AGEN                  | 730,731 |
+
+Campo 3 — Zuñiga (San Vicente):
+| id_cc | Cultivo                  | ID Odoo principal |
+| 800   | SAN VICENTE (general)    | 404,406-418 (distribuido) |
+| 860   | CIRUELOS ADULTOS         | 404 |
+| 861   | CEREZOS 2020             | 726,727 |
+| 862   | CEREZOS SANTINA 2020 NORTE | 726 |
+| 863   | CEREZOS SANTINA 2020 SUR | 727 |
+| 864   | CEREZOS SANTINA 2019 NORTE | 728 |
+| 865   | CEREZOS SANTINA 2019 SUR | 729 |
+| 866   | CEREZOS 2024             | 416,417,418 |
+| 878   | CEREZOS (general)        | 406-418 (distribuido) |
+| 879   | CEREZOS 2015             | 407,408 |
+| 880   | CEREZOS 2014             | 406,407 |
+| 881   | LAPINS 2014              | 406 |
+| 882   | RAINIER 2015             | 409 |
+| 883   | SANTINA 2014             | 407 |
+| 884   | LAPINS 2015              | 408 |
+| 890   | CEREZOS 2018             | 410,411,412 |
+| 891   | LAPINS 2019              | 413 |
+| 894   | IVU 115                  | 410 |
+| 895   | SANTINA 2018             | 411 |
+| 896   | LAPINS 2018              | 412 |
+| 897   | CEREZOS 2019             | 413,414,728,729 |
+
+Campo 1 — Talagante:
+| id_cc | Cultivo                  | ID Odoo principal |
+| 210   | TALAGANTE DONAR UNO      | 391,394,395,517,562,604-626,666 |
+| 212   | PEONÍAS 2024             | 395 |
+| 581   | LECHUGA ESCAROLA         | 391 |
+| 582   | SEMILLERO BUNCHING 25-26 | 394 |
+| 613   | ALMÁCIGO BUNCHING 25-26  | 562 |
+| 614   | SEMILLERO BRÓCOLI 25-26  | 517 |
+| 615   | SEMILLERO BUNCHING 26/27 | 666 |
+| 583-612 | PIMENTONES (varios)    | 604-626 (ver detalle en tarjas_cc) |
+
+### Ordenes_de_aplicacion — Órdenes de aplicación agrícola (1.479 registros)
+- id (INTEGER): ID interno
+- name (STRING): código de la orden, ej: "D1/MO/00999", "ZUÑIG/MO/00702", "ISLA/MO/00251"
+  El prefijo indica el predio: D1 = Donar 1, ZUÑIG = Zuñiga, ISLA = Isla de Maipo
+- date_start (TIMESTAMP): fecha y hora de inicio — usar DATE(date_start) para filtrar por fecha
+- date_finished (TIMESTAMP): fecha y hora de término
+- state (STRING): "done" | "confirmed" | "draft" | "cancel" — para órdenes completadas filtrar state = 'done'
+- product_id (INTEGER): ID del producto/insumo aplicado → join con Variantes_del_producto.id
+- product_qty (FLOAT): cantidad del producto aplicado
+- product_uom_id (INTEGER): unidad de medida
+- analytic_distribution (STRING): JSON con IDs de centros de costo y porcentaje, ej: {"407": 100.0}
+- x_studio_mojamiento_ha (INTEGER): mojamiento en litros por hectárea
+- x_studio_volumen_de_agua (FLOAT): volumen total de agua en litros
+- x_studio_observaciones (STRING): observaciones de la orden
+- x_studio_superficie_calculada (FLOAT): superficie en hectáreas
+- x_studio_estado_fenologico (INTEGER): estado fenológico del cultivo
+
+⭐ QUERY TIPO — órdenes de un período con nombre del producto:
+  SELECT o.name, DATE(o.date_start) as fecha, o.state, o.product_qty,
+         v.default_code as codigo_producto
+  FROM `ace-scarab-484515-v1.odoo_data.Ordenes_de_aplicacion` o
+  LEFT JOIN `ace-scarab-484515-v1.odoo_data.Variantes_del_producto` v ON v.id = o.product_id
+  WHERE DATE(o.date_start) BETWEEN '2026-03-01' AND '2026-03-31'
+    AND o.state = 'done'
+  ORDER BY o.date_start
+
+⭐ QUERY TIPO — órdenes filtradas por centro de costo (usar ID Odoo, NO el id_cc de AppSheet):
+  -- Para CC 424 (CEREZOS SANTINA 2023), el ID Odoo es 401:
+  SELECT o.name, DATE(o.date_start) as fecha, o.product_qty,
+         o.x_studio_mojamiento_ha, o.analytic_distribution
+  FROM `ace-scarab-484515-v1.odoo_data.Ordenes_de_aplicacion` o
+  WHERE o.analytic_distribution LIKE '%"401"%'
+    AND o.state = 'done'
+  ORDER BY o.date_start
+
+  → SIEMPRE consultar la tabla de mapeo (sección Reporte_Analitico) para convertir
+    id_cc de AppSheet al ID Odoo antes de armar la query.
 
 ### Contactos — Clientes, proveedores y personas (res.partner de Odoo) — 5.541 registros
 - id: ID del contacto
