@@ -1,0 +1,53 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write   # required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/1072789134265/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions-deploy@integraciones-484915.iam.gserviceaccount.com
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker southamerica-west1-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f chatai/Dockerfile \
+            -t southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest \
+            -t southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:${{ github.sha }} \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
+          docker push southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy chatai \
+            --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:${{ github.sha }} \
+            --region=southamerica-west1 \
+            --project=integraciones-484915 \
+            --platform=managed \
+            --quiet
