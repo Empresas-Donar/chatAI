@@ -135,6 +135,85 @@ Usa la tool `query_bigquery`. Path completo: `ace-scarab-484515-v1.odoo_data.TAB
 - date_start (TIMESTAMP) — usar DATE(date_start) para filtrar por fecha
 - analytic_distribution: JSON con centros de costo
 
+### Contactos — Clientes, proveedores y personas (res.partner de Odoo) — 5.541 registros
+- id: ID del contacto
+- name: nombre completo o razón social
+- vat: RUT (ej: "77222780-9")
+- is_company: TRUE si es empresa, FALSE si es persona
+- email, phone, mobile: datos de contacto
+- street, city, state_id, country_id: dirección
+- customer_rank: > 0 si es cliente
+- supplier_rank: > 0 si es proveedor
+- active: TRUE si está activo
+- commercial_company_name: nombre comercial de la empresa padre
+
+### Cuentas_Contables — Plan de cuentas contables (account.account) — 3.767 registros
+- id, code: código de cuenta (ej: "1101010")
+- name: nombre de la cuenta (JSON con claves "es_CL" y "en_US")
+- account_type: tipo (ej: "asset_cash", "liability_current", "expense")
+- internal_group: "asset" | "liability" | "equity" | "income" | "expense"
+- company_id: empresa dueña de la cuenta
+- deprecated: TRUE si la cuenta está obsoleta
+
+### Diarios_Contables — Diarios contables (account.journal) — 203 registros
+- id, code, name: identificación del diario
+- type: "sale" | "purchase" | "bank" | "cash" | "general"
+- company_id: empresa propietaria
+- default_account_id: cuenta contable por defecto
+- active: TRUE si está activo
+
+### Nomina — Líneas detalle de liquidaciones de sueldo (hr.payslip.line) — 46.068 registros
+Cada fila es una línea de una liquidación (haber, descuento o totalizador).
+- id, name: nombre de la línea (ej: "BONO TRATO", "TOTAL DESCUENTOS", "Salario neto")
+- code: código de la regla salarial (ej: "BTRATO", "TDE", "NET")
+- slip_id: ID de la liquidación madre (vincula con Remuneraciones.id)
+- employee_id: ID del empleado
+- contract_id: ID del contrato
+- date_from, date_to: período de la liquidación
+- amount, total, bl_signed_total: montos en CLP (FLOAT)
+- quantity, rate: cantidad y tasa aplicada
+- category_id: categoría de la línea (haber=7, descuento=14, neto=5)
+- tipo_auxiliar: clasificación auxiliar
+
+### Ubicaciones — Ubicaciones de bodega (stock.location) — 129 registros
+- id, name, complete_name: nombre corto y ruta completa (ej: "WH/Bodega Central")
+- usage: "internal" | "customer" | "supplier" | "transit" | "view" | "production"
+- company_id: empresa propietaria
+- active: TRUE si está activa
+- warehouse_id: bodega a la que pertenece
+
+### Variantes_del_producto — Variantes de producto (product.product) — 6.074 registros
+- id: ID de la variante
+- product_tmpl_id: ID del producto plantilla
+- default_code: referencia interna / código de producto
+- barcode: código de barras
+- active: TRUE si está activo
+- weight, volume: peso y volumen
+
+### movimientos_de_stock — Movimientos de inventario (stock.move.line) — 17.849 registros
+Cada fila es un movimiento real de productos entre ubicaciones.
+- id, move_id: ID del movimiento detalle y su cabecera
+- product_id: ID del producto (vincula con Variantes_del_producto.id)
+- picking_id: ID del albarán/guía de despacho
+- location_id: ubicación origen
+- location_dest_id: ubicación destino
+- quantity, quantity_product_uom: cantidad movida
+- date: fecha y hora del movimiento (TIMESTAMP)
+- state: "done" | "draft" | "cancel"
+- reference: referencia del albarán (ej: "D1/OUT/00019")
+- product_category_name: categoría del producto (ej: "AG / INSUMOS AGRO / AGROQUIMICOS")
+- x_studio_guia_despacho: número de guía de despacho
+- x_studio_empresa: ID del contacto empresa destinataria
+- x_studio_dosis_x_hectarea, x_studio_dosis_x_100l: dosis agrícola
+- x_studio_mojamiento_ha: mojamiento en hectáreas
+
+CRUCES NUEVOS CON TABLAS ODOO:
+- Nombre de producto: movimientos_de_stock.product_id ↔ Variantes_del_producto.id
+- Detalle liquidación: Remuneraciones.id ↔ Nomina.slip_id
+- Nombre cliente/proveedor: Cuentas_por_cobrar.partner_id ↔ Contactos.id
+- Cuenta contable: Reporte_Analitico.account_id ↔ Cuentas_Contables.id
+- Ubicación bodega: movimientos_de_stock.location_id ↔ Ubicaciones.id
+
 ══════════════════════════════════════════════
 FUENTE 2 — PostgreSQL (esquema appsheet / public)
 ══════════════════════════════════════════════
@@ -439,7 +518,9 @@ _TOOLS = [
         description=(
             "Ejecuta SQL en BigQuery y devuelve resultados. "
             "Usar path completo: `ace-scarab-484515-v1.odoo_data.TABLA`. "
-            "Tablas: Cuentas_por_cobrar, Remuneraciones, Reporte_Analitico, Ordenes_de_aplicacion."
+            "Tablas disponibles: Cuentas_por_cobrar, Remuneraciones, Reporte_Analitico, "
+            "Ordenes_de_aplicacion, Contactos, Cuentas_Contables, Diarios_Contables, "
+            "Nomina, Ubicaciones, Variantes_del_producto, movimientos_de_stock."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
