@@ -13,7 +13,7 @@ AppSheet (con backend en Google Sheets)
         │
         │  Exportar CSVs
         ▼
-Herramienta Web  (https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
+Herramienta Web  (https://chatai-1072789134265.southamerica-west1.run.app)
         │
         │  1. Subir CSVs e ingresar nombre de la app
         │  2. Detección automática de tipos de columna
@@ -60,7 +60,7 @@ Consolida los pagos semanales de `appsheet.tarjas_pagos` agrupados por contratis
 
 La herramienta está desplegada en Google Cloud y se accede desde cualquier browser:
 
-**URL:** `https://appsheet-migrator-nx63mrnslq-tl.a.run.app`
+**URL:** `https://chatai-1072789134265.southamerica-west1.run.app`
 
 Al abrir la URL el browser muestra un popup de login. Ingresar las credenciales y listo — no se requiere instalar nada ni correr comandos.
 
@@ -81,7 +81,7 @@ Exportar cada tabla como CSV. Mantener los nombres de archivo originales — el 
 
 ### Paso 2 — Subir y validar
 
-1. Abrir [https://appsheet-migrator-nx63mrnslq-tl.a.run.app](https://appsheet-migrator-nx63mrnslq-tl.a.run.app)
+1. Abrir [https://chatai-1072789134265.southamerica-west1.run.app](https://chatai-1072789134265.southamerica-west1.run.app)
 2. Ingresar el **nombre de la app** (ej. `medicion_pozos`) — se usa como prefijo de las tablas
 3. Seleccionar todos los CSVs de la app
 4. Hacer clic en **Subir y Analizar**
@@ -154,9 +154,9 @@ Las claves primarias siempre son `TEXT NOT NULL PRIMARY KEY` — AppSheet genera
 
 | Recurso | Detalle |
 |---|---|
-| **Cloud Run** | `appsheet-migrator`, región `southamerica-west1` |
+| **Cloud Run** | `chatai`, región `southamerica-west1` |
 | **Cloud SQL** | `db-donar` (PostgreSQL 16), base de datos `donar_prod` |
-| **Artifact Registry** | `integraciones`, imagen `appsheet-migrator:latest` |
+| **Artifact Registry** | `integraciones`, imagen `chatai:latest` |
 | **Proyecto** | `integraciones-484915` |
 
 El servicio escala a cero cuando no está en uso — sin costo cuando está inactivo.
@@ -168,12 +168,12 @@ cd chatai/
 
 # 1. Reconstruir y subir la imagen
 gcloud builds submit \
-  --tag southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
+  --tag southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest \
   --project=integraciones-484915
 
 # 2. Desplegar la nueva revisión
-gcloud run deploy appsheet-migrator \
-  --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest \
+gcloud run deploy chatai \
+  --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest \
   --region=southamerica-west1 \
   --project=integraciones-484915
 ```

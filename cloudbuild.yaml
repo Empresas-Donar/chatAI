@@ -5,7 +5,7 @@ steps:
       - -f
       - chatai/Dockerfile
       - -t
-      - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest
+      - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
       - .
 images:
-  - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/appsheet-migrator:latest
+  - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
