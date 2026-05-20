@@ -133,10 +133,41 @@ Usa la tool `query_bigquery`. Path completo: `ace-scarab-484515-v1.odoo_data.TAB
 - haberes: total haberes (NUMERIC)
 - state: "done" = cerrada
 
-### Reporte_Analitico — Líneas contables por centro de costo
-- account_id, analytic_account_id, partner_id, date (DATE)
-- debit, credit, balance (NUMERIC)
-- move_id
+### Reporte_Analitico — Líneas contables por centro de costo (131.674 registros)
+IMPORTANTE: El campo de distribución analítica es un JSON string, NO una columna directa.
+
+Columnas reales:
+- id, move_id, move_name: identificación del asiento
+- date (DATE): fecha del movimiento
+- debit, credit, balance (FLOAT): debe, haber, saldo en CLP
+- account_id (INTEGER): ID de cuenta contable → join con Cuentas_Contables.id
+- partner_id (INTEGER): ID del partner → join con Contactos.id
+- parent_state: "posted" (confirmado) | "draft" | "cancel" — SIEMPRE filtrar WHERE parent_state = 'posted'
+- analytic_distribution (STRING): JSON con centros de costo y su porcentaje
+  Ejemplo: {"407": 100.0} o {"404": 60.0, "407": 40.0}
+  El ID numérico es el ID del centro de costo analítico en Odoo.
+- x_studio_codigo_de_distribucin_analitica: código de distribución (puede ser NULL)
+- name: descripción de la línea
+- ref: referencia del asiento
+
+⭐ CÓMO CONSULTAR COSTOS POR CENTRO DE COSTO ANALÍTICO:
+Usar JSON_EXTRACT_SCALAR para extraer el porcentaje y ponderarlo sobre el balance:
+
+  -- Costo total asignado al CC 407 (Santina 2014), ponderado por su % de distribución:
+  SELECT
+    SUM(balance * CAST(JSON_EXTRACT_SCALAR(analytic_distribution, '$.407') AS FLOAT64) / 100.0) AS costo_cc
+  FROM `ace-scarab-484515-v1.odoo_data.Reporte_Analitico`
+  WHERE analytic_distribution LIKE '%"407"%'
+    AND parent_state = 'posted'
+    AND JSON_EXTRACT_SCALAR(analytic_distribution, '$.407') IS NOT NULL
+
+⭐ CÓMO ENCONTRAR EL ID DE UN CENTRO DE COSTO:
+Los IDs de centros de costo analíticos NO están en Reporte_Analitico directamente.
+Para encontrar el ID del CC, revisar la columna analytic_distribution buscando patrones,
+o preguntar al usuario si conoce el ID (aparece en Odoo como "Distribuciones Analíticas").
+IDs conocidos:
+- 407 = Santina 2014
+(agregar más cuando el usuario los confirme)
 
 ### Ordenes_de_aplicacion — Órdenes de aplicación agrícola
 - name: código de orden
@@ -529,7 +560,9 @@ _TOOLS = [
             "Usar path completo: `ace-scarab-484515-v1.odoo_data.TABLA`. "
             "Tablas disponibles: Cuentas_por_cobrar, Remuneraciones, Reporte_Analitico, "
             "Ordenes_de_aplicacion, Contactos, Cuentas_Contables, Diarios_Contables, "
-            "Nomina, Ubicaciones, Variantes_del_producto, movimientos_de_stock."
+            "Nomina, Ubicaciones, Variantes_del_producto, movimientos_de_stock. "
+            "Para Reporte_Analitico: usar JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID') "
+            "para extraer porcentaje de un CC específico y ponderarlo sobre balance."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
