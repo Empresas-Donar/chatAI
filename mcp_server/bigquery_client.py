@@ -1,4 +1,9 @@
+import base64
+import json
 import os
+import tempfile
+from typing import Optional
+
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -9,9 +14,30 @@ KEY_PATH = os.environ.get(
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json"
 )
 
+_cached_key_file: Optional[str] = None
+
+
+def _get_key_file() -> str:
+    """Resolve credentials: BIGQUERY_KEY_B64 (base64 JSON) takes priority over KEY_PATH."""
+    global _cached_key_file
+    if _cached_key_file:
+        return _cached_key_file
+
+    key_b64 = os.environ.get("BIGQUERY_KEY_B64")
+    if key_b64:
+        key_json = base64.b64decode(key_b64)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        tmp.write(key_json)
+        tmp.close()
+        _cached_key_file = tmp.name
+        return _cached_key_file
+
+    _cached_key_file = KEY_PATH
+    return _cached_key_file
+
 
 def get_client() -> bigquery.Client:
-    credentials = service_account.Credentials.from_service_account_file(KEY_PATH)
+    credentials = service_account.Credentials.from_service_account_file(_get_key_file())
     return bigquery.Client(project=GCP_PROJECT, credentials=credentials)
 
 
