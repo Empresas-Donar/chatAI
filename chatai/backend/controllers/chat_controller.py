@@ -136,35 +136,57 @@ QUERY TIPO — clientes más morosos (deuda vencida):
   ORDER BY 2 DESC
   LIMIT 10
 
-### Remuneraciones — Liquidaciones de sueldo (empleados KONTROLAG)
-⚠️ MONTOS EN 0: Muchas liquidaciones desde feb 2026 tienen gross_wage y net_wage = 0 — son registros
-creados en Odoo pero sin datos importados todavía. Si los montos son 0, informar:
-"La liquidación existe pero sin montos registrados aún en el sistema."
-Los datos reales con montos están hasta aproximadamente enero 2026.
+### Remuneraciones — Liquidaciones de sueldo (empleados KONTROLAG) — cabeceras hr.payslip
+⚠️ MONTOS EN 0: Algunas liquidaciones tienen gross_wage y net_wage = 0 — registros creados pero sin datos.
+Si los montos son 0, informar: "La liquidación existe pero sin montos registrados aún en el sistema."
 
-⚠️ "FECHA DE PAGA": No existe ese campo. Interpretar como date_to (último día del mes de la liquidación).
-Responder con: "El período de pago fue [mes] — liquidación del [date_from] al [date_to]."
+⚠️ CAMPO "FECHA DE PAGA": existe como `paid_date` (DATE). También `date_to` = último día del período.
+Responder "fecha de pago" con `paid_date`; si es NULL usar `date_to` como referencia.
 
 Para buscar un empleado: usar LOWER(name) LIKE '%apellido%' — el campo name incluye nombre completo.
 
-- name: nombre completo de la liquidación, ej: "Liquidación de Sueldo - JUAN PEREZ GARCIA - enero 2026"
-- employee_id: ID empleado (INTEGER)
+- id: ID de la liquidación (vincula con Nomina.slip_id para el detalle)
+- name: nombre completo, ej: "Liquidación de Sueldo - JUAN PEREZ GARCIA - enero 2026"
+- number: número de liquidación (ej: "SLIP/080")
 - date_from: inicio período (DATE) — primer día del mes
-- date_to: fin período (DATE) — último día del mes (interpretar como "fecha de paga")
-- gross_wage: sueldo bruto (NUMERIC)
-- net_wage: sueldo líquido (NUMERIC)
-- sueldo_base: sueldo base (NUMERIC)
-- descuentos: total descuentos (NUMERIC)
-- aportes_patronales: costos patronales (NUMERIC)
-- haberes: total haberes (NUMERIC)
-- state: "done" = liquidación cerrada
+- date_to: fin período (DATE) — último día del mes
+- date: fecha de la liquidación (DATE)
+- paid_date: fecha real de pago (DATE) — puede ser NULL
+- paid: TRUE si ya fue pagada
+- state: "done" = cerrada, "draft" = borrador
+- gross_wage: sueldo bruto total (FLOAT)
+- net_wage: sueldo líquido Odoo (FLOAT) ⚠️ puede incluir impuesto único
+- sueldo_liquido: sueldo líquido real a pagar (FLOAT) — usar este campo para "¿cuánto le pagan?"
+- sueldo_base / basic_wage: sueldo base contractual (FLOAT)
+- haberes: total haberes/ingresos (FLOAT)
+- descuentos: total descuentos legales (FLOAT)
+- aportes_patronales: costos del empleador (FLOAT)
+- dias_trabajados: días trabajados en el período (FLOAT)
+- sum_worked_hours: horas trabajadas (FLOAT)
+- department_id: ID departamento
+- job_id: ID cargo
+- company_id: ID empresa
+- payslip_run_id: ID del lote de liquidaciones
+- x_studio_anticipo2: anticipo descontado (FLOAT)
+- x_studio_impuesto_nico: impuesto único segunda categoría (FLOAT)
+- x_studio_retencin_3: retención (FLOAT)
 
-QUERY TIPO — historial de un empleado (incluir state y filtrar montos > 0 para mostrar datos reales):
-  SELECT name, date_from, date_to, gross_wage, net_wage, state
+QUERY TIPO — historial de un empleado:
+  SELECT name, date_from, date_to, gross_wage, sueldo_liquido, haberes, descuentos, state, paid_date
   FROM `ace-scarab-484515-v1.odoo_data.Remuneraciones`
-  WHERE LOWER(name) LIKE '%leyton%'
+  WHERE LOWER(name) LIKE '%garcia%'
   ORDER BY date_from DESC
   LIMIT 20
+
+QUERY TIPO — costo total mensual (todos los empleados):
+  SELECT DATE_TRUNC(date_from, MONTH) AS mes,
+         COUNT(*) AS empleados,
+         SUM(gross_wage) AS bruto_total,
+         SUM(sueldo_liquido) AS liquido_total,
+         SUM(aportes_patronales) AS costo_patronal
+  FROM `ace-scarab-484515-v1.odoo_data.Remuneraciones`
+  WHERE state = 'done'
+  GROUP BY 1 ORDER BY 1 DESC
 
 ### Reporte_Analitico — Líneas contables por centro de costo (131.674 registros)
 IMPORTANTE: El campo de distribución analítica es un JSON string, NO una columna directa.
@@ -251,26 +273,38 @@ Campo 1 — Talagante:
 | 615   | SEMILLERO BUNCHING 26/27 | 666 |
 | 583-612 | PIMENTONES (varios)    | 604-626 (ver detalle en tarjas_cc) |
 
-### Ordenes_de_aplicacion — Órdenes de aplicación agrícola (1.479 registros)
+### Ordenes_de_aplicacion — Órdenes de aplicación agrícola (mrp.production) — 1.479 registros
+Estas son órdenes de fabricación/aplicación de insumos agroquímicos. Modelo Odoo: mrp.production.
 - id (INTEGER): ID interno
 - name (STRING): código de la orden, ej: "D1/MO/00999", "ZUÑIG/MO/00702", "ISLA/MO/00251"
-  El prefijo indica el predio: D1 = Donar 1, ZUÑIG = Zuñiga, ISLA = Isla de Maipo
-- date_start (TIMESTAMP): fecha y hora de inicio — usar DATE(date_start) para filtrar por fecha
-- date_finished (TIMESTAMP): fecha y hora de término
-- state (STRING): "done" | "confirmed" | "draft" | "cancel" — para órdenes completadas filtrar state = 'done'
-- product_id (INTEGER): ID del producto/insumo aplicado → join con Variantes_del_producto.id
-- product_qty (FLOAT): cantidad del producto aplicado
-- product_uom_id (INTEGER): unidad de medida
-- analytic_distribution (STRING): JSON con IDs de centros de costo y porcentaje, ej: {"407": 100.0}
+  El prefijo indica el predio: D1 = Donar 1 (Talagante), ZUÑIG = Zuñiga, ISLA = Isla de Maipo
+- date_start (TIMESTAMP): fecha y hora de inicio — usar DATE(date_start) para filtrar por día
+- date_finished (TIMESTAMP): fecha y hora de término de la aplicación
+- state (STRING): "done" = completada | "confirmed" = confirmada | "draft" | "cancel"
+  Para filtrar órdenes ejecutadas: WHERE state = 'done'
+- product_id (INTEGER): ID del producto/insumo → join con Variantes_del_producto.id
+- product_qty (FLOAT): cantidad solicitada del producto
+- product_uom_qty (FLOAT): cantidad real producida/aplicada
+- qty_producing (FLOAT): cantidad en producción activa
+- product_uom_id (INTEGER): unidad de medida del producto
+- analytic_distribution (STRING): JSON con IDs de centros de costo analítico y %, ej: {"407": 100.0}
+  Puede distribuir en múltiples CC: {"606": 66.0, "607": 25.0, "608": 4.5, "609": 4.5}
 - x_studio_mojamiento_ha (INTEGER): mojamiento en litros por hectárea
 - x_studio_volumen_de_agua (FLOAT): volumen total de agua en litros
-- x_studio_observaciones (STRING): observaciones de la orden
-- x_studio_superficie_calculada (FLOAT): superficie en hectáreas
-- x_studio_estado_fenologico (INTEGER): estado fenológico del cultivo
+- x_studio_observaciones (STRING): observaciones y notas de la orden
+- x_studio_superficie_calculada (FLOAT): superficie en hectáreas calculada
+- x_studio_estado_fenologico (INTEGER): estado fenológico del cultivo al momento de la aplicación
+- x_studio_tractorista (INTEGER): ID del tractorista (Contactos.id)
+- x_studio_fabricacion_custom (BOOLEAN): TRUE = orden de aplicación custom
+- x_studio_multiempresa (BOOLEAN): si involucra múltiples empresas
+- x_studio_motivo_de_cancelacion (STRING): motivo si fue cancelada
+- origin (STRING): referencia de origen de la orden
+- company_id (INTEGER): empresa que ejecuta la aplicación
 
-⭐ QUERY TIPO — órdenes de un período con nombre del producto:
-  SELECT o.name, DATE(o.date_start) as fecha, o.state, o.product_qty,
-         v.default_code as codigo_producto
+⭐ QUERY TIPO — órdenes completadas en un período con nombre del producto:
+  SELECT o.name, DATE(o.date_start) AS fecha, DATE(o.date_finished) AS fecha_fin,
+         o.state, o.product_qty, o.x_studio_volumen_de_agua, o.x_studio_mojamiento_ha,
+         v.default_code AS codigo_producto
   FROM `ace-scarab-484515-v1.odoo_data.Ordenes_de_aplicacion` o
   LEFT JOIN `ace-scarab-484515-v1.odoo_data.Variantes_del_producto` v ON v.id = o.product_id
   WHERE DATE(o.date_start) BETWEEN '2026-03-01' AND '2026-03-31'
@@ -279,8 +313,8 @@ Campo 1 — Talagante:
 
 ⭐ QUERY TIPO — órdenes filtradas por centro de costo (usar ID Odoo, NO el id_cc de AppSheet):
   -- Para CC 424 (CEREZOS SANTINA 2023), el ID Odoo es 401:
-  SELECT o.name, DATE(o.date_start) as fecha, o.product_qty,
-         o.x_studio_mojamiento_ha, o.analytic_distribution
+  SELECT o.name, DATE(o.date_start) AS fecha, o.product_qty,
+         o.x_studio_mojamiento_ha, o.x_studio_volumen_de_agua, o.analytic_distribution
   FROM `ace-scarab-484515-v1.odoo_data.Ordenes_de_aplicacion` o
   WHERE o.analytic_distribution LIKE '%"401"%'
     AND o.state = 'done'
@@ -552,12 +586,25 @@ REQUERIMIENTOS TÍPICOS (porciones Dynamic Model):
 ══════════════════════════════════════════════
 CRUCES DE NEGOCIO
 ══════════════════════════════════════════════
-- Costo campo vs facturación: appsheet.tarjas_pagos.nombre_campo ↔ Cuentas_por_cobrar.invoice_partner_display_name
-- Costo laboral vs remuneraciones: tarjas_pagos.fecha::date ↔ Remuneraciones.date_from/date_to
-- CC AppSheet vs Odoo: tarjas_pagos.cuartel_cc ↔ Reporte_Analitico.analytic_account_id
+ODOO INTERNO:
+- Detalle liquidación empleado: Remuneraciones.id ↔ Nomina.slip_id
+- Nombre en línea contable: Reporte_Analitico.partner_id ↔ Contactos.id
+- Nombre cuenta contable: Reporte_Analitico.account_id ↔ Cuentas_Contables.id
+- Nombre producto en orden aplicación: Ordenes_de_aplicacion.product_id ↔ Variantes_del_producto.id
+- Nombre producto en movimiento stock: movimientos_de_stock.product_id ↔ Variantes_del_producto.id
+- Ubicación bodega: movimientos_de_stock.location_id ↔ Ubicaciones.id
+- RUT de un cliente/proveedor: Cuentas_por_cobrar.partner_id → Contactos.vat
+
+ODOO ↔ APPSHEET:
+- Costo campo vs facturación: tarjas_pagos.nombre_campo ↔ Cuentas_por_cobrar.invoice_partner_display_name
+- Costo laboral mensual: tarjas_pagos.fecha::date ↔ Remuneraciones.date_from/date_to
+- CC AppSheet → CC Odoo: tarjas_pagos.cuartel_cc → tabla de mapeo → clave en analytic_distribution JSON
+  ⚠️ NO existe columna analytic_account_id. El CC Odoo va dentro del JSON de analytic_distribution.
+
+APPSHEET INTERNO:
 - Sensores por campo: sensor_inventory.field ↔ tarjas_campo.nombre
 
-CAMPOS Y EMPRESA:
+CAMPOS Y EMPRESA FACTURADA EN ODOO:
   - "Isla de Maipo" → Agricola Donar Dos SpA
   - "Zuñiga" → Agricola Donar Dos SpA
 

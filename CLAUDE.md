@@ -182,16 +182,23 @@ El cliente **KONTROLAG SPA** (RUT 77235191-7) tiene una instancia de Odoo activa
 **Service Account:** `odoo-bigquery@ace-scarab-484515-v1.iam.gserviceaccount.com`
 **Clave JSON local:** `/Users/bedomax/startups/donar/bigquery-odoo-key.json`
 
-### Tablas disponibles
+### Tablas disponibles (verificadas 21/05/2026)
 
-| Tabla BigQuery | Contenido | Filas aprox. |
-|---|---|---|
-| `Cuentas_por_cobrar` | Facturas emitidas (account.move) | 109 |
-| `Remuneraciones` | Liquidaciones de sueldo (hr.payslip) | 1.199 |
-| `Reporte_Analítico_staging_1778157508` | Líneas analíticas contables | 50.000 |
-| `Ordenes_de_aplicación_staging_1778157654` | Órdenes de aplicación agrícola | 1.441 |
+| Tabla BigQuery | Modelo Odoo | Filas | Contenido |
+|---|---|---|---|
+| `Contactos` | res.partner | 5.541 | Clientes, proveedores y empleados — directorio completo |
+| `Cuentas_Contables` | account.account | 3.767 | Plan de cuentas contable |
+| `Cuentas_por_cobrar` | account.move | 106 | Facturas emitidas a clientes |
+| `Diarios_Contables` | account.journal | 203 | Diarios contables (ventas, compras, banco, etc.) |
+| `Nomina` | hr.payslip.line | 46.068 | **Líneas detalladas** de liquidaciones (reglas salariales por empleado) |
+| `Ordenes_de_aplicacion` | stock.move.line | 1.479 | Órdenes de aplicación agrícola (movimientos de insumos) |
+| `Remuneraciones` | hr.payslip | 1.214 | Cabeceras de liquidaciones de sueldo |
+| `Reporte_Analitico` | account.move.line | 131.707 | Líneas contables con distribución analítica (centro de costo) |
+| `Ubicaciones` | stock.location | 129 | Ubicaciones de bodega/almacén |
+| `Variantes_del_producto` | product.product | 6.074 | Variantes de productos/insumos |
+| `movimientos_de_stock` | stock.move.line | 17.849 | Movimientos de stock completados (despachos, recepciones) |
 
-> Las tablas sin sufijo `_staging_*` están vacías — los datos reales están en las staging con sufijos exactos arriba.
+> **Nota:** Los nombres de tabla ya no tienen sufijo `_staging_*`. Usar nombres exactos arriba.
 
 ### gcloud
 
@@ -214,7 +221,36 @@ df = client.query("""
 """).to_dataframe()
 ```
 
-### Columnas clave — Cuentas_por_cobrar
+### Columnas clave — Contactos (res.partner)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID del partner en Odoo |
+| `name` | Nombre completo |
+| `vat` | RUT (e.g. `77235191-7`) |
+| `is_company` | TRUE = empresa, FALSE = persona |
+| `customer_rank` | > 0 = es cliente |
+| `supplier_rank` | > 0 = es proveedor |
+| `employee` | TRUE = es empleado |
+| `email` / `phone` / `mobile` | Datos de contacto |
+| `street`, `city`, `state_id` | Dirección |
+| `l10n_cl_sii_taxpayer_type` | Tipo contribuyente SII Chile |
+| `l10n_cl_activity_description` | Giro comercial |
+| `commercial_company_name` | Nombre comercial de la empresa |
+
+### Columnas clave — Cuentas_Contables (account.account)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID interno |
+| `code` | Código de cuenta (e.g. `1101010`) |
+| `name` | Nombre de la cuenta (JSON bilingüe `{"es_CL": "..."}`) |
+| `account_type` | Tipo: `asset_cash`, `liability_payable`, `expense`, `income`, etc. |
+| `internal_group` | Grupo: `asset`, `liability`, `income`, `expense` |
+| `reconcile` | TRUE = cuenta reconciliable |
+| `company_id` | ID de la empresa propietaria |
+
+### Columnas clave — Cuentas_por_cobrar (account.move)
 
 | Campo Odoo | Significado |
 |---|---|
@@ -231,13 +267,13 @@ df = client.query("""
 | `l10n_cl_sii_send_ident` | RUT receptor (Chile) |
 | `x_studio_estado_aprobacin` | Campo custom Odoo Studio |
 
-### Columnas clave — Remuneraciones
+### Columnas clave — Remuneraciones (hr.payslip) — cabeceras
 
 | Campo Odoo | Significado |
 |---|---|
 | `name` | Nombre liquidación (empleado + mes) |
-| `employee_id` | ID empleado |
-| `date_from` / `date_to` | Período |
+| `employee_id` | ID empleado (join con `Contactos.id` vía `employee=TRUE`) |
+| `date_from` / `date_to` | Período de la liquidación |
 | `gross_wage` | Sueldo bruto |
 | `net_wage` | Sueldo líquido |
 | `sueldo_base` | Sueldo base contractual |
@@ -246,29 +282,106 @@ df = client.query("""
 | `haberes` | Total haberes |
 | `state` | `done` = liquidación cerrada |
 
-### Columnas clave — Reporte_Analítico_staging_1778157508
+### Columnas clave — Nomina (hr.payslip.line) — líneas detalladas
 
 | Campo | Significado |
 |---|---|
-| `account_id` | Cuenta contable |
-| `analytic_account_id` | Centro de costo / proyecto |
-| `partner_id` | Cliente o proveedor |
+| `slip_id` | ID liquidación madre (join con `Remuneraciones.id`) |
+| `employee_id` | ID empleado |
+| `name` | Nombre de la regla (e.g. `BONO TRATO`, `TOTAL DESCUENTOS`, `Salario neto`) |
+| `code` | Código regla salarial (e.g. `NET`, `TDE`, `BTRATO`) |
+| `category_id` | Categoría (haberes, descuentos, aportes, etc.) |
+| `amount` / `total` | Monto de la línea |
+| `bl_signed_total` | Monto con signo (negativo para descuentos) |
+| `quantity` / `rate` | Cantidad y tasa aplicada |
+| `date_from` / `date_to` | Período |
+| `contract_id` | ID del contrato de trabajo |
+| `x_studio_afp` | AFP del trabajador |
+| `x_studio_isapre` | Isapre del trabajador |
+| `tipo_auxiliar` | Tipo auxiliar de la línea |
+
+### Columnas clave — Reporte_Analitico (account.move.line)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID de la línea contable |
+| `move_id` | ID del asiento contable |
+| `move_name` | Nombre del asiento (e.g. `FAC/2026/01/0001`) |
+| `account_id` | ID cuenta contable (join con `Cuentas_Contables.id`) |
+| `journal_id` | ID diario contable (join con `Diarios_Contables.id`) |
+| `partner_id` | ID cliente/proveedor (join con `Contactos.id`) |
 | `date` | Fecha del movimiento |
+| `invoice_date` | Fecha de factura (si aplica) |
 | `debit` / `credit` | Debe / Haber |
-| `balance` | Saldo neto |
-| `move_id` | Referencia al asiento contable |
+| `balance` | Saldo neto (debit - credit) |
+| `analytic_distribution` | JSON con distribución analítica `{"ID_CC": porcentaje}` |
+| `parent_state` | Estado: `posted`, `draft`, `cancel` |
+| `name` | Descripción de la línea |
+| `ref` | Referencia del asiento |
+| `product_id` | Producto asociado (si aplica) |
+| `quantity` | Cantidad |
+| `price_unit` / `price_subtotal` | Precio unitario / subtotal |
+| `x_studio_n_de_oc` | N° de OC (custom Studio) |
+| `x_studio_documento` | Documento de referencia (custom Studio) |
+| `x_studio_estado_aprobacin` | Estado aprobación (custom Studio) |
 
-### Columnas clave — Ordenes_de_aplicación_staging_1778157654
+> **Importante:** La distribución analítica está en `analytic_distribution` como JSON string `{"12345": 100.0}` donde la key es el ID del centro de costo analítico. No existe columna `analytic_account_id` directa.
+
+### Columnas clave — Ordenes_de_aplicacion (stock.move.line)
 
 | Campo | Significado |
 |---|---|
-| `name` | Código de la orden |
-| `product_id` | Producto/insumo aplicado |
-| `picking_id` | Guía de despacho asociada |
-| `partner_id` | Cliente destinatario |
-| `date` | Fecha de la orden |
-| `product_qty` | Cantidad |
-| `state` | Estado de la orden |
+| `id` | ID del movimiento |
+| `move_id` | ID de la operación de stock padre |
+| `picking_id` | ID guía de despacho / transferencia |
+| `product_id` | ID producto/insumo (join con `Variantes_del_producto.id`) |
+| `product_uom_id` | Unidad de medida |
+| `quantity` / `quantity_product_uom` | Cantidad movida |
+| `location_id` | Ubicación origen (join con `Ubicaciones.id`) |
+| `location_dest_id` | Ubicación destino |
+| `date` | Fecha del movimiento |
+| `state` | Estado: `done`, `assigned`, `cancel` |
+| `reference` | Referencia (e.g. `D1/OUT/00019`) |
+| `product_category_name` | Categoría del producto (e.g. `AG / INSUMOS AGRO / AGROQUIMICOS`) |
+| `x_studio_empresa` | ID empresa asociada (custom Studio) |
+| `x_studio_distribucin_analtica` | Distribución analítica (custom Studio) |
+| `x_studio_guia_despacho` | Guía de despacho (custom Studio) |
+| `x_studio_dosis_x_hectarea` | Dosis por hectárea aplicada |
+| `x_studio_dosis_x_100l` | Dosis por 100L aplicada |
+| `x_studio_mojamiento_ha` | Mojamiento por hectárea |
+| `x_studio_tipo_de_aplicacin` | Tipo de aplicación agrícola |
+
+### Columnas clave — movimientos_de_stock (stock.move.line — despachos)
+
+Misma estructura que `Ordenes_de_aplicacion`. Se diferencia en que contiene **todos** los movimientos de stock (no solo aplicaciones agrícolas). Campos adicionales relevantes:
+
+| Campo | Significado |
+|---|---|
+| `lot_id` / `lot_name` | Lote del producto |
+| `picked` | TRUE = ya fue retirado físicamente |
+| `description_picking` | Descripción del despacho |
+
+### Columnas clave — Variantes_del_producto (product.product)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID de la variante |
+| `product_tmpl_id` | ID del template de producto |
+| `default_code` | Código interno / referencia (e.g. `4669`) |
+| `barcode` | Código de barras |
+| `active` | TRUE = producto activo |
+
+### Columnas clave — Ubicaciones (stock.location)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID de la ubicación |
+| `name` | Nombre corto (e.g. `Consumo`) |
+| `complete_name` | Ruta completa (e.g. `WH/Stock/Sector A`) |
+| `usage` | Tipo: `internal`, `customer`, `supplier`, `production`, `view` |
+| `scrap_location` | TRUE = es ubicación de merma |
+| `company_id` | Empresa propietaria |
+| `warehouse_id` | Bodega a la que pertenece |
 
 ### Contexto del negocio
 
@@ -323,11 +436,18 @@ El sistema combina dos fuentes principales para responder preguntas de negocio:
 
 | Pregunta de negocio | Join |
 |---|---|
-| Costo de mano de obra por CC vs lo contabilizado | `pagos."CC"` ↔ `Reporte_Analítico.analytic_account_id` |
+| Costo de mano de obra por CC vs lo contabilizado | `pagos."CC"` ↔ clave en JSON `Reporte_Analitico.analytic_distribution` |
 | Costo laboral mensual vs remuneraciones Odoo | `pagos."Mes"` ↔ `Remuneraciones.date_from` |
-| Qué se le facturó al cliente vs lo que costó producirlo | `Cuentas_por_cobrar.partner` ↔ `pagos."Empresa"` |
-| Órdenes de aplicación vs tratos ejecutados en campo | `Ordenes_de_aplicación.partner_id` ↔ `contratistas."Campo"` |
-| Rentabilidad por contratista | `pagos."Total a Pagar"` agrupado por `"Contratista"` vs facturas Odoo |
+| Detalle de reglas salariales por empleado | `Remuneraciones.id` ↔ `Nomina.slip_id` |
+| Qué se le facturó al cliente vs lo que costó producirlo | `Cuentas_por_cobrar.partner_id` ↔ `Contactos.id` |
+| Nombre de cuenta contable por ID | `Reporte_Analitico.account_id` ↔ `Cuentas_Contables.id` |
+| Nombre de proveedor/cliente en línea contable | `Reporte_Analitico.partner_id` ↔ `Contactos.id` |
+| Órdenes de aplicación vs producto usado | `Ordenes_de_aplicacion.product_id` ↔ `Variantes_del_producto.id` |
+| Bodega origen/destino de un despacho | `movimientos_de_stock.location_id` ↔ `Ubicaciones.id` |
+| Rentabilidad por contratista | `pagos."Total a Pagar"` agrupado por `"Contratista"` vs `Cuentas_por_cobrar` |
+| RUT de cliente en factura | `Cuentas_por_cobrar.partner_id` → `Contactos.vat` |
+
+> **Nota `analytic_distribution`:** Es un JSON string. Para extraer el CC: `JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID_CC')` en BigQuery, o parsear con `json.loads()` en Python.
 
 ### Campo → Empresa facturada
 
