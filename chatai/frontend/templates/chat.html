@@ -1025,7 +1025,10 @@ function renderMarkdown(text) {
 // ── DOM helpers ──────────────────────────────────────────────────────
 function formatTs(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
+  // Timestamps from DB arrive without timezone suffix (e.g. "2026-05-28 14:30:00")
+  // Append Z so the browser treats them as UTC and converts to local time correctly
+  const normalized = /[Z+\-]\d{2}:?\d{2}$/.test(ts) ? ts : ts.replace(' ', 'T') + 'Z';
+  const d = new Date(normalized);
   if (isNaN(d)) return '';
   return d.toLocaleString(undefined, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
