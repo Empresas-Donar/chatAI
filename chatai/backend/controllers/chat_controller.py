@@ -50,6 +50,17 @@ Cuando el usuario pida "descargar", "exportar", "generar Excel", "generar PDF" u
 → Usa esta frase exacta al final: "📥 El archivo se descargará automáticamente."
 → NUNCA digas que no puedes generar archivos — sí puedes, el sistema lo hace por ti.
 
+CAPACIDAD DE GRÁFICOS:
+Este sistema SÍ puede mostrar gráficos visuales directamente en el chat.
+Cuando el usuario pida un gráfico, o cuando los datos sean comparativos/temporales y un gráfico los muestre mejor:
+→ PRIMERO ejecuta la query para obtener los datos.
+→ LUEGO llama a render_chart con los datos resumidos (máximo 30 puntos).
+→ Elige el tipo más apropiado: line para series temporales (ej: valores por mes), bar para comparaciones entre categorías, pie/doughnut para proporciones o porcentajes.
+→ En labels pon las etiquetas del eje X (fechas, nombres, categorías) como array JSON.
+→ En values pon los valores numéricos correspondientes como array JSON.
+→ NUNCA digas que no puedes generar gráficos — sí puedes, el sistema los renderiza por ti.
+→ Si los datos tienen más de 30 filas, agrúpalos antes de graficar (ej: por mes, por top 10).
+
 TEMAS FUERA DE ALCANCE — responde SIEMPRE con este mensaje exacto:
 "Lo siento, solo puedo responder preguntas sobre los datos internos de Empresas Donar y KONTROLAG. Consulta sobre facturas, remuneraciones, tarjas, despacho, sensores u otros datos de la empresa."
 
@@ -924,6 +935,31 @@ _TOOLS = [
             required=["table_id"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="render_chart",
+        description=(
+            "Renderiza un gráfico visual inline en el chat a partir de datos ya consultados. "
+            "Llamar DESPUÉS de query_bigquery o query_postgres cuando el usuario pide un gráfico "
+            "o cuando los datos son claramente comparativos/temporales y un gráfico los muestra mejor. "
+            "Tipos disponibles: 'bar' (barras), 'line' (línea temporal), 'pie' (torta/porcentajes), 'doughnut' (dona). "
+            "Elegir el tipo más apropiado: line para series temporales, bar para comparaciones, pie/doughnut para proporciones. "
+            "labels: array de etiquetas del eje X o categorías. "
+            "values: array de valores numéricos correspondientes. "
+            "dataset_label: nombre del dataset (ej: 'Monto CLP', 'Temperatura °C'). "
+            "title: título descriptivo del gráfico."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "chart_type": types.Schema(type=types.Type.STRING, description="'bar' | 'line' | 'pie' | 'doughnut'"),
+                "title": types.Schema(type=types.Type.STRING, description="Título del gráfico"),
+                "labels": types.Schema(type=types.Type.STRING, description="Array JSON de etiquetas, ej: '[\"Ene\",\"Feb\"]'"),
+                "values": types.Schema(type=types.Type.STRING, description="Array JSON de valores numéricos, ej: '[1200,3400]'"),
+                "dataset_label": types.Schema(type=types.Type.STRING, description="Nombre del dataset"),
+            },
+            required=["chart_type", "title", "labels", "values", "dataset_label"],
+        ),
+    ),
 ]
 
 
@@ -1014,6 +1050,20 @@ def _call_tool(name: str, args: dict) -> str:
             return json.dumps(bq.list_tables(), ensure_ascii=False)
         if name == "describe_table":
             return json.dumps(bq.describe_table(args["table_id"]), ensure_ascii=False, default=str)
+        if name == "render_chart":
+            try:
+                labels = json.loads(args["labels"])
+                values = json.loads(args["values"])
+            except Exception:
+                return json.dumps({"error": "labels y values deben ser arrays JSON válidos"})
+            chart_payload = {
+                "chart_type": args.get("chart_type", "bar"),
+                "title": args.get("title", ""),
+                "dataset_label": args.get("dataset_label", ""),
+                "labels": [str(l) for l in labels],
+                "values": [float(v) if v is not None else 0 for v in values],
+            }
+            return json.dumps({"__chart__": chart_payload})
         return json.dumps({"error": f"tool desconocida: {name}"})
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -1022,34 +1072,33 @@ def _call_tool(name: str, args: dict) -> str:
 # ── History helpers ───────────────────────────────────────────────────────────
 
 def _ensure_traces_column() -> None:
-    """Add traces JSONB column to chat_history if it doesn't exist yet."""
+    """Add traces and charts JSONB columns to chat_history if they don't exist yet."""
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                ALTER TABLE public.chat_history
-                ADD COLUMN IF NOT EXISTS traces JSONB
-            """)
+            cur.execute("ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS traces JSONB")
+            cur.execute("ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS charts JSONB")
         conn.commit()
     except Exception as e:
-        _log.warning("Could not add traces column: %s", e)
+        _log.warning("Could not add columns to chat_history: %s", e)
         conn.rollback()
     finally:
         conn.close()
 
 
-def _save_messages(username: str, user_msg: str, model_reply: str, traces: list = None) -> None:
+def _save_messages(username: str, user_msg: str, model_reply: str, traces: list = None, charts: list = None) -> None:
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            traces_json = json.dumps(traces) if traces else None
             cur.execute(
                 "INSERT INTO public.chat_history (username, role, message) VALUES (%s, %s, %s)",
                 (username, "user", user_msg),
             )
             cur.execute(
-                "INSERT INTO public.chat_history (username, role, message, traces) VALUES (%s, %s, %s, %s)",
-                (username, "model", model_reply, traces_json),
+                "INSERT INTO public.chat_history (username, role, message, traces, charts) VALUES (%s, %s, %s, %s, %s)",
+                (username, "model", model_reply,
+                 json.dumps(traces) if traces else None,
+                 json.dumps(charts) if charts else None),
             )
         conn.commit()
     except Exception:
@@ -1063,7 +1112,7 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=__import__("psycopg2").extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT id, role, message, traces, created_at
+                SELECT id, role, message, traces, charts, created_at
                 FROM public.chat_history
                 WHERE username = %s
                 ORDER BY id DESC
@@ -1075,6 +1124,8 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
                 entry = {"role": r["role"], "message": r["message"], "created_at": str(r["created_at"])}
                 if r["traces"]:
                     entry["traces"] = r["traces"] if isinstance(r["traces"], list) else json.loads(r["traces"])
+                if r["charts"]:
+                    entry["charts"] = r["charts"] if isinstance(r["charts"], list) else json.loads(r["charts"])
                 result.append(entry)
             return result
     finally:
@@ -1331,6 +1382,7 @@ async def chat_ask(request: Request):
     # Agentic loop — Gemini may call multiple tools before answering
     collected_badges: list[str] = []
     collected_traces: list[dict] = []
+    collected_charts: list[dict] = []
     for _ in range(8):
         fn_calls = [p for p in response.candidates[0].content.parts if p.function_call]
         if not fn_calls:
@@ -1340,15 +1392,18 @@ async def chat_ask(request: Request):
         for part in fn_calls:
             fn = part.function_call
             result = _call_tool(fn.name, dict(fn.args))
-            # Collect source badges and traces generated by the backend
+            # Collect source badges, traces and charts
             try:
                 parsed = json.loads(result)
                 badge = parsed.get("__source_badge__", "")
                 trace = parsed.get("__trace__")
+                chart = parsed.get("__chart__")
                 if badge:
                     collected_badges.append(badge.strip())
                 if trace:
                     collected_traces.append(trace)
+                if chart:
+                    collected_charts.append(chart)
             except Exception:
                 pass
             tool_parts.append(
@@ -1363,10 +1418,19 @@ async def chat_ask(request: Request):
         response = chat.send_message(tool_parts)
 
     try:
-        final_text = response.candidates[0].content.parts[0].text
+        # Join all text parts (Gemini may split text + function_response across parts)
+        text_parts = [p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text]
+        final_text = "\n".join(text_parts).strip()
     except (IndexError, AttributeError) as e:
         _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
         raise HTTPException(status_code=502, detail="No se pudo obtener respuesta del modelo")
+
+    # Strip stray HTML tags Gemini sometimes emits (e.g. <br>) when it has nothing else to say
+    final_text = re.sub(r"^(\s*<br\s*/?>)+\s*", "", final_text, flags=re.IGNORECASE).strip()
+
+    # If there's a chart and the text is empty/trivial, use a default message
+    if collected_charts and not final_text:
+        final_text = "Aquí tienes el gráfico con los datos consultados."
 
     # Backend safety net: if Gemini omitted the source badge, append it
     if collected_badges:
@@ -1378,7 +1442,7 @@ async def chat_ask(request: Request):
     # and no tool was called (i.e. Gemini answered from memory)
     _has_numbers = bool(re.search(r'\b\d[\d\.]{2,}\b', final_text))
     _has_source  = "__source_badge__" in final_text or "📊 Fuente:" in final_text
-    _tool_was_called = len(collected_badges) > 0
+    _tool_was_called = len(collected_badges) > 0 or len(collected_charts) > 0
 
     if _has_numbers and not _has_source and not _tool_was_called:
         _log.warning(
@@ -1396,9 +1460,11 @@ async def chat_ask(request: Request):
         cache.put(user_question, embedding, final_text, collected_traces)
 
     # Persist to DB (fire and forget — don't block the response)
-    _save_messages(username, user_question, final_text, collected_traces if collected_traces else None)
+    _save_messages(username, user_question, final_text,
+                   collected_traces if collected_traces else None,
+                   collected_charts if collected_charts else None)
 
-    return JSONResponse({"reply": final_text, "traces": collected_traces, "from_cache": False})
+    return JSONResponse({"reply": final_text, "traces": collected_traces, "charts": collected_charts, "from_cache": False})
 
 
 @router.post("/download")
