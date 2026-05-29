@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -9,7 +10,7 @@ from typing import Optional
 _log = logging.getLogger("chat_controller")
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from google import genai
@@ -40,6 +41,14 @@ _SYSTEM = """══════════════════════�
 ═══════════════════════════════════════════════════════
 Eres un asistente EXCLUSIVO de datos internos de Empresas Donar y KONTROLAG SPA.
 Tu único propósito es consultar y analizar datos de las bases de datos de la empresa.
+
+CAPACIDAD DE EXPORTACIÓN:
+Este sistema SÍ puede generar archivos Excel y PDF con los datos de las consultas.
+Cuando el usuario pida "descargar", "exportar", "generar Excel", "generar PDF" u otra expresión similar:
+→ PRIMERO ejecuta la query para obtener los datos (igual que siempre).
+→ LUEGO responde indicando que la descarga se generará automáticamente.
+→ Usa esta frase exacta al final: "📥 El archivo se descargará automáticamente."
+→ NUNCA digas que no puedes generar archivos — sí puedes, el sistema lo hace por ti.
 
 TEMAS FUERA DE ALCANCE — responde SIEMPRE con este mensaje exacto:
 "Lo siento, solo puedo responder preguntas sobre los datos internos de Empresas Donar y KONTROLAG. Consulta sobre facturas, remuneraciones, tarjas, despacho, sensores u otros datos de la empresa."
@@ -1230,3 +1239,133 @@ async def chat_ask(request: Request):
     _save_messages(username, user_question, final_text)
 
     return JSONResponse({"reply": final_text, "traces": collected_traces, "from_cache": False})
+
+
+@router.post("/download")
+async def chat_download(request: Request):
+    from fastapi import HTTPException
+    body = await request.json()
+    fmt = body.get("format", "xlsx").lower()
+    sql = body.get("sql", "").strip()
+    system = body.get("system", "bigquery")
+
+    if not sql or _WRITE_RE.match(sql):
+        raise HTTPException(status_code=400, detail="SQL inválida")
+
+    try:
+        if system == "bigquery" or "ace-scarab" in sql:
+            rows = bq.run_query(sql, 5000)
+        else:
+            rows = pg.run_pg_query(sql, 5000)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="La consulta no devolvió datos")
+
+    if fmt == "pdf":
+        return _build_pdf(rows, sql)
+    return _build_xlsx(rows, sql)
+
+
+def _build_xlsx(rows: list[dict], sql: str) -> StreamingResponse:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Datos"
+
+    headers = list(rows[0].keys())
+    header_fill = PatternFill("solid", fgColor="2D6A4F")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx, row in enumerate(rows, 2):
+        for col_idx, header in enumerate(headers, 1):
+            val = row.get(header)
+            ws.cell(row=row_idx, column=col_idx, value=val)
+            if row_idx % 2 == 0:
+                ws.cell(row=row_idx, column=col_idx).fill = PatternFill("solid", fgColor="F0F4F0")
+
+    for col_idx in range(1, len(headers) + 1):
+        col_letter = get_column_letter(col_idx)
+        max_len = max(
+            len(str(headers[col_idx - 1])),
+            max((len(str(row.get(headers[col_idx - 1]) or "")) for row in rows[:50]), default=0)
+        )
+        ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=datos_donar.xlsx"},
+    )
+
+
+def _build_pdf(rows: list[dict], sql: str) -> StreamingResponse:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+
+    headers = list(rows[0].keys())
+    page_size = landscape(A4) if len(headers) > 6 else A4
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=page_size,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Reporte de Datos — Empresas Donar", styles["Title"]))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(f"Total registros: {len(rows)}", styles["Normal"]))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Build table data
+    col_widths = None
+    page_width = page_size[0] - 3*cm
+    col_w = page_width / len(headers)
+    col_widths = [col_w] * len(headers)
+
+    table_data = [headers]
+    for row in rows:
+        table_data.append([str(row.get(h) or "") for h in headers])
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2D6A4F")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F0F4F0")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t)
+
+    doc.build(story)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=datos_donar.pdf"},
+    )
