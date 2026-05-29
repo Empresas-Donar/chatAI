@@ -52,14 +52,16 @@ Cuando el usuario pida "descargar", "exportar", "generar Excel", "generar PDF" u
 
 CAPACIDAD DE GRÁFICOS:
 Este sistema SÍ puede mostrar gráficos visuales directamente en el chat.
-Cuando el usuario pida un gráfico, o cuando los datos sean comparativos/temporales y un gráfico los muestre mejor:
+Cuando el usuario pida un gráfico (palabras clave: "gráfico", "grafico", "chart", "visualiza", "muestra en gráfico", "grafica"):
+→ OBLIGATORIO: llama SIEMPRE a render_chart después de obtener los datos. Sin excepción.
 → PRIMERO ejecuta la query para obtener los datos.
 → LUEGO llama a render_chart con los datos resumidos (máximo 30 puntos).
-→ Elige el tipo más apropiado: line para series temporales (ej: valores por mes), bar para comparaciones entre categorías, pie/doughnut para proporciones o porcentajes.
-→ En labels pon las etiquetas del eje X (fechas, nombres, categorías) como array JSON.
-→ En values pon los valores numéricos correspondientes como array JSON.
+→ Elige el tipo más apropiado: line para series temporales (ej: valores por mes/día), bar para comparaciones entre categorías, pie/doughnut para proporciones o porcentajes.
+→ En labels pon las etiquetas del eje X (fechas, nombres, categorías) como array JSON: "[\"label1\",\"label2\"]"
+→ En values pon los valores numéricos correspondientes como array JSON: "[100, 200, 300]"
 → NUNCA digas que no puedes generar gráficos — sí puedes, el sistema los renderiza por ti.
 → Si los datos tienen más de 30 filas, agrúpalos antes de graficar (ej: por mes, por top 10).
+→ Si el usuario pide gráfico de temperatura/clima, usar temp_avg como values y las fechas como labels.
 
 TEMAS FUERA DE ALCANCE — responde SIEMPRE con este mensaje exacto:
 "Lo siento, solo puedo responder preguntas sobre los datos internos de Empresas Donar y KONTROLAG. Consulta sobre facturas, remuneraciones, tarjas, despacho, sensores u otros datos de la empresa."
@@ -1429,8 +1431,21 @@ async def chat_ask(request: Request):
         _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
         raise HTTPException(status_code=502, detail="No se pudo obtener respuesta del modelo")
 
-    # Strip stray HTML tags Gemini sometimes emits (e.g. <br>) when it has nothing else to say
+    # Strip stray HTML tags Gemini sometimes emits (e.g. <br>)
     final_text = re.sub(r"^(\s*<br\s*/?>)+\s*", "", final_text, flags=re.IGNORECASE).strip()
+
+    # Extract __chart__ payloads Gemini sometimes embeds as raw JSON in the text
+    # instead of calling the render_chart tool properly
+    inline_chart_re = re.compile(r'\{["\s]*__chart__["\s]*:.*?\}\s*\}', re.DOTALL)
+    for match in inline_chart_re.finditer(final_text):
+        try:
+            payload = json.loads(match.group())
+            chart = payload.get("__chart__")
+            if chart and isinstance(chart, dict):
+                collected_charts.append(chart)
+        except Exception:
+            pass
+    final_text = inline_chart_re.sub("", final_text).strip()
 
     # If there's a chart and the text is empty/trivial, use a default message
     if collected_charts and not final_text:
