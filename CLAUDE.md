@@ -182,23 +182,26 @@ El cliente **KONTROLAG SPA** (RUT 77235191-7) tiene una instancia de Odoo activa
 **Service Account:** `odoo-bigquery@ace-scarab-484515-v1.iam.gserviceaccount.com`
 **Clave JSON local:** `/Users/bedomax/startups/donar/bigquery-odoo-key.json`
 
-### Tablas disponibles (verificadas 21/05/2026)
+### Tablas disponibles (verificadas 28/05/2026)
 
 | Tabla BigQuery | Modelo Odoo | Filas | Contenido |
 |---|---|---|---|
 | `Contactos` | res.partner | 5.541 | Clientes, proveedores y empleados — directorio completo |
 | `Cuentas_Contables` | account.account | 3.767 | Plan de cuentas contable |
-| `Cuentas_por_cobrar` | account.move | 106 | Facturas emitidas a clientes |
+| `Cuentas_por_cobrar` | account.move | 111 | Facturas emitidas a clientes |
+| `Despachos` | stock.picking | 6.469 | Guías de despacho con DTE SII tipo 52 — cabeceras de transferencias de stock salientes (Agricola Donar Uno) |
 | `Diarios_Contables` | account.journal | 203 | Diarios contables (ventas, compras, banco, etc.) |
+| `Empleados` | hr.employee | 118 | Ficha completa de empleados: nombre, RUT (`formated_vat`), cargo, depto, contrato, datos privados |
+| `Lineas_del_Pedido_de_Venta` | sale.order.line | 3.297 | Líneas de pedido de venta: producto, cantidad, precio, estado facturación, distribución analítica |
+| `Movimientos_de_Stock` | stock.move | 19.777 | Movimientos de stock a nivel operación (incluye manufactura, despachos, ajustes) |
 | `Nomina` | hr.payslip.line | 46.068 | **Líneas detalladas** de liquidaciones (reglas salariales por empleado) |
-| `Ordenes_de_aplicacion` | stock.move.line | 1.479 | Órdenes de aplicación agrícola (movimientos de insumos) |
+| `Ordenes_de_aplicacion` | stock.move.line | 1.482 | Órdenes de aplicación agrícola (movimientos de insumos) |
+| `Pedidos_de_Venta` | sale.order | 951 | Pedidos de venta completos (S00XXX): cliente, monto, estado, fecha |
+| `Producto` | product.template | 6.077 | Templates de producto: nombre, tipo, ingredientes activos, concentración, marca (`bl_marca`) |
 | `Remuneraciones` | hr.payslip | 1.214 | Cabeceras de liquidaciones de sueldo |
-| `Reporte_Analitico` | account.move.line | 131.707 | Líneas contables con distribución analítica (centro de costo) |
+| `Reporte_Analitico` | account.move.line | 132.924 | Líneas contables con distribución analítica (centro de costo) |
 | `Ubicaciones` | stock.location | 129 | Ubicaciones de bodega/almacén |
-| `Variantes_del_producto` | product.product | 6.074 | Variantes de productos/insumos |
-| `movimientos_de_stock` | stock.move.line | 17.849 | Movimientos de stock completados (despachos, recepciones) |
-
-> **Nota:** Los nombres de tabla ya no tienen sufijo `_staging_*`. Usar nombres exactos arriba.
+| `Variantes_del_producto` | product.product | 6.074 | Variantes de productos/insumos (join con `Producto` para nombre e ingredientes) |
 
 ### gcloud
 
@@ -351,15 +354,143 @@ df = client.query("""
 | `x_studio_mojamiento_ha` | Mojamiento por hectárea |
 | `x_studio_tipo_de_aplicacin` | Tipo de aplicación agrícola |
 
-### Columnas clave — movimientos_de_stock (stock.move.line — despachos)
+### Columnas clave — Despachos (stock.picking)
 
-Misma estructura que `Ordenes_de_aplicacion`. Se diferencia en que contiene **todos** los movimientos de stock (no solo aplicaciones agrícolas). Campos adicionales relevantes:
+Cabeceras de guías de despacho emitidas por Agricola Donar Uno SPA. Cada fila es una transferencia completa (no la línea de producto).
 
 | Campo | Significado |
 |---|---|
-| `lot_id` / `lot_name` | Lote del producto |
-| `picked` | TRUE = ya fue retirado físicamente |
-| `description_picking` | Descripción del despacho |
+| `id` | ID del despacho |
+| `name` | Referencia interna (e.g. `D1/OUT/00421`) |
+| `state` | Estado: `done`, `assigned`, `cancel` |
+| `partner_id` | ID cliente receptor (join con `Contactos.id`) |
+| `sale_id` | ID pedido de venta origen (join con `Pedidos_de_Venta.id`) |
+| `date_done` | Fecha de completado |
+| `date` / `scheduled_date` | Fecha programada |
+| `l10n_latam_document_number` | N° guía DTE (e.g. `000421`) |
+| `l10n_cl_dte_status` | Estado SII: `accepted`, `rejected` |
+| `l10n_cl_delivery_guide_reason` | Razón de traslado (código SII) |
+| `l10n_cl_sii_send_ident` | RUT receptor |
+| `origin` | Referencia de origen (e.g. `S00485` = pedido de venta) |
+| `location_id` / `location_dest_id` | Ubicación origen/destino (join con `Ubicaciones.id`) |
+| `x_studio_chofer` | ID chofer (join con `Contactos.id`) |
+| `note` | Notas (incluye datos del chofer y patente en texto libre) |
+
+### Columnas clave — Empleados (hr.employee)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID del empleado en Odoo |
+| `name` | Nombre completo |
+| `firstname` / `last_name` / `middle_name` / `mothers_name` | Nombre desglosado |
+| `formated_vat` | RUT formateado (campo Chile) |
+| `job_title` | Cargo |
+| `department_id` | ID departamento |
+| `company_id` | ID empresa (1=Donar, 2=Donar Uno, 7=KONTROLAG) |
+| `work_email` | Email laboral |
+| `mobile_phone` | Teléfono móvil |
+| `contract_id` | ID contrato activo |
+| `first_contract_date` | Fecha primer contrato (antigüedad) |
+| `departure_date` | Fecha de egreso (si aplica) |
+| `gender` | Género: `male`, `female`, `other` |
+| `marital` | Estado civil |
+| `children` | Número de cargas familiares |
+| `active` | TRUE = empleado activo |
+| `employee_type` | Tipo: `employee`, `student`, etc. |
+| `bl_tramo_asignacion_familiar` | Tramo asignación familiar (Chile) |
+| `bl_pago_efectivo` | TRUE = se paga en efectivo |
+| `x_studio_operacin` | ID operación asociada (custom Studio) |
+
+### Columnas clave — Pedidos_de_Venta (sale.order)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID del pedido |
+| `name` | Número de pedido (e.g. `S00485`) |
+| `partner_id` | ID cliente (join con `Contactos.id`) |
+| `state` | Estado: `sale` (confirmado), `draft`, `cancel`, `done` |
+| `date_order` | Fecha de confirmación |
+| `amount_untaxed` / `amount_tax` / `amount_total` | Montos neto/IVA/total |
+| `amount_to_invoice` | Monto pendiente de facturar |
+| `invoice_status` | Estado facturación: `invoiced`, `to invoice`, `nothing` |
+| `delivery_status` | Estado entrega: `pending`, `partial`, `full` |
+| `company_id` | Empresa emisora |
+| `analytic_account_id` | Centro de costo analítico del pedido |
+| `warehouse_id` | Bodega de despacho |
+| `x_studio_superficiem` | Superficie en metros (custom, instalaciones) |
+| `x_studio_tiempo_entrega` / `x_studio_tiempo_instalacin` | Tiempos estimados (instalaciones) |
+
+### Columnas clave — Lineas_del_Pedido_de_Venta (sale.order.line)
+
+| Campo | Significado |
+|---|---|
+| `id` | ID de la línea |
+| `order_id` | ID pedido de venta padre (join con `Pedidos_de_Venta.id`) |
+| `order_partner_id` | ID cliente del pedido |
+| `product_id` | ID variante de producto (join con `Variantes_del_producto.id`) |
+| `name` | Descripción de la línea |
+| `product_uom_qty` | Cantidad pedida |
+| `qty_delivered` | Cantidad entregada |
+| `qty_invoiced` | Cantidad facturada |
+| `qty_to_invoice` | Cantidad pendiente de facturar |
+| `price_unit` | Precio unitario |
+| `price_subtotal` | Subtotal neto |
+| `price_total` | Total con impuesto |
+| `price_tax` | Monto impuesto |
+| `invoice_status` | Estado: `invoiced`, `to invoice`, `nothing` |
+| `state` | Estado del pedido padre |
+| `analytic_distribution` | JSON distribución analítica (mismo formato que `Reporte_Analitico`) |
+| `is_service` | TRUE = es un servicio |
+| `display_type` | `line_note` = línea de texto (sin producto ni precio) |
+| `company_id` | Empresa |
+
+### Columnas clave — Producto (product.template)
+
+Tabla de templates de producto. Más completa que `Variantes_del_producto` para datos de agroquímicos.
+
+| Campo | Significado |
+|---|---|
+| `id` | ID del template (diferente al ID de `Variantes_del_producto`) |
+| `name` | Nombre en JSON bilingüe `{"es_CL": "...", "en_US": "..."}` |
+| `default_code` | Código interno |
+| `type` | Tipo: `product` (almacenable), `consu` (consumible), `service` |
+| `active` | TRUE = activo |
+| `list_price` | Precio de venta |
+| `categ_id` | Categoría del producto |
+| `uom_id` / `uom_po_id` | Unidad de medida venta / compra |
+| `bl_marca` | Marca comercial |
+| `ingrediente_activo_1/2/3` | Ingredientes activos (agroquímicos) |
+| `concentracion_ia1/2/3` | Concentración de cada ingrediente activo |
+| `x_studio_concentracin` | Concentración total (custom Studio) |
+| `x_studio_utilidad` | Utilidad/uso del producto |
+| `sale_ok` / `purchase_ok` | Se puede vender / comprar |
+
+### Columnas clave — Movimientos_de_Stock (stock.move)
+
+Nivel operación (stock.move), distinto de `Ordenes_de_aplicacion` que es stock.move.line. Un stock.move puede tener múltiples líneas.
+
+| Campo | Significado |
+|---|---|
+| `id` | ID del movimiento |
+| `name` | Nombre/referencia (e.g. `D1/MO/00112`) |
+| `reference` | Referencia del picking asociado |
+| `product_id` | ID producto (join con `Variantes_del_producto.id`) |
+| `product_uom_qty` / `product_qty` / `quantity` | Cantidades demandada/real/ejecutada |
+| `location_id` / `location_dest_id` | Ubicaciones origen/destino |
+| `picking_id` | ID del despacho/picking padre (join con `Despachos.id`) |
+| `state` | Estado: `done`, `assigned`, `cancel` |
+| `date` | Fecha del movimiento |
+| `origin` | Referencia origen (pedido, orden manufactura) |
+| `sale_line_id` | Línea de pedido de venta origen |
+| `purchase_line_id` | Línea de pedido de compra origen |
+| `raw_material_production_id` | ID orden de manufactura (si aplica) |
+| `is_done` | TRUE = completado |
+| `picked` | TRUE = retirado físicamente |
+| `scrapped` | TRUE = merma |
+| `price_unit` | Precio unitario del movimiento |
+| `x_studio_dosis_x_hectarea` / `x_studio_dosis_x_100l` | Dosis agronómicas (custom) |
+| `x_studio_stock_isla` / `x_studio_stock_zuig` | Stock por predio (custom) |
+| `x_stock_bodega_lanas` | Stock bodega Lanas (custom) |
 
 ### Columnas clave — Variantes_del_producto (product.product)
 
@@ -443,9 +574,15 @@ El sistema combina dos fuentes principales para responder preguntas de negocio:
 | Nombre de cuenta contable por ID | `Reporte_Analitico.account_id` ↔ `Cuentas_Contables.id` |
 | Nombre de proveedor/cliente en línea contable | `Reporte_Analitico.partner_id` ↔ `Contactos.id` |
 | Órdenes de aplicación vs producto usado | `Ordenes_de_aplicacion.product_id` ↔ `Variantes_del_producto.id` |
-| Bodega origen/destino de un despacho | `movimientos_de_stock.location_id` ↔ `Ubicaciones.id` |
+| Nombre e ingredientes de un producto | `Variantes_del_producto.product_tmpl_id` ↔ `Producto.id` |
+| Bodega origen/destino de un despacho | `Movimientos_de_Stock.location_id` ↔ `Ubicaciones.id` |
+| Despacho → pedido de venta que lo originó | `Despachos.sale_id` ↔ `Pedidos_de_Venta.id` |
+| Líneas de lo que se vendió por pedido | `Pedidos_de_Venta.id` ↔ `Lineas_del_Pedido_de_Venta.order_id` |
+| Movimientos de stock de un despacho | `Despachos.id` ↔ `Movimientos_de_Stock.picking_id` |
+| Empleado → liquidaciones de sueldo | `Empleados.id` ↔ `Remuneraciones.employee_id` |
 | Rentabilidad por contratista | `pagos."Total a Pagar"` agrupado por `"Contratista"` vs `Cuentas_por_cobrar` |
 | RUT de cliente en factura | `Cuentas_por_cobrar.partner_id` → `Contactos.vat` |
+| RUT de empleado | `Empleados.formated_vat` (directo) |
 
 > **Nota `analytic_distribution`:** Es un JSON string. Para extraer el CC: `JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID_CC')` en BigQuery, o parsear con `json.loads()` en Python.
 

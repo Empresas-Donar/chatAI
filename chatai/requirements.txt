@@ -13,3 +13,4 @@ google-genai>=1.0.0
 google-cloud-bigquery>=3.0.0
 google-auth>=2.0.0
 db-dtypes>=1.0.0
+pgvector>=0.3.0

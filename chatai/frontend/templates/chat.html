@@ -35,19 +35,43 @@
         </li>
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--green"></span>
+          Pedidos de Venta
+        </li>
+        <li class="chat-source-item">
+          <span class="chat-source-dot chat-source-dot--green"></span>
           Remuneraciones
         </li>
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--green"></span>
+          Empleados
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
           Nómina (detalle)
         </li>
-        <li class="chat-source-item">
+        <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--green"></span>
           Reporte Analítico
         </li>
         <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--green"></span>
+          Despachos (DTE)
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Líneas de Pedido
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Movimientos de Stock
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
           Órdenes de aplicación
+        </li>
+        <li class="chat-source-item chat-source-extra">
+          <span class="chat-source-dot chat-source-dot--green"></span>
+          Productos / Ingredientes
         </li>
         <li class="chat-source-item chat-source-extra">
           <span class="chat-source-dot chat-source-dot--green"></span>
@@ -57,20 +81,8 @@
           <span class="chat-source-dot chat-source-dot--green"></span>
           Cuentas Contables
         </li>
-        <li class="chat-source-item chat-source-extra">
-          <span class="chat-source-dot chat-source-dot--green"></span>
-          Diarios Contables
-        </li>
-        <li class="chat-source-item chat-source-extra">
-          <span class="chat-source-dot chat-source-dot--green"></span>
-          Productos / Stock
-        </li>
-        <li class="chat-source-item chat-source-extra">
-          <span class="chat-source-dot chat-source-dot--green"></span>
-          Movimientos de Stock
-        </li>
         <li class="chat-source-item chat-source-more-btn" id="bq-more">
-          <button class="chat-source-show-more" data-list="bq-list">+ 6 más</button>
+          <button class="chat-source-show-more" data-list="bq-list">+ 9 más</button>
         </li>
       </ul>
     </div>
@@ -114,11 +126,13 @@
       </ul>
     </div>
     <div class="chat-sidebar-section">
-      <p class="chat-sidebar-label">Ejemplos</p>
-      <button class="chat-example" data-q="¿Cuántas horas frío llevamos acumuladas esta temporada por campo y huerto?">Horas frío acumuladas por huerto</button>
-      <button class="chat-example" data-q="¿Cuántas porciones de frío (Dynamic Model) llevamos acumuladas por huerto?">Porciones frío Dynamic Model</button>
-      <button class="chat-example" data-q="¿Qué clientes son los más morosos en abril 2026?">Clientes más morosos abril 2026</button>
-      <button class="chat-example" data-q="¿Qué órdenes de aplicación se realizaron en el centro de costo 424 (código de referencia Cerezo santina 2023)?">Órdenes CC 424 – Cerezo santina 2023</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+        <p class="chat-sidebar-label" style="margin:0">Ejemplos</p>
+        <button id="shuffleExamples" title="Mostrar otros ejemplos" style="background:none;border:none;cursor:pointer;padding:2px 4px;color:var(--text-light);line-height:1;" aria-label="Nuevos ejemplos">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+        </button>
+      </div>
+      <div id="examplesContainer"></div>
     </div>
   </div>
 
@@ -132,8 +146,8 @@
       <div class="chat-row chat-row--assistant">
         <div class="chat-avatar chat-avatar--ai">IA</div>
         <div class="chat-bubble chat-bubble--assistant">
-          Hola, soy tu asistente de datos de Empresas Donar. Consulto BigQuery en tiempo real.<br><br>
-          Pregunta sobre facturas, remuneraciones, órdenes de aplicación o el reporte analítico.
+          Hola, soy tu asistente de datos de Empresas Donar. Consulto BigQuery y PostgreSQL en tiempo real.<br><br>
+          Puedo responder sobre <strong>facturas, pedidos de venta, despachos, remuneraciones, empleados, órdenes de aplicación, reportes analíticos, tarjas, sensores</strong> y más. Usa los ejemplos del panel izquierdo o escribe tu pregunta.
         </div>
       </div>
     </div>
@@ -544,6 +558,18 @@
   border-radius: 20px;
   font-size: 11px;
   color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.chat-cache-badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 9px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+  border-radius: 20px;
+  font-size: 11px;
+  color: #854d0e;
   line-height: 1.4;
 }
 
@@ -1030,7 +1056,7 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-function addRow(role, text, timestamp, traces) {
+function addRow(role, text, timestamp, traces, fromCache) {
   const row = document.createElement('div');
   row.className = `chat-row chat-row--${role}`;
 
@@ -1055,6 +1081,15 @@ function addRow(role, text, timestamp, traces) {
   }
   wrap.appendChild(bubble);
 
+  // Cache badge
+  if (role === 'assistant' && fromCache) {
+    const badge = document.createElement('div');
+    badge.className = 'chat-cache-badge';
+    badge.title = 'Respuesta en caché — misma pregunta consultada recientemente';
+    badge.innerHTML = '⚡ Respuesta instantánea (caché)';
+    wrap.appendChild(badge);
+  }
+
   // Trace panel — only for assistant messages with data provenance
   if (role === 'assistant' && traces && traces.length > 0) {
     const tracePanel = buildTracePanel(traces);
@@ -1074,6 +1109,14 @@ function addRow(role, text, timestamp, traces) {
   return { row, bubble };
 }
 
+const _THINKING_STEPS = [
+  { delay:    0, text: '🧠 Analizando tu pregunta…' },
+  { delay: 2500, text: '🔍 Generando consulta SQL…' },
+  { delay: 5500, text: '📡 Consultando base de datos…' },
+  { delay: 9000, text: '⚙️ Procesando resultados…' },
+  { delay:13000, text: '✍️ Redactando respuesta… (esto puede tomar unos segundos más)' },
+];
+
 function addThinking() {
   const row = document.createElement('div');
   row.className = 'chat-row chat-row--thinking';
@@ -1081,11 +1124,21 @@ function addThinking() {
   wrap.className = 'chat-bubble-wrap';
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble chat-bubble--thinking';
-  bubble.textContent = 'Consultando datacenter de Donar…';
+  bubble.textContent = _THINKING_STEPS[0].text;
   wrap.appendChild(bubble);
   row.appendChild(wrap);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const timers = [];
+  for (let i = 1; i < _THINKING_STEPS.length; i++) {
+    const { delay, text } = _THINKING_STEPS[i];
+    timers.push(setTimeout(() => {
+      if (row.isConnected) bubble.textContent = text;
+    }, delay));
+  }
+  row._clearTimers = () => timers.forEach(clearTimeout);
+
   return row;
 }
 
@@ -1135,14 +1188,90 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
-// example buttons
-document.querySelectorAll('.chat-example').forEach(btn => {
-  btn.addEventListener('click', () => {
-    input.value = btn.dataset.q;
-    input.dispatchEvent(new Event('input'));
-    form.requestSubmit();
+// ── Examples pool & rotation ─────────────────────────────────────────
+const ALL_EXAMPLES = [
+  // Facturas / Cobros
+  { label: 'Clientes más morosos',           q: '¿Qué clientes tienen facturas vencidas y cuánto deben en total?' },
+  { label: 'Facturas impagas +90 días',      q: '¿Qué facturas llevan más de 90 días sin pagar?' },
+  { label: 'Facturas emitidas este mes',     q: '¿Qué facturas se emitieron este mes y por qué monto total?' },
+  // Pedidos de Venta
+  { label: 'Ventas por cliente 2026',        q: '¿Cuánto ha comprado cada cliente en pedidos de venta en 2026?' },
+  { label: 'Pedidos sin facturar',           q: '¿Qué pedidos de venta tienen monto pendiente de facturar?' },
+  { label: 'Top clientes por volumen',       q: '¿Cuáles son los 10 clientes con mayor monto de pedidos de venta?' },
+  { label: 'Ventas mensuales 2026',          q: '¿Cuál fue el monto de pedidos de venta confirmados por mes en 2026?' },
+  // Despachos
+  { label: 'Despachos del mes',              q: '¿Cuántas guías de despacho se emitieron este mes y a qué clientes?' },
+  { label: 'Despachos de un cliente',        q: '¿Qué guías de despacho se emitieron a Agricola Donar Dos?' },
+  { label: 'Despachos sin pedido asociado',  q: '¿Qué despachos completados no tienen pedido de venta de origen?' },
+  // Remuneraciones / Empleados
+  { label: 'Costo laboral mensual',          q: '¿Cuál fue el costo total de remuneraciones por mes en 2025?' },
+  { label: 'Empleados activos KONTROLAG',    q: '¿Cuántos empleados activos tiene KONTROLAG y cuáles son sus nombres?' },
+  { label: 'Historial liquidaciones',        q: '¿Cuál es el historial de liquidaciones del último trimestre por empleado?' },
+  { label: 'Bruto vs líquido por mes',       q: '¿Cuál es la diferencia entre sueldo bruto y líquido total por mes en 2025?' },
+  // Reporte Analítico / Costos por CC
+  { label: 'Costos CC Santina 2023',         q: '¿Cuáles son los costos del centro de costo Cerezos Santina 2023 (id_cc 424) en 2026?' },
+  { label: 'Costos CC Lapins 2014',          q: '¿Cuáles son los costos acumulados del CC Lapins 2014 (id_cc 881) este año?' },
+  // Órdenes de aplicación
+  { label: 'Órdenes CC 424 – Santina 2023', q: '¿Qué órdenes de aplicación se realizaron en el centro de costo 424 (Cerezo Santina 2023)?' },
+  { label: 'Aplicaciones último mes',        q: '¿Qué órdenes de aplicación se completaron el mes pasado?' },
+  { label: 'Volumen de agua por predio',     q: '¿Cuántos litros de agua se usaron en aplicaciones por predio en lo que va del año?' },
+  // Sensores / Clima
+  { label: 'Horas frío acumuladas',          q: '¿Cuántas horas frío llevamos acumuladas esta temporada por campo y huerto?' },
+  { label: 'Porciones frío Dynamic Model',   q: '¿Cuántas porciones de frío (Dynamic Model) llevamos acumuladas por huerto?' },
+  { label: 'Temperatura de ayer por campo',  q: '¿Cuál fue la temperatura promedio, mínima y máxima de ayer en Isla de Maipo y Zuñiga?' },
+  { label: 'Lluvia acumulada del mes',       q: '¿Cuánto ha llovido este mes en cada campo?' },
+  { label: 'Últimas heladas registradas',    q: '¿Cuándo ocurrieron las últimas heladas (temperatura bajo 0°C) en cada campo?' },
+  // Tarjas / Contratistas
+  { label: 'Costo total tarjas este mes',    q: '¿Cuánto se pagó en tarjas este mes por campo y contratista?' },
+  { label: 'Jornadas por labor',             q: '¿Cuántas jornadas se trabajaron por tipo de labor en los últimos 30 días?' },
+  { label: 'Trabajadores por contratista',   q: '¿Cuántos trabajadores tiene registrados cada contratista?' },
+];
+
+const EXAMPLES_SHOWN = 4;
+let _shownIndices = [];
+
+function pickExamples() {
+  // Fisher-Yates shuffle, avoid repeating previous selection
+  const pool = ALL_EXAMPLES.map((_, i) => i).filter(i => !_shownIndices.includes(i));
+  const source = pool.length >= EXAMPLES_SHOWN ? pool : ALL_EXAMPLES.map((_, i) => i);
+  const shuffled = [...source].sort(() => Math.random() - 0.5);
+  _shownIndices = shuffled.slice(0, EXAMPLES_SHOWN);
+  return _shownIndices.map(i => ALL_EXAMPLES[i]);
+}
+
+function renderExamples() {
+  const container = document.getElementById('examplesContainer');
+  if (!container) return;
+  const examples = pickExamples();
+  container.innerHTML = '';
+  examples.forEach(ex => {
+    const btn = document.createElement('button');
+    btn.className = 'chat-example';
+    btn.dataset.q = ex.q;
+    btn.textContent = ex.label;
+    btn.addEventListener('click', () => {
+      input.value = btn.dataset.q;
+      input.dispatchEvent(new Event('input'));
+      form.requestSubmit();
+    });
+    container.appendChild(btn);
   });
-});
+}
+
+renderExamples();
+
+const shuffleBtn = document.getElementById('shuffleExamples');
+if (shuffleBtn) {
+  shuffleBtn.addEventListener('click', () => {
+    const container = document.getElementById('examplesContainer');
+    container.style.opacity = '0';
+    container.style.transition = 'opacity 0.15s';
+    setTimeout(() => {
+      renderExamples();
+      container.style.opacity = '1';
+    }, 150);
+  });
+}
 
 // ── Submit ────────────────────────────────────────────────────────────
 form.addEventListener('submit', async (e) => {
@@ -1167,13 +1296,15 @@ form.addEventListener('submit', async (e) => {
       body: JSON.stringify({ messages: history }),
     });
     const data = await res.json();
+    if (thinking._clearTimers) thinking._clearTimers();
     thinking.remove();
 
     const reply = data.reply || 'Sin respuesta.';
     const traces = data.traces || [];
-    addRow('assistant', reply, new Date().toISOString(), traces);
+    addRow('assistant', reply, new Date().toISOString(), traces, data.from_cache);
     history.push({ role: 'model', parts: reply });
   } catch {
+    if (thinking._clearTimers) thinking._clearTimers();
     thinking.remove();
     addRow('assistant', 'Error al consultar. Intenta de nuevo.');
   } finally {

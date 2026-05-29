@@ -4,6 +4,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 _log = logging.getLogger("chat_controller")
 
@@ -18,11 +19,14 @@ from google.oauth2 import service_account
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 import mcp_server.bigquery_client as bq
 import pg_client as pg
+import chat_cache as cache
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 _templates: Jinja2Templates = None
 _client: genai.Client = None
+_embed_client: genai.Client = None   # same client, kept as alias for clarity
 
+EMBED_MODEL = "text-embedding-004"
 GCP_PROJECT  = "ace-scarab-484515-v1"
 GCP_LOCATION = "us-central1"
 MODEL        = "gemini-2.5-pro"
@@ -372,35 +376,165 @@ Cada fila es una línea de una liquidación (haber, descuento o totalizador).
 
 ### Variantes_del_producto — Variantes de producto (product.product) — 6.074 registros
 - id: ID de la variante
-- product_tmpl_id: ID del producto plantilla
+- product_tmpl_id: ID del template (vincula con Producto.id para obtener nombre e ingredientes)
 - default_code: referencia interna / código de producto
 - barcode: código de barras
 - active: TRUE si está activo
-- weight, volume: peso y volumen
 
-### movimientos_de_stock — Movimientos de inventario (stock.move.line) — 17.849 registros
-Cada fila es un movimiento real de productos entre ubicaciones.
-- id, move_id: ID del movimiento detalle y su cabecera
-- product_id: ID del producto (vincula con Variantes_del_producto.id)
-- picking_id: ID del albarán/guía de despacho
-- location_id: ubicación origen
-- location_dest_id: ubicación destino
-- quantity, quantity_product_uom: cantidad movida
-- date: fecha y hora del movimiento (TIMESTAMP)
-- state: "done" | "draft" | "cancel"
-- reference: referencia del albarán (ej: "D1/OUT/00019")
-- product_category_name: categoría del producto (ej: "AG / INSUMOS AGRO / AGROQUIMICOS")
-- x_studio_guia_despacho: número de guía de despacho
-- x_studio_empresa: ID del contacto empresa destinataria
-- x_studio_dosis_x_hectarea, x_studio_dosis_x_100l: dosis agrícola
-- x_studio_mojamiento_ha: mojamiento en hectáreas
+### Producto — Templates de producto (product.template) — 6.077 registros
+Tabla más completa que Variantes_del_producto. Contiene nombre, tipo y datos agroquímicos.
+- id: ID del template (diferente al ID de Variantes_del_producto)
+- name: nombre en JSON bilingüe {"es_CL": "...", "en_US": "..."} — extraer con JSON_VALUE(name, '$.es_CL')
+- default_code: código interno
+- type: "product" (almacenable) | "consu" (consumible) | "service"
+- active: TRUE si está activo
+- list_price: precio de venta
+- bl_marca: marca comercial
+- ingrediente_activo_1, ingrediente_activo_2, ingrediente_activo_3: ingredientes activos (agroquímicos)
+- concentracion_ia1, concentracion_ia2, concentracion_ia3: concentración de cada ingrediente activo (FLOAT)
+- x_studio_concentracin: concentración total (custom Studio)
+- x_studio_utilidad: utilidad/uso del producto
+- sale_ok, purchase_ok: se puede vender / comprar
 
-CRUCES NUEVOS CON TABLAS ODOO:
-- Nombre de producto: movimientos_de_stock.product_id ↔ Variantes_del_producto.id
-- Detalle liquidación: Remuneraciones.id ↔ Nomina.slip_id
+### Empleados — Ficha de empleados (hr.employee) — 118 registros
+- id: ID del empleado (vincula con Remuneraciones.employee_id)
+- name: nombre completo
+- firstname, last_name, middle_name, mothers_name: nombre desglosado
+- formated_vat: RUT formateado (ej: "12.345.678-9")
+- job_title: cargo
+- department_id: ID departamento
+- company_id: ID empresa (importante: 10 empresas distintas del grupo)
+- work_email: email laboral
+- mobile_phone: teléfono móvil
+- contract_id: ID contrato activo
+- first_contract_date: fecha primer contrato (antigüedad)
+- active: TRUE si activo (todos los 118 registros son activos)
+- employee_type: "employee" | "student" etc.
+- bl_tramo_asignacion_familiar: tramo AF Chile
+- bl_pago_efectivo: TRUE = se paga en efectivo
+
+⚠️ IMPORTANTE: La tabla Empleados tiene 118 registros pero son de MÚLTIPLES empresas del grupo.
+Para filtrar solo KONTROLAG: WHERE company_id = 7
+Para buscar un empleado: LOWER(name) LIKE '%apellido%' o LOWER(formated_vat) LIKE '%rut%'
+
+QUERY TIPO — empleado por nombre:
+  SELECT id, name, formated_vat, job_title, work_email, first_contract_date, company_id
+  FROM `ace-scarab-484515-v1.odoo_data.Empleados`
+  WHERE LOWER(name) LIKE '%garcia%'
+
+### Pedidos_de_Venta — Pedidos de venta (sale.order) — 951 registros
+Datos desde jul 2024. Corresponden a ventas de Agricola Donar Uno SPA principalmente.
+- id: ID del pedido
+- name: número de pedido (ej: "S00485")
+- partner_id: ID cliente (join con Contactos.id)
+- state: "sale" (confirmado) | "draft" | "cancel" | "done" — filtrar WHERE state = 'sale'
+- date_order: fecha de confirmación (TIMESTAMP)
+- amount_untaxed: monto neto (FLOAT)
+- amount_tax: IVA (FLOAT)
+- amount_total: total con IVA (FLOAT)
+- amount_to_invoice: monto pendiente de facturar (FLOAT)
+- invoice_status: "invoiced" | "to invoice" | "nothing"
+- delivery_status: "pending" | "partial" | "full" | NULL
+- company_id: empresa emisora
+- analytic_account_id: centro de costo analítico del pedido
+- warehouse_id: bodega de despacho
+
+QUERY TIPO — ventas por cliente este año:
+  SELECT c.name AS cliente, COUNT(p.id) AS pedidos,
+         SUM(p.amount_untaxed) AS neto_total
+  FROM `ace-scarab-484515-v1.odoo_data.Pedidos_de_Venta` p
+  JOIN `ace-scarab-484515-v1.odoo_data.Contactos` c ON p.partner_id = c.id
+  WHERE p.state = 'sale'
+    AND EXTRACT(YEAR FROM p.date_order) = 2026
+  GROUP BY 1 ORDER BY 3 DESC
+
+QUERY TIPO — pedidos pendientes de facturar:
+  SELECT p.name, c.name AS cliente, p.amount_untaxed, p.amount_to_invoice, p.delivery_status
+  FROM `ace-scarab-484515-v1.odoo_data.Pedidos_de_Venta` p
+  JOIN `ace-scarab-484515-v1.odoo_data.Contactos` c ON p.partner_id = c.id
+  WHERE p.state = 'sale' AND p.invoice_status = 'to invoice'
+  ORDER BY p.amount_to_invoice DESC
+
+### Lineas_del_Pedido_de_Venta — Líneas de pedidos (sale.order.line) — 3.297 registros
+- id: ID de la línea
+- order_id: ID pedido padre (join con Pedidos_de_Venta.id)
+- order_partner_id: ID cliente del pedido
+- product_id: ID variante de producto (join con Variantes_del_producto.id)
+- name: descripción de la línea
+- product_uom_qty: cantidad pedida (FLOAT)
+- qty_delivered: cantidad entregada (FLOAT)
+- qty_invoiced: cantidad facturada (FLOAT)
+- qty_to_invoice: cantidad pendiente de facturar (FLOAT)
+- price_unit: precio unitario (FLOAT)
+- price_subtotal: subtotal neto (FLOAT)
+- price_total: total con impuesto (FLOAT)
+- invoice_status: "invoiced" | "to invoice" | "nothing"
+- state: estado del pedido padre
+- analytic_distribution: JSON de distribución analítica (mismo formato que Reporte_Analitico)
+- is_service: TRUE = es un servicio
+- display_type: "line_note" = línea de texto sin precio (ignorar para sumas)
+- company_id: empresa
+
+⚠️ Filtrar SIEMPRE display_type IS NULL o display_type != 'line_note' para excluir líneas de texto.
+
+### Despachos — Guías de despacho (stock.picking) — 6.469 registros
+Corresponden a Agricola Donar Uno SPA. Cada fila es una transferencia completa (no la línea de producto).
+- id: ID del despacho
+- name: referencia interna (ej: "D1/OUT/00421")
+- state: "done" | "assigned" | "cancel" — filtrar WHERE state = 'done' para completados
+- partner_id: ID cliente receptor (join con Contactos.id)
+- sale_id: ID pedido de venta origen (join con Pedidos_de_Venta.id) — puede ser NULL
+- date_done: fecha de completado (TIMESTAMP)
+- date, scheduled_date: fecha programada (TIMESTAMP)
+- l10n_latam_document_number: N° guía DTE (ej: "000421")
+- l10n_cl_dte_status: estado SII: "accepted" | "rejected" | "objected"
+- l10n_cl_delivery_guide_reason: razón de traslado (código SII)
+- l10n_cl_sii_send_ident: RUT receptor
+- origin: referencia de origen (ej: "S00485" vincula con pedido de venta)
+- location_id, location_dest_id: ubicación origen/destino (join con Ubicaciones.id)
+- note: notas en HTML (incluye datos de chofer y patente)
+
+QUERY TIPO — despachos de un cliente:
+  SELECT d.name, d.l10n_latam_document_number, DATE(d.date_done) AS fecha,
+         d.l10n_cl_dte_status, d.origin
+  FROM `ace-scarab-484515-v1.odoo_data.Despachos` d
+  JOIN `ace-scarab-484515-v1.odoo_data.Contactos` c ON d.partner_id = c.id
+  WHERE d.state = 'done'
+    AND LOWER(c.name) LIKE '%donar%'
+  ORDER BY d.date_done DESC
+
+### Movimientos_de_Stock — Movimientos de stock nivel operación (stock.move) — 19.777 registros
+⚠️ DIFERENCIA IMPORTANTE: Esta tabla es stock.move (una operación completa).
+Las Ordenes_de_aplicacion son stock.move.line (línea individual dentro de la operación).
+- id: ID del movimiento
+- name, reference: referencia (ej: "D1/MO/00112")
+- product_id: ID producto (join con Variantes_del_producto.id)
+- product_uom_qty: cantidad demandada (FLOAT)
+- quantity: cantidad ejecutada (FLOAT)
+- location_id, location_dest_id: ubicación origen/destino
+- picking_id: ID del despacho padre (join con Despachos.id) — NULL si es manufactura
+- state: "done" | "assigned" | "cancel"
+- date: fecha del movimiento (TIMESTAMP)
+- origin: referencia de origen (pedido, orden de manufactura)
+- sale_line_id: línea de pedido de venta origen
+- raw_material_production_id: ID orden de manufactura (si es consumo de MP)
+- is_done: TRUE si completado
+- picked: TRUE si retirado físicamente
+- scrapped: TRUE si es merma
+- x_studio_dosis_x_hectarea, x_studio_dosis_x_100l: dosis agronómicas (FLOAT)
+- x_studio_stock_isla, x_studio_stock_zuig, x_stock_bodega_lanas: stock por predio (FLOAT)
+
+CRUCES CLAVE ENTRE TABLAS ODOO:
+- Nombre de producto en movimiento: Movimientos_de_Stock.product_id ↔ Variantes_del_producto.id → Producto.id
+- Detalle liquidación empleado: Remuneraciones.id ↔ Nomina.slip_id
+- Empleado → liquidaciones: Empleados.id ↔ Remuneraciones.employee_id
 - Nombre cliente/proveedor: Cuentas_por_cobrar.partner_id ↔ Contactos.id
 - Cuenta contable: Reporte_Analitico.account_id ↔ Cuentas_Contables.id
-- Ubicación bodega: movimientos_de_stock.location_id ↔ Ubicaciones.id
+- Ubicación bodega: Movimientos_de_Stock.location_id ↔ Ubicaciones.id
+- Despacho → pedido origen: Despachos.sale_id ↔ Pedidos_de_Venta.id
+- Pedido → líneas: Pedidos_de_Venta.id ↔ Lineas_del_Pedido_de_Venta.order_id
+- Movimientos de un despacho: Despachos.id ↔ Movimientos_de_Stock.picking_id
+- Nombre template de producto: Variantes_del_producto.product_tmpl_id ↔ Producto.id
 
 ══════════════════════════════════════════════
 FUENTE 2 — PostgreSQL (esquema appsheet / public)
@@ -588,12 +722,17 @@ CRUCES DE NEGOCIO
 ══════════════════════════════════════════════
 ODOO INTERNO:
 - Detalle liquidación empleado: Remuneraciones.id ↔ Nomina.slip_id
+- Empleado → liquidaciones: Empleados.id ↔ Remuneraciones.employee_id
 - Nombre en línea contable: Reporte_Analitico.partner_id ↔ Contactos.id
 - Nombre cuenta contable: Reporte_Analitico.account_id ↔ Cuentas_Contables.id
 - Nombre producto en orden aplicación: Ordenes_de_aplicacion.product_id ↔ Variantes_del_producto.id
-- Nombre producto en movimiento stock: movimientos_de_stock.product_id ↔ Variantes_del_producto.id
-- Ubicación bodega: movimientos_de_stock.location_id ↔ Ubicaciones.id
+- Nombre template/ingredientes: Variantes_del_producto.product_tmpl_id ↔ Producto.id
+- Ubicación bodega: Movimientos_de_Stock.location_id ↔ Ubicaciones.id
+- Despacho → pedido origen: Despachos.sale_id ↔ Pedidos_de_Venta.id
+- Despacho → movimientos: Despachos.id ↔ Movimientos_de_Stock.picking_id
+- Pedido → líneas: Pedidos_de_Venta.id ↔ Lineas_del_Pedido_de_Venta.order_id
 - RUT de un cliente/proveedor: Cuentas_por_cobrar.partner_id → Contactos.vat
+- RUT de un empleado: Empleados.formated_vat (directo)
 
 ODOO ↔ APPSHEET:
 - Costo campo vs facturación: tarjas_pagos.nombre_campo ↔ Cuentas_por_cobrar.invoice_partner_display_name
@@ -721,9 +860,11 @@ _TOOLS = [
             "Usar path completo: `ace-scarab-484515-v1.odoo_data.TABLA`. "
             "Tablas disponibles: Cuentas_por_cobrar, Remuneraciones, Reporte_Analitico, "
             "Ordenes_de_aplicacion, Contactos, Cuentas_Contables, Diarios_Contables, "
-            "Nomina, Ubicaciones, Variantes_del_producto, movimientos_de_stock. "
-            "Para Reporte_Analitico: usar JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID') "
-            "para extraer porcentaje de un CC específico y ponderarlo sobre balance."
+            "Nomina, Ubicaciones, Variantes_del_producto, Producto, Empleados, "
+            "Pedidos_de_Venta, Lineas_del_Pedido_de_Venta, Despachos, Movimientos_de_Stock. "
+            "Para Reporte_Analitico y Lineas_del_Pedido_de_Venta: usar JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID') "
+            "para extraer porcentaje de un CC específico y ponderarlo sobre balance. "
+            "Para nombre de producto en Producto: JSON_VALUE(name, '$.es_CL')."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
@@ -775,6 +916,19 @@ _TOOLS = [
         ),
     ),
 ]
+
+
+def _get_embedding(text: str) -> Optional[list]:
+    """Return a 768-dim embedding vector for text using Gemini text-embedding-004."""
+    try:
+        result = _client.models.embed_content(
+            model=EMBED_MODEL,
+            contents=text,
+        )
+        return result.embeddings[0].values
+    except Exception as e:
+        _log.warning("embedding error: %s", e)
+        return None
 
 
 _WRITE_RE = re.compile(
@@ -969,6 +1123,26 @@ async def chat_ask(request: Request):
 
     _log.info("chat/ask user=%s question_len=%d", username, len(user_question))
 
+    # ── Semantic cache lookup ─────────────────────────────────────────
+    embedding = _get_embedding(user_question)
+    cache_hit = False
+    if embedding:
+        cached = cache.get(user_question, embedding)
+        if cached:
+            cache_hit = True
+            cached_reply, cached_traces = cached
+            _save_messages(username, user_question, cached_reply)
+            _log.info("cache hit user=%s", username)
+            return JSONResponse({
+                "reply": cached_reply,
+                "traces": cached_traces,
+                "from_cache": True,
+            })
+    # Lazy cleanup — 1% of requests to avoid dedicated cron
+    import random
+    if random.random() < 0.01:
+        cache.cleanup()
+
     history = []
     for m in messages[:-1]:
         role = "user" if m["role"] == "user" else "model"
@@ -1048,7 +1222,11 @@ async def chat_ask(request: Request):
             "(facturas, remuneraciones, tarjas, despacho, sensores, etc.)."
         )
 
+    # Store in cache only if a tool was called (i.e. real data was queried)
+    if embedding and _tool_was_called:
+        cache.put(user_question, embedding, final_text, collected_traces)
+
     # Persist to DB (fire and forget — don't block the response)
     _save_messages(username, user_question, final_text)
 
-    return JSONResponse({"reply": final_text, "traces": collected_traces})
+    return JSONResponse({"reply": final_text, "traces": collected_traces, "from_cache": False})
