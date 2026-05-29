@@ -1021,13 +1021,35 @@ def _call_tool(name: str, args: dict) -> str:
 
 # ── History helpers ───────────────────────────────────────────────────────────
 
-def _save_messages(username: str, user_msg: str, model_reply: str) -> None:
+def _ensure_traces_column() -> None:
+    """Add traces JSONB column to chat_history if it doesn't exist yet."""
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE public.chat_history
+                ADD COLUMN IF NOT EXISTS traces JSONB
+            """)
+        conn.commit()
+    except Exception as e:
+        _log.warning("Could not add traces column: %s", e)
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def _save_messages(username: str, user_msg: str, model_reply: str, traces: list = None) -> None:
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            traces_json = json.dumps(traces) if traces else None
             cur.execute(
-                "INSERT INTO public.chat_history (username, role, message) VALUES (%s, %s, %s), (%s, %s, %s)",
-                (username, "user", user_msg, username, "model", model_reply),
+                "INSERT INTO public.chat_history (username, role, message) VALUES (%s, %s, %s)",
+                (username, "user", user_msg),
+            )
+            cur.execute(
+                "INSERT INTO public.chat_history (username, role, message, traces) VALUES (%s, %s, %s, %s)",
+                (username, "model", model_reply, traces_json),
             )
         conn.commit()
     except Exception:
@@ -1041,24 +1063,91 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=__import__("psycopg2").extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT id, role, message, created_at
+                SELECT id, role, message, traces, created_at
                 FROM public.chat_history
                 WHERE username = %s
                 ORDER BY id DESC
                 LIMIT %s
             """, (username, limit))
             rows = cur.fetchall()
-            return [{"role": r["role"], "message": r["message"], "created_at": str(r["created_at"])}
-                    for r in reversed(rows)]
+            result = []
+            for r in reversed(rows):
+                entry = {"role": r["role"], "message": r["message"], "created_at": str(r["created_at"])}
+                if r["traces"]:
+                    entry["traces"] = r["traces"] if isinstance(r["traces"], list) else json.loads(r["traces"])
+                result.append(entry)
+            return result
     finally:
         conn.close()
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 
+def _ensure_prompt_table() -> None:
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS public.chat_prompts (
+                    id         SERIAL PRIMARY KEY,
+                    prompt     TEXT NOT NULL,
+                    is_active  BOOLEAN NOT NULL DEFAULT FALSE,
+                    saved_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _load_system_prompt() -> str:
+    """Load active prompt from DB; seed with hardcoded default if table is empty."""
+    global _SYSTEM
+    try:
+        _ensure_prompt_table()
+        conn = pg._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT prompt FROM public.chat_prompts WHERE is_active = TRUE ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if row and row[0].strip():
+            _SYSTEM = row[0]
+        else:
+            # Seed DB with the hardcoded default
+            _save_system_prompt(_SYSTEM)
+    except Exception as e:
+        _log.warning("Could not load prompt from DB, using hardcoded default: %s", e)
+    return _SYSTEM
+
+
+def _save_system_prompt(new_prompt: str) -> int:
+    """Archive current active prompt as inactive, insert new one as active. Returns new row id."""
+    global _SYSTEM
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE public.chat_prompts SET is_active = FALSE WHERE is_active = TRUE")
+            cur.execute(
+                "INSERT INTO public.chat_prompts (prompt, is_active) VALUES (%s, TRUE) RETURNING id",
+                (new_prompt,),
+            )
+            new_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+    _SYSTEM = new_prompt
+    return new_id
+
+
 def init(templates: Jinja2Templates):
     global _templates, _client
     _templates = templates
+    _load_system_prompt()
+    _ensure_traces_column()
 
     # Support credentials from env var (base64 JSON) or local file path
     key_b64 = os.environ.get("BIGQUERY_KEY_B64")
@@ -1114,6 +1203,77 @@ async def clear_history(request: Request):
     return JSONResponse({"ok": True})
 
 
+@router.get("/prompt-editor", response_class=HTMLResponse)
+async def prompt_editor_page(request: Request):
+    return _templates.TemplateResponse(request, "prompt_editor.html")
+
+
+@router.get("/prompt")
+async def get_prompt():
+    return JSONResponse({"prompt": _SYSTEM})
+
+
+@router.post("/prompt")
+async def update_prompt(request: Request):
+    from fastapi import HTTPException
+    body = await request.json()
+    new_prompt = body.get("prompt", "").strip()
+    if not new_prompt or len(new_prompt) < 100:
+        raise HTTPException(status_code=400, detail="Prompt demasiado corto o vacío")
+    version = _save_system_prompt(new_prompt)
+    return JSONResponse({"ok": True, "version": version})
+
+
+@router.get("/prompt/versions")
+async def list_prompt_versions():
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, saved_at, LENGTH(prompt) AS chars
+                FROM public.chat_prompts
+                ORDER BY id DESC
+                LIMIT 30
+            """)
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    versions = [
+        {
+            "name": str(r[0]),
+            "saved_at": r[1].strftime("%d/%m/%Y %H:%M") if r[1] else "—",
+            "size": r[2] or 0,
+        }
+        for r in rows
+    ]
+    return JSONResponse({"versions": versions})
+
+
+@router.get("/prompt/versions/{version_id}")
+async def get_prompt_version(version_id: str):
+    from fastapi import HTTPException
+    if not version_id.isdigit():
+        raise HTTPException(status_code=400, detail="ID de versión inválido")
+    conn = pg._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT prompt, id, is_active, saved_at FROM public.chat_prompts WHERE id = %s",
+                (int(version_id),),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Versión no encontrada")
+    return JSONResponse({
+        "prompt": row[0],
+        "name": str(row[1]),
+        "is_active": row[2],
+        "saved_at": row[3].strftime("%d/%m/%Y %H:%M") if row[3] else "—",
+    })
+
+
 @router.post("/ask")
 async def chat_ask(request: Request):
     from auth import get_current_user
@@ -1140,7 +1300,7 @@ async def chat_ask(request: Request):
         if cached:
             cache_hit = True
             cached_reply, cached_traces = cached
-            _save_messages(username, user_question, cached_reply)
+            _save_messages(username, user_question, cached_reply, cached_traces)
             _log.info("cache hit user=%s", username)
             return JSONResponse({
                 "reply": cached_reply,
@@ -1236,7 +1396,7 @@ async def chat_ask(request: Request):
         cache.put(user_question, embedding, final_text, collected_traces)
 
     # Persist to DB (fire and forget — don't block the response)
-    _save_messages(username, user_question, final_text)
+    _save_messages(username, user_question, final_text, collected_traces if collected_traces else None)
 
     return JSONResponse({"reply": final_text, "traces": collected_traces, "from_cache": False})
 

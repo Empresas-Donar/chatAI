@@ -932,8 +932,18 @@ async function loadHistory() {
 
     for (const msg of data.history) {
       const role = msg.role === 'user' ? 'user' : 'assistant';
-      addRow(role, msg.message, msg.created_at);
+      const traces = msg.traces || [];
+      const { row: msgRow } = addRow(role, msg.message, msg.created_at, traces);
       history.push({ role: msg.role, parts: msg.message });
+
+      // Restore download buttons for assistant messages with saved traces
+      if (role === 'assistant' && traces.length > 0) {
+        const downloadBar = buildDownloadBar(traces);
+        if (downloadBar) {
+          const wrap = msgRow.querySelector('.chat-bubble-wrap');
+          if (wrap) wrap.insertBefore(downloadBar, wrap.querySelector('.chat-trace-wrap') || null);
+        }
+      }
     }
   } catch (e) {
     // silently fail — keep welcome message
