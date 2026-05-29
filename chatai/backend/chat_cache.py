@@ -48,14 +48,28 @@ def _get_conn():
     return conn
 
 
-def get(question: str, embedding: list[float]) -> Optional[tuple[str, list]]:
-    """Return (reply, traces) from cache or None on miss."""
+def _ensure_charts_column() -> None:
+    """Add charts JSONB column to chat_cache if it doesn't exist yet."""
+    try:
+        conn = pg._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE public.chat_cache ADD COLUMN IF NOT EXISTS charts JSONB")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        _log.warning("Could not add charts column to chat_cache: %s", e)
+
+
+def get(question: str, embedding: list[float]) -> Optional[tuple[str, list, list]]:
+    """Return (reply, traces, charts) from cache or None on miss."""
     try:
         conn = _get_conn()
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT id, reply, traces,
+                    SELECT id, reply, traces, charts,
                            embedding <=> %s::vector AS distance
                     FROM public.chat_cache
                     WHERE expires_at > NOW()
@@ -66,7 +80,6 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list]]:
                 row = cur.fetchone()
                 if not row:
                     return None
-                # Update hit stats
                 cur.execute("""
                     UPDATE public.chat_cache
                     SET hit_count  = hit_count + 1,
@@ -76,7 +89,8 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list]]:
                 conn.commit()
                 _log.info("cache hit id=%s dist=%.4f", row["id"], row["distance"])
                 traces = row["traces"] if row["traces"] else []
-                return row["reply"], traces
+                charts = row["charts"] if row["charts"] else []
+                return row["reply"], traces, charts
         finally:
             conn.close()
     except Exception as e:
@@ -84,7 +98,7 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list]]:
         return None
 
 
-def put(question: str, embedding: list[float], reply: str, traces: list) -> None:
+def put(question: str, embedding: list[float], reply: str, traces: list, charts: list = None) -> None:
     """Store a question+response in cache."""
     ttl = _ttl(question)
     try:
@@ -93,13 +107,14 @@ def put(question: str, embedding: list[float], reply: str, traces: list) -> None
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO public.chat_cache
-                      (question_raw, embedding, reply, traces, ttl_hours, expires_at)
-                    VALUES (%s, %s::vector, %s, %s, %s, NOW() + (%s || ' hours')::INTERVAL)
+                      (question_raw, embedding, reply, traces, charts, ttl_hours, expires_at)
+                    VALUES (%s, %s::vector, %s, %s, %s, %s, NOW() + (%s || ' hours')::INTERVAL)
                 """, (
                     question,
                     embedding,
                     reply,
                     json.dumps(traces, ensure_ascii=False, default=str),
+                    json.dumps(charts, ensure_ascii=False, default=str) if charts else None,
                     ttl,
                     ttl,
                 ))

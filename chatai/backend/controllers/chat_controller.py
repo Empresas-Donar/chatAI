@@ -1199,6 +1199,7 @@ def init(templates: Jinja2Templates):
     _templates = templates
     _load_system_prompt()
     _ensure_traces_column()
+    cache._ensure_charts_column()
 
     # Support credentials from env var (base64 JSON) or local file path
     key_b64 = os.environ.get("BIGQUERY_KEY_B64")
@@ -1350,12 +1351,15 @@ async def chat_ask(request: Request):
         cached = cache.get(user_question, embedding)
         if cached:
             cache_hit = True
-            cached_reply, cached_traces = cached
-            _save_messages(username, user_question, cached_reply, cached_traces)
+            cached_reply, cached_traces, cached_charts = cached
+            # Clean stale <br> from old cached replies
+            cached_reply = re.sub(r"^(\s*<br\s*/?>)+\s*", "", cached_reply, flags=re.IGNORECASE).strip()
+            _save_messages(username, user_question, cached_reply, cached_traces, cached_charts or None)
             _log.info("cache hit user=%s", username)
             return JSONResponse({
                 "reply": cached_reply,
                 "traces": cached_traces,
+                "charts": cached_charts,
                 "from_cache": True,
             })
     # Lazy cleanup — 1% of requests to avoid dedicated cron
@@ -1457,7 +1461,7 @@ async def chat_ask(request: Request):
 
     # Store in cache only if a tool was called (i.e. real data was queried)
     if embedding and _tool_was_called:
-        cache.put(user_question, embedding, final_text, collected_traces)
+        cache.put(user_question, embedding, final_text, collected_traces, collected_charts or None)
 
     # Persist to DB (fire and forget — don't block the response)
     _save_messages(username, user_question, final_text,
