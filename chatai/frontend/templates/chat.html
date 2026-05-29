@@ -909,6 +909,7 @@
   .chat-bubble--assistant table { font-size: 11.5px; }
   .chat-bubble--assistant th, .chat-bubble--assistant td { padding: 4px 8px; }
 }
+
 </style>
 
 <script>
@@ -1322,103 +1323,62 @@ if (shuffleBtn) {
   });
 }
 
-// ── Download intent detection ────────────────────────────────────────
-// Match "excel/pdf/planilla" anywhere in the message, regardless of word order
-const _DOWNLOAD_RE = /\b(descarga?r?|bajar|exportar?|generar?|crear?|hacer?|dame?|quiero?|necesito?)\b/i;
-const _FILE_RE = /\b(excel|xlsx|pdf|archivo|planilla)\b/i;
+// ── Download helpers ─────────────────────────────────────────────────
+const _DOWNLOAD_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
 
-function isDownloadIntent(text) {
-  return _FILE_RE.test(text) || (_DOWNLOAD_RE.test(text) && /\breporte\b/i.test(text));
+async function triggerDownload(trace, fmt) {
+  const res = await fetch('/chat/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql: trace.sql, system: trace.system, format: fmt }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'No se pudo generar el archivo');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fmt === 'pdf' ? 'datos_donar.pdf' : 'datos_donar.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function detectFormat(text) {
-  return /\bpdf\b/i.test(text) ? 'pdf' : 'xlsx';
-}
-
-// Keep track of last traces that had data (for download)
-let _lastDownloadableTraces = [];
-
-function buildDownloadBar(traces, fmt) {
-  if (!traces || traces.length === 0) return null;
-  // Only show if traces have SQL
-  const downloadable = traces.filter(t => t.sql && t.row_count > 0);
-  if (downloadable.length === 0) return null;
-
-  const bar = document.createElement('div');
-  bar.className = 'chat-download-bar';
-
-  const fmtLabel = fmt === 'pdf' ? 'PDF' : 'Excel';
-  const icon = fmt === 'pdf'
-    ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`
-    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
-
+function makeDownloadBtn(trace, fmt, label) {
   const btn = document.createElement('button');
-  btn.className = 'chat-download-btn';
-  btn.innerHTML = `${icon} Descargar ${fmtLabel} (${downloadable[0].row_count} filas)`;
+  btn.className = 'chat-download-btn' + (label ? ' chat-download-btn--alt' : '');
+  const rows = trace.row_count;
+  btn.innerHTML = label
+    ? label
+    : `${_DOWNLOAD_SVG} Excel (${rows} filas)`;
+
   btn.addEventListener('click', async () => {
+    const origHTML = btn.innerHTML;
     btn.disabled = true;
     btn.textContent = 'Generando…';
     try {
-      const trace = downloadable[0];
-      const res = await fetch('/chat/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql: trace.sql, system: trace.system, format: fmt }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        alert('Error: ' + (err.detail || 'No se pudo generar el archivo'));
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fmt === 'pdf' ? 'datos_donar.pdf' : 'datos_donar.xlsx';
-      a.click();
-      URL.revokeObjectURL(url);
+      await triggerDownload(trace, fmt);
     } catch (e) {
-      alert('Error de red al generar el archivo');
+      alert('Error: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.innerHTML = `${icon} Descargar ${fmtLabel}`;
+      btn.innerHTML = origHTML;
     }
   });
+  return btn;
+}
 
-  bar.appendChild(btn);
+function buildDownloadBar(traces) {
+  const downloadable = (traces || []).filter(t => t.sql && t.row_count > 0);
+  if (downloadable.length === 0) return null;
 
-  // Also offer the other format
-  const altFmt = fmt === 'pdf' ? 'xlsx' : 'pdf';
-  const altLabel = altFmt === 'pdf' ? 'PDF' : 'Excel';
-  const altBtn = document.createElement('button');
-  altBtn.className = 'chat-download-btn chat-download-btn--alt';
-  altBtn.textContent = `También en ${altLabel}`;
-  altBtn.addEventListener('click', () => {
-    // Clone btn logic with altFmt
-    const trace = downloadable[0];
-    altBtn.disabled = true;
-    altBtn.textContent = 'Generando…';
-    fetch('/chat/download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql: trace.sql, system: trace.system, format: altFmt }),
-    }).then(res => {
-      if (!res.ok) return res.json().then(e => { throw new Error(e.detail); });
-      return res.blob();
-    }).then(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = altFmt === 'pdf' ? 'datos_donar.pdf' : 'datos_donar.xlsx';
-      a.click();
-      URL.revokeObjectURL(url);
-    }).catch(e => alert('Error: ' + e.message))
-    .finally(() => {
-      altBtn.disabled = false;
-      altBtn.textContent = `También en ${altLabel}`;
-    });
-  });
-  bar.appendChild(altBtn);
+  const trace = downloadable[0];
+  const bar = document.createElement('div');
+  bar.className = 'chat-download-bar';
+
+  bar.appendChild(makeDownloadBtn(trace, 'xlsx', null));
+  bar.appendChild(makeDownloadBtn(trace, 'pdf', 'PDF'));
 
   return bar;
 }
@@ -1437,10 +1397,6 @@ form.addEventListener('submit', async (e) => {
   addRow('user', text, now);
   history.push({ role: 'user', parts: text });
 
-  // Check if user wants a file download
-  const wantsDownload = isDownloadIntent(text);
-  const downloadFmt = detectFormat(text);
-
   const thinking = addThinking();
 
   try {
@@ -1456,29 +1412,14 @@ form.addEventListener('submit', async (e) => {
     const reply = data.reply || 'Sin respuesta.';
     const traces = data.traces || [];
 
-    // Store traces if they have data (for potential later download)
-    if (traces.some(t => t.sql && t.row_count > 0)) {
-      _lastDownloadableTraces = traces;
-    }
-
-    const { row: msgRow, bubble: msgBubble } = addRow('assistant', reply, new Date().toISOString(), traces, data.from_cache);
+    const { row: msgRow } = addRow('assistant', reply, new Date().toISOString(), traces, data.from_cache);
     history.push({ role: 'model', parts: reply });
 
-    // If download was requested, use current traces or fall back to last known ones
-    if (wantsDownload) {
-      const tracesWithData = traces.filter(t => t.sql && t.row_count > 0);
-      const sourceTraces = tracesWithData.length > 0 ? tracesWithData
-        : _lastDownloadableTraces.filter(t => t.sql && t.row_count > 0);
-
-      if (sourceTraces.length > 0) {
-        const downloadBar = buildDownloadBar(sourceTraces, downloadFmt);
-        if (downloadBar) {
-          const wrap = msgRow.querySelector('.chat-bubble-wrap');
-          if (wrap) wrap.insertBefore(downloadBar, wrap.querySelector('.chat-trace-wrap') || null);
-          // Trigger download immediately
-          downloadBar.querySelector('.chat-download-btn').click();
-        }
-      }
+    // Show download buttons whenever traces have data — no intent detection needed
+    const downloadBar = buildDownloadBar(traces);
+    if (downloadBar) {
+      const wrap = msgRow.querySelector('.chat-bubble-wrap');
+      if (wrap) wrap.insertBefore(downloadBar, wrap.querySelector('.chat-trace-wrap') || null);
     }
   } catch {
     if (thinking._clearTimers) thinking._clearTimers();
@@ -1518,5 +1459,6 @@ document.querySelectorAll('.chat-source-show-more').forEach(btn => {
     }
   });
 });
+
 </script>
 {% endblock body %}
