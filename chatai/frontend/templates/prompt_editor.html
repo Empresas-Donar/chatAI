@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+
+{% block title %}Prompt del sistema — Donar{% endblock %}
+
+{% block body %}
+<div class="pe-page">
+
+  <div class="pe-header">
+    <div>
+      <h1 class="pe-title">Prompt del sistema</h1>
+      <p class="pe-sub">Define el comportamiento y contexto del asistente IA. Los cambios se aplican de inmediato y se guardan con versionamiento.</p>
+    </div>
+  </div>
+
+  <div class="pe-layout">
+
+    <!-- ── Editor panel ── -->
+    <div class="pe-editor-panel">
+      <div class="pe-panel-header">
+        <span class="pe-panel-title">Editor</span>
+        <span class="pe-char-count" id="peCharCount">0 caracteres</span>
+      </div>
+      <textarea class="pe-textarea" id="peTextarea" spellcheck="false" placeholder="Cargando prompt…"></textarea>
+      <div class="pe-editor-footer">
+        <div class="pe-save-status" id="peSaveStatus"></div>
+        <div class="pe-action-btns">
+          <button class="pe-btn pe-btn--secondary" id="peResetBtn">Restablecer</button>
+          <button class="pe-btn pe-btn--primary" id="peSaveBtn">Guardar y aplicar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Versions panel ── -->
+    <div class="pe-versions-panel">
+      <div class="pe-panel-header">
+        <span class="pe-panel-title">Versiones anteriores</span>
+      </div>
+      <div class="pe-versions-list" id="peVersionsList">
+        <p class="pe-empty">Cargando…</p>
+      </div>
+      <div class="pe-version-preview" id="peVersionPreview" style="display:none">
+        <div class="pe-version-preview-header">
+          <span class="pe-version-preview-name" id="peVersionPreviewName"></span>
+          <button class="pe-btn pe-btn--secondary pe-btn--sm" id="peRestoreBtn">Restaurar</button>
+        </div>
+        <textarea class="pe-textarea pe-textarea--preview" id="peVersionContent" readonly></textarea>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.pe-page {
+  padding: 28px 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.pe-header {
+  margin-bottom: 24px;
+}
+.pe-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.pe-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.pe-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Panel shell ── */
+.pe-editor-panel,
+.pe-versions-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pe-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-warm);
+  flex-shrink: 0;
+}
+.pe-panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-light);
+}
+.pe-char-count {
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+/* ── Textarea ── */
+.pe-textarea {
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 16px;
+  font-size: 12.5px;
+  font-family: monospace;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+  min-height: calc(100vh - 280px);
+  box-sizing: border-box;
+}
+.pe-textarea--preview {
+  min-height: 240px;
+  background: var(--bg-warm);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Editor footer ── */
+.pe-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  gap: 12px;
+}
+.pe-action-btns {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pe-save-status {
+  font-size: 12px;
+  min-height: 18px;
+}
+.pe-save-status.ok  { color: var(--green); }
+.pe-save-status.err { color: #e53e3e; }
+
+/* ── Buttons ── */
+.pe-btn {
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.pe-btn--primary {
+  background: var(--terra);
+  color: #fff;
+  border-color: var(--terra);
+}
+.pe-btn--primary:hover:not(:disabled) { background: var(--terra-dark); }
+.pe-btn--primary:disabled             { opacity: 0.5; cursor: not-allowed; }
+.pe-btn--secondary {
+  background: none;
+  color: var(--text-muted);
+}
+.pe-btn--secondary:hover:not(:disabled) { background: var(--bg-warm); color: var(--text); }
+.pe-btn--secondary:disabled             { opacity: 0.5; cursor: not-allowed; }
+.pe-btn--sm { padding: 4px 12px; font-size: 11.5px; }
+
+/* ── Versions list ── */
+.pe-versions-list {
+  overflow-y: auto;
+  max-height: 320px;
+  padding: 6px;
+}
+.pe-empty {
+  font-size: 12px;
+  color: var(--text-light);
+  margin: 10px;
+}
+.pe-version-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+  gap: 8px;
+}
+.pe-version-item:hover    { background: var(--bg-warm); }
+.pe-version-item.selected { background: var(--earth-light); }
+.pe-version-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text);
+}
+.pe-version-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Version preview ── */
+.pe-version-preview {
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.pe-version-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-warm);
+}
+.pe-version-preview-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text-muted);
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .pe-layout { grid-template-columns: 1fr; }
+  .pe-textarea { min-height: 400px; }
+  .pe-page { padding: 16px; }
+}
+</style>
+
+<script>
+(function () {
+  const textarea      = document.getElementById('peTextarea');
+  const charCount     = document.getElementById('peCharCount');
+  const saveBtn       = document.getElementById('peSaveBtn');
+  const resetBtn      = document.getElementById('peResetBtn');
+  const saveStatus    = document.getElementById('peSaveStatus');
+  const versionsList  = document.getElementById('peVersionsList');
+  const versionPreview = document.getElementById('peVersionPreview');
+  const versionName   = document.getElementById('peVersionPreviewName');
+  const versionContent = document.getElementById('peVersionContent');
+  const restoreBtn    = document.getElementById('peRestoreBtn');
+
+  let _original = '';
+  let _selectedVersion = null;
+
+  function updateCount() {
+    charCount.textContent = `${textarea.value.length.toLocaleString('es-CL')} caracteres`;
+  }
+  textarea.addEventListener('input', updateCount);
+
+  function setStatus(msg, type) {
+    saveStatus.textContent = msg;
+    saveStatus.className = `pe-save-status ${type}`;
+    if (type === 'ok') setTimeout(() => { saveStatus.textContent = ''; saveStatus.className = 'pe-save-status'; }, 4000);
+  }
+
+  // Load current prompt
+  async function loadPrompt() {
+    try {
+      const res = await fetch('/chat/prompt');
+      const data = await res.json();
+      _original = data.prompt;
+      textarea.value = data.prompt;
+      updateCount();
+    } catch {
+      textarea.value = 'Error al cargar el prompt.';
+    }
+  }
+
+  // Load versions list
+  async function loadVersions() {
+    versionsList.innerHTML = '<p class="pe-empty">Cargando…</p>';
+    versionPreview.style.display = 'none';
+    _selectedVersion = null;
+    try {
+      const res = await fetch('/chat/prompt/versions');
+      const data = await res.json();
+      if (!data.versions || data.versions.length === 0) {
+        versionsList.innerHTML = '<p class="pe-empty">No hay versiones guardadas aún.</p>';
+        return;
+      }
+      versionsList.innerHTML = '';
+      data.versions.forEach(v => {
+        const item = document.createElement('div');
+        item.className = 'pe-version-item';
+        item.innerHTML = `
+          <span class="pe-version-name">#${v.name}</span>
+          <span class="pe-version-meta">${v.saved_at} · ${(v.size/1000).toFixed(1)}k</span>`;
+        item.addEventListener('click', () => selectVersion(item, v.name));
+        versionsList.appendChild(item);
+      });
+    } catch {
+      versionsList.innerHTML = '<p class="pe-empty">Error al cargar versiones.</p>';
+    }
+  }
+
+  async function selectVersion(itemEl, name) {
+    document.querySelectorAll('.pe-version-item').forEach(i => i.classList.remove('selected'));
+    itemEl.classList.add('selected');
+    _selectedVersion = name;
+    versionContent.value = 'Cargando…';
+    versionPreview.style.display = 'flex';
+    try {
+      const res = await fetch(`/chat/prompt/versions/${name}`);
+      const data = await res.json();
+      versionName.textContent = name;
+      versionContent.value = data.prompt;
+    } catch {
+      versionContent.value = 'Error al cargar versión.';
+    }
+  }
+
+  // Save prompt
+  saveBtn.addEventListener('click', async () => {
+    const newPrompt = textarea.value.trim();
+    if (!newPrompt || newPrompt.length < 100) {
+      setStatus('El prompt es demasiado corto.', 'err');
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando…';
+    try {
+      const res = await fetch('/chat/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: newPrompt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error al guardar');
+      _original = newPrompt;
+      setStatus(`✓ Guardado (ID ${data.version}) — aplicado al chat`, 'ok');
+      loadVersions();
+    } catch (e) {
+      setStatus('Error: ' + e.message, 'err');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar y aplicar';
+    }
+  });
+
+  // Reset to original
+  resetBtn.addEventListener('click', () => {
+    if (!_original) return;
+    if (confirm('¿Descartar cambios y volver al prompt guardado?')) {
+      textarea.value = _original;
+      updateCount();
+      setStatus('', '');
+    }
+  });
+
+  // Restore old version
+  restoreBtn.addEventListener('click', async () => {
+    if (!_selectedVersion) return;
+    const newPrompt = versionContent.value.trim();
+    if (!confirm(`¿Restaurar "${_selectedVersion}" como prompt activo?`)) return;
+    restoreBtn.disabled = true;
+    restoreBtn.textContent = 'Restaurando…';
+    try {
+      const res = await fetch('/chat/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: newPrompt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error');
+      textarea.value = newPrompt;
+      _original = newPrompt;
+      updateCount();
+      setStatus(`✓ Versión "${_selectedVersion}" restaurada y aplicada`, 'ok');
+      loadVersions();
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      restoreBtn.disabled = false;
+      restoreBtn.textContent = 'Restaurar';
+    }
+  });
+
+  loadPrompt();
+  loadVersions();
+})();
+</script>
+{% endblock body %}

@@ -2,6 +2,10 @@
 
 {% block title %}Chat IA — Donar{% endblock %}
 
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{% endblock %}
+
 {% block body %}
 <div class="chat-page">
 
@@ -723,6 +727,59 @@
 }
 .chat-trace-preview-wrap tr:last-child td { border-bottom: none; }
 
+/* ── Chart container ────────────────────────────────────────────── */
+.chat-chart-wrap {
+  margin-top: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+}
+
+.chat-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chat-chart-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.chat-chart-type-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.chat-chart-type-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.chat-chart-type-btn:hover,
+.chat-chart-type-btn.active {
+  background: var(--terra);
+  color: #fff;
+  border-color: var(--terra);
+}
+
+.chat-chart-canvas-wrap {
+  position: relative;
+  height: 240px;
+}
+
 /* ── Download bar ───────────────────────────────────────────────── */
 .chat-download-bar {
   display: flex;
@@ -936,12 +993,20 @@ async function loadHistory() {
       const { row: msgRow } = addRow(role, msg.message, msg.created_at, traces);
       history.push({ role: msg.role, parts: msg.message });
 
-      // Restore download buttons for assistant messages with saved traces
-      if (role === 'assistant' && traces.length > 0) {
-        const downloadBar = buildDownloadBar(traces);
-        if (downloadBar) {
-          const wrap = msgRow.querySelector('.chat-bubble-wrap');
-          if (wrap) wrap.insertBefore(downloadBar, wrap.querySelector('.chat-trace-wrap') || null);
+      // Restore charts and download buttons for assistant messages
+      if (role === 'assistant') {
+        const charts = msg.charts || [];
+        const wrap = msgRow.querySelector('.chat-bubble-wrap');
+        if (wrap) {
+          const insertBefore = wrap.querySelector('.chat-trace-wrap') || null;
+          for (const chartData of charts) {
+            const widget = buildChartWidget(chartData);
+            if (widget) wrap.insertBefore(widget, insertBefore);
+          }
+          if (traces.length > 0) {
+            const downloadBar = buildDownloadBar(traces);
+            if (downloadBar) wrap.insertBefore(downloadBar, insertBefore);
+          }
         }
       }
     }
@@ -954,6 +1019,8 @@ loadHistory();
 
 // ── Minimal markdown → HTML renderer ────────────────────────────────
 function renderMarkdown(text) {
+  // Strip stray <br> tags Gemini sometimes emits at the start of a reply
+  text = text.replace(/^(\s*<br\s*\/?>\s*)+/i, '').trim();
   let html = text
     // escape HTML first
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1336,6 +1403,114 @@ if (shuffleBtn) {
   });
 }
 
+// ── Chart rendering ──────────────────────────────────────────────────
+const CHART_COLORS = [
+  '#2D6A4F','#52B788','#95D5B2','#D4A017','#E76F51',
+  '#264653','#2A9D8F','#E9C46A','#F4A261','#E76F51',
+];
+
+function buildChartWidget(chartData) {
+  if (!chartData || !chartData.labels || !chartData.values) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-chart-wrap';
+
+  // Header: title + type switcher
+  const header = document.createElement('div');
+  header.className = 'chat-chart-header';
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'chat-chart-title';
+  titleEl.textContent = chartData.title || 'Gráfico';
+  header.appendChild(titleEl);
+
+  const typeBtns = document.createElement('div');
+  typeBtns.className = 'chat-chart-type-btns';
+
+  const canvasWrap = document.createElement('div');
+  canvasWrap.className = 'chat-chart-canvas-wrap';
+  const canvas = document.createElement('canvas');
+  canvasWrap.appendChild(canvas);
+
+  let chartInstance = null;
+  let currentType = chartData.chart_type || 'bar';
+
+  function drawChart(type) {
+    if (chartInstance) chartInstance.destroy();
+
+    const isPie = type === 'pie' || type === 'doughnut';
+    const bgColors = isPie
+      ? chartData.labels.map((_, i) => CHART_COLORS[i % CHART_COLORS.length])
+      : CHART_COLORS[0];
+    const borderColors = isPie
+      ? chartData.labels.map((_, i) => CHART_COLORS[i % CHART_COLORS.length])
+      : CHART_COLORS[0];
+
+    chartInstance = new Chart(canvas, {
+      type: type,
+      data: {
+        labels: chartData.labels,
+        datasets: [{
+          label: chartData.dataset_label || '',
+          data: chartData.values,
+          backgroundColor: Array.isArray(bgColors) ? bgColors : bgColors + '99',
+          borderColor: Array.isArray(borderColors) ? borderColors : borderColors,
+          borderWidth: isPie ? 1 : 1.5,
+          tension: 0.35,
+          fill: type === 'line' ? false : undefined,
+          pointRadius: type === 'line' ? 3 : undefined,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: isPie, position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.parsed.y ?? ctx.parsed;
+                const formatted = typeof v === 'number'
+                  ? v.toLocaleString('es-CL')
+                  : v;
+                return ` ${ctx.dataset.label}: ${formatted}`;
+              }
+            }
+          }
+        },
+        scales: isPie ? {} : {
+          x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } },
+          y: { ticks: { font: { size: 10 }, callback: v => v.toLocaleString('es-CL') }, grid: { color: '#f0f0f0' } },
+        },
+      },
+    });
+
+    // Update active button
+    typeBtns.querySelectorAll('.chat-chart-type-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.type === type);
+    });
+  }
+
+  // Type switcher buttons
+  [['bar','Barras'],['line','Línea'],['pie','Torta'],['doughnut','Dona']].forEach(([type, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'chat-chart-type-btn';
+    btn.dataset.type = type;
+    btn.textContent = label;
+    btn.addEventListener('click', () => { currentType = type; drawChart(type); });
+    typeBtns.appendChild(btn);
+  });
+
+  header.appendChild(typeBtns);
+  wrap.appendChild(header);
+  wrap.appendChild(canvasWrap);
+
+  // Draw after element is in DOM (requestAnimationFrame ensures canvas has dimensions)
+  requestAnimationFrame(() => drawChart(currentType));
+
+  return wrap;
+}
+
 // ── Download helpers ─────────────────────────────────────────────────
 const _DOWNLOAD_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
 
@@ -1424,15 +1599,22 @@ form.addEventListener('submit', async (e) => {
 
     const reply = data.reply || 'Sin respuesta.';
     const traces = data.traces || [];
+    const charts = data.charts || [];
 
     const { row: msgRow } = addRow('assistant', reply, new Date().toISOString(), traces, data.from_cache);
     history.push({ role: 'model', parts: reply });
 
-    // Show download buttons whenever traces have data — no intent detection needed
-    const downloadBar = buildDownloadBar(traces);
-    if (downloadBar) {
-      const wrap = msgRow.querySelector('.chat-bubble-wrap');
-      if (wrap) wrap.insertBefore(downloadBar, wrap.querySelector('.chat-trace-wrap') || null);
+    const wrap = msgRow.querySelector('.chat-bubble-wrap');
+    if (wrap) {
+      const insertBefore = wrap.querySelector('.chat-trace-wrap') || null;
+      // Render charts inline
+      for (const chartData of charts) {
+        const widget = buildChartWidget(chartData);
+        if (widget) wrap.insertBefore(widget, insertBefore);
+      }
+      // Show download buttons whenever traces have data
+      const downloadBar = buildDownloadBar(traces);
+      if (downloadBar) wrap.insertBefore(downloadBar, insertBefore);
     }
   } catch {
     if (thinking._clearTimers) thinking._clearTimers();
