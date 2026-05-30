@@ -1,0 +1,479 @@
+{% extends "base.html" %}
+
+{% block title %}Looker Studio — Donar{% endblock %}
+
+{% block body %}
+<div class="lk-page">
+
+  <div class="lk-header">
+    <div>
+      <h1 class="lk-title">Reportes Looker Studio</h1>
+      <p class="lk-sub">Administra los enlaces a los reportes de Looker Studio. Los cambios se aplican de inmediato.</p>
+    </div>
+    <button class="lk-btn lk-btn--primary" id="lkNewBtn">+ Nuevo reporte</button>
+  </div>
+
+  <!-- ── Modal form ── -->
+  <div class="lk-overlay" id="lkOverlay" style="display:none">
+    <div class="lk-modal">
+      <div class="lk-modal-header">
+        <span class="lk-modal-title" id="lkModalTitle">Nuevo reporte</span>
+        <button class="lk-modal-close" id="lkCloseBtn" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="lk-modal-body">
+        <label class="lk-label">Nombre <span class="lk-required">*</span></label>
+        <input class="lk-input" id="lkFldName" type="text" placeholder="Ej: Tarjas — Resumen mensual" maxlength="200" />
+
+        <label class="lk-label">Categoría</label>
+        <input class="lk-input" id="lkFldCategory" type="text" placeholder="Ej: Tarjas, Despacho, Finanzas…" maxlength="100" list="lkCategoryList" />
+        <datalist id="lkCategoryList"></datalist>
+
+        <label class="lk-label">URL de Looker Studio <span class="lk-required">*</span></label>
+        <input class="lk-input" id="lkFldUrl" type="url" placeholder="https://lookerstudio.google.com/reporting/…" />
+
+        <label class="lk-label">Descripción</label>
+        <textarea class="lk-textarea" id="lkFldDesc" rows="3" placeholder="Descripción breve del reporte…" maxlength="500"></textarea>
+
+        <p class="lk-form-error" id="lkFormError" style="display:none"></p>
+      </div>
+      <div class="lk-modal-footer">
+        <button class="lk-btn lk-btn--secondary" id="lkCancelBtn">Cancelar</button>
+        <button class="lk-btn lk-btn--primary" id="lkSaveBtn">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Report grid ── -->
+  <div id="lkGrid" class="lk-grid">
+    <p class="lk-empty" id="lkEmpty">Cargando…</p>
+  </div>
+
+</div>
+
+<style>
+.lk-page {
+  padding: 28px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.lk-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.lk-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.lk-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── Buttons ── */
+.lk-btn {
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.lk-btn--primary {
+  background: var(--terra);
+  color: #fff;
+  border-color: var(--terra);
+}
+.lk-btn--primary:hover:not(:disabled) { background: var(--terra-dark); }
+.lk-btn--primary:disabled             { opacity: 0.5; cursor: not-allowed; }
+.lk-btn--secondary {
+  background: none;
+  color: var(--text-muted);
+}
+.lk-btn--secondary:hover:not(:disabled) { background: var(--bg-warm); color: var(--text); }
+.lk-btn--danger {
+  background: none;
+  color: #e53e3e;
+  border-color: transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.lk-btn--danger:hover { background: #fff5f5; }
+.lk-btn--icon {
+  background: none;
+  border-color: transparent;
+  color: var(--text-light);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.lk-btn--icon:hover { background: var(--bg-warm); color: var(--text); }
+
+/* ── Modal overlay ── */
+.lk-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.lk-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+}
+.lk-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.lk-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.lk-modal-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.lk-modal-close:hover { background: var(--bg-warm); color: var(--text); }
+.lk-modal-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lk-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-light);
+  margin-bottom: 2px;
+  display: block;
+}
+.lk-required { color: #e53e3e; }
+.lk-input, .lk-textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.lk-input:focus, .lk-textarea:focus {
+  outline: none;
+  border-color: var(--terra);
+}
+.lk-textarea { resize: vertical; min-height: 72px; }
+.lk-form-error {
+  font-size: 12px;
+  color: #e53e3e;
+  margin: 0;
+}
+.lk-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Report grid ── */
+.lk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.lk-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+.lk-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+
+.lk-card-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--terra);
+  padding: 10px 14px 0;
+}
+.lk-card-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 4px 14px 6px;
+}
+.lk-card-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 14px 10px;
+  flex: 1;
+  line-height: 1.5;
+}
+.lk-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-warm);
+  gap: 8px;
+}
+.lk-card-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--terra);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.lk-card-link:hover { background: var(--earth-light); }
+.lk-card-actions { display: flex; gap: 2px; }
+.lk-card-meta {
+  font-size: 10px;
+  color: var(--text-light);
+  padding: 4px 14px 8px;
+}
+
+.lk-empty {
+  font-size: 13px;
+  color: var(--text-light);
+  grid-column: 1/-1;
+  text-align: center;
+  padding: 48px 0;
+}
+
+.lk-category-section { grid-column: 1/-1; }
+.lk-category-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-light);
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+@media (max-width: 600px) {
+  .lk-page { padding: 16px; }
+  .lk-header { flex-direction: column; }
+  .lk-grid { grid-template-columns: 1fr; }
+}
+</style>
+
+<script>
+(function () {
+  const overlay    = document.getElementById('lkOverlay');
+  const modalTitle = document.getElementById('lkModalTitle');
+  const fldName    = document.getElementById('lkFldName');
+  const fldCat     = document.getElementById('lkFldCategory');
+  const fldUrl     = document.getElementById('lkFldUrl');
+  const fldDesc    = document.getElementById('lkFldDesc');
+  const formError  = document.getElementById('lkFormError');
+  const saveBtn    = document.getElementById('lkSaveBtn');
+  const grid       = document.getElementById('lkGrid');
+  const catList    = document.getElementById('lkCategoryList');
+
+  let _editingId = null;
+  let _reports   = [];
+
+  // ── Modal open/close ──
+  function openModal(report) {
+    _editingId = report ? report.id : null;
+    modalTitle.textContent = report ? 'Editar reporte' : 'Nuevo reporte';
+    fldName.value     = report ? report.name        : '';
+    fldCat.value      = report ? (report.category || '') : '';
+    fldUrl.value      = report ? report.url         : '';
+    fldDesc.value     = report ? (report.description || '') : '';
+    hideError();
+    overlay.style.display = 'flex';
+    fldName.focus();
+  }
+
+  function closeModal() {
+    overlay.style.display = 'none';
+    _editingId = null;
+  }
+
+  function showError(msg) {
+    formError.textContent = msg;
+    formError.style.display = 'block';
+  }
+
+  function hideError() {
+    formError.textContent = '';
+    formError.style.display = 'none';
+  }
+
+  document.getElementById('lkNewBtn').addEventListener('click', () => openModal(null));
+  document.getElementById('lkCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('lkCancelBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+  // ── Save (create / update) ──
+  saveBtn.addEventListener('click', async () => {
+    hideError();
+    const body = {
+      name:        fldName.value.trim(),
+      category:    fldCat.value.trim(),
+      url:         fldUrl.value.trim(),
+      description: fldDesc.value.trim(),
+    };
+    if (!body.name)  { showError('El nombre es obligatorio.'); fldName.focus(); return; }
+    if (!body.url)   { showError('La URL es obligatoria.'); fldUrl.focus(); return; }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando…';
+    try {
+      const method = _editingId ? 'PUT' : 'POST';
+      const url    = _editingId ? `/api/looker/reports/${_editingId}` : '/api/looker/reports';
+      const res    = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error al guardar');
+      closeModal();
+      await loadReports();
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar';
+    }
+  });
+
+  // ── Delete ──
+  async function deleteReport(id, name) {
+    if (!confirm(`¿Eliminar "${name}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      const res = await fetch(`/api/looker/reports/${id}`, { method: 'DELETE' });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Error'); }
+      await loadReports();
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
+  // ── Render ──
+  function renderReports(reports) {
+    // Update datalist with known categories
+    const cats = [...new Set(reports.map(r => r.category).filter(Boolean))].sort();
+    catList.innerHTML = cats.map(c => `<option value="${escHtml(c)}"></option>`).join('');
+
+    if (reports.length === 0) {
+      grid.innerHTML = '<p class="lk-empty">No hay reportes registrados aún. Crea el primero con el botón "+" arriba.</p>';
+      return;
+    }
+
+    // Group by category
+    const groups = {};
+    reports.forEach(r => {
+      const key = r.category || '—';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      if (a === '—') return 1;
+      if (b === '—') return -1;
+      return a.localeCompare(b, 'es');
+    });
+
+    let html = '';
+    sortedKeys.forEach(cat => {
+      html += `
+        <div class="lk-category-section">
+          <div class="lk-category-label">${escHtml(cat)}</div>
+        </div>`;
+      groups[cat].forEach(r => {
+        html += `
+        <div class="lk-card">
+          <div class="lk-card-name">${escHtml(r.name)}</div>
+          ${r.description ? `<div class="lk-card-desc">${escHtml(r.description)}</div>` : ''}
+          <div class="lk-card-meta">Actualizado: ${escHtml(r.updated_at)}</div>
+          <div class="lk-card-footer">
+            <a class="lk-card-link" href="${escHtml(r.url)}" target="_blank" rel="noopener">
+              ↗ Abrir reporte
+            </a>
+            <div class="lk-card-actions">
+              <button class="lk-btn lk-btn--icon" data-edit="${r.id}" title="Editar">✏️</button>
+              <button class="lk-btn lk-btn--danger" data-del="${r.id}" data-name="${escHtml(r.name)}" title="Eliminar">Eliminar</button>
+            </div>
+          </div>
+        </div>`;
+      });
+    });
+    grid.innerHTML = html;
+
+    // Event delegation for edit / delete buttons
+    grid.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const report = _reports.find(r => r.id == btn.dataset.edit);
+        if (report) openModal(report);
+      });
+    });
+    grid.querySelectorAll('[data-del]').forEach(btn => {
+      btn.addEventListener('click', () => deleteReport(Number(btn.dataset.del), btn.dataset.name));
+    });
+  }
+
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Load ──
+  async function loadReports() {
+    grid.innerHTML = '<p class="lk-empty">Cargando…</p>';
+    try {
+      const res  = await fetch('/api/looker/reports');
+      const data = await res.json();
+      _reports = data.reports || [];
+      renderReports(_reports);
+    } catch {
+      grid.innerHTML = '<p class="lk-empty">Error al cargar los reportes.</p>';
+    }
+  }
+
+  loadReports();
+})();
+</script>
+{% endblock body %}

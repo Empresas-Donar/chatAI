@@ -810,67 +810,11 @@ GLOSARIO AGRONÓMICO:
 CATÁLOGO DE REPORTES — LOOKER STUDIO
 ══════════════════════════════════════════════
 REGLA ESTRICTA: Si el usuario menciona "looker studio", "looker", "reporte visual" o "dashboard visual":
-→ Responde ÚNICAMENTE con los links de este catálogo.
-→ NUNCA llames a query_bigquery ni query_postgres para responder esto.
-→ Los datos ya están aquí — no hay nada más que buscar en la base de datos.
-
-Formato de respuesta para links: **[Nombre del reporte](URL)**
-Si no hay coincidencia exacta, muestra los más similares de la misma categoría.
-
-TARJAS / LABORES:
-- Tarjas → https://lookerstudio.google.com/reporting/b7968535-f24b-427c-b22e-4c8209e99f10
-- Labores de Contratistas - Talagante → https://lookerstudio.google.com/reporting/0e244aef-25ff-49f3-b950-c0c4a5859d4c
-- Labores de Contratistas - Isla de Maipo → https://lookerstudio.google.com/reporting/f4d89631-e38d-4844-a0a1-ad795192444a
-- Reporte de labores - Herbi → https://lookerstudio.google.com/reporting/360e3d4f-ec11-43a5-a6b8-4327aca83591
-- Reporte de labores - Gutierrez II → https://lookerstudio.google.com/reporting/c29161f1-ca96-4d88-856c-066067a01c30
-- Reporte de labores - PLP/Bonhomia → https://lookerstudio.google.com/reporting/a4183e71-575e-47c3-a8bf-558cb9a9fa19
-
-EXPORTACIÓN:
-- Exportación Cerezas (Comisión 8%) → https://lookerstudio.google.com/reporting/7ca2d00c-1917-4ae3-b26a-bec262c09560
-- Exportación Cerezas (C.E.) → https://lookerstudio.google.com/reporting/8c948532-8b57-42a7-b6aa-89623d8a7b60
-- Análisis de Exportación Kg exportados/entregados C.E. 2025 V2.0 → https://lookerstudio.google.com/reporting/3c363620-98a0-4e79-ad4f-3490e63ed425
-- Análisis de Exportación Kg exportados/entregados y 8% comisión 2025 V2.0 → https://lookerstudio.google.com/reporting/47196466-1303-4662-959a-48f30a787a1c
-- Comparativos Ciruelas Fresco → https://lookerstudio.google.com/reporting/03ea9780-5395-45d9-b273-e3e1c20255d8
-
-COSECHA — RENDIMIENTO:
-- Rendimiento de Cosecha → https://lookerstudio.google.com/reporting/036aef2c-de39-4fd4-8986-1738f9f94c2b
-- Rendimiento de Cosecha - Isla de Maipo → https://lookerstudio.google.com/reporting/11e44633-ef80-40f6-832d-cf9912c03f1d
-- Conteo De Bunching → https://lookerstudio.google.com/reporting/5dd421e6-eefc-4db3-b1fe-6fd376c93966
-
-COSECHA — CONTROL DE CALIDAD CEREZAS:
-- Control de Calidad Cosecha-Cerezas → https://lookerstudio.google.com/reporting/25288538-c720-4a3a-82f4-6f7a03028d31
-- Control de Calidad Cosecha-Cerezas 2 → https://lookerstudio.google.com/reporting/d6c4fc22-139e-41a7-8fc3-689f02e64506
-- Control de Calidad Cosecha-Cerezas 3 → https://lookerstudio.google.com/reporting/9d211b7a-d3a1-45b5-ae13-cd61f4ea087b
-- Control de Calidad Cosecha-Cerezas 4 → https://lookerstudio.google.com/reporting/97125ae7-3413-4ef5-8d82-93a834a5171c
-- Control de Calidad Cosecha-Cerezas 5 → https://lookerstudio.google.com/reporting/9ba18176-1017-4995-9b81-197dbfda0bbf
-- Control de Calidad Cosecha-Cerezas 6 → https://lookerstudio.google.com/reporting/64494484-c5c4-44be-b41b-87d30034ff34
-- Control de Calidad Cosecha-Cerezas 7 → https://lookerstudio.google.com/reporting/e03a7d56-ce49-48e3-b440-ba31d6f1b214
-- Isla de Maipo - Control de Calidad Cosecha-Cerezas → https://lookerstudio.google.com/reporting/0852376e-92af-4d96-974e-6e4b699e2881
-- Isla de Maipo - Control de Calidad Cosecha-Cerezas (v2) → https://lookerstudio.google.com/reporting/202a3eef-b187-47e1-ba0c-6a1be594426d
-
-COSECHA — CONTROL DE CALIDAD CIRUELAS:
-- Control de Calidad Cosecha-Ciruelas → https://lookerstudio.google.com/reporting/e51d083a-8dc1-49cc-a511-724f01bdc512
-- Control de Calidad Cosecha-Ciruelas 2 → https://lookerstudio.google.com/reporting/324893a9-a137-4ff8-b588-0e4ee98980fd
-- Control de Calidad Cosecha-Ciruelas 3 → https://lookerstudio.google.com/reporting/b906e888-c265-4a22-b14d-68d9249eded5
-- Control de Calidad Cosecha-Ciruelas 4 → https://lookerstudio.google.com/reporting/23583c25-979d-4f58-9a0a-fcf454055939
-- Control de Calidad Cosecha-Ciruelas 5 → https://lookerstudio.google.com/reporting/2029b33d-0ff0-4246-8c5d-ae597d400919
-- Control de Calidad Cosecha-Ciruelas 6 → https://lookerstudio.google.com/reporting/54a92686-615a-4deb-99b1-765cec180ed3
-- Control de Calidad Cosecha-Ciruelas 7 → https://lookerstudio.google.com/reporting/00bd551d-d2a0-4c03-b088-53791de7de6f
-
-CLIMA:
-- Reporte Clima Zúñiga → https://lookerstudio.google.com/reporting/499b7a06-c616-44ce-896e-d056c2e49dfb
-- Reporte Clima Isla de Maipo → https://lookerstudio.google.com/reporting/104781a4-f2a6-47e7-b5f3-f4d92025addd
-
-RIEGO:
-- Reporte Riego Isla de Maipo V2.0 → https://lookerstudio.google.com/reporting/78c65824-385e-4f1c-98f8-c3a93e0fcb2c
-- Reporte Riego Isla de Maipo → https://lookerstudio.google.com/reporting/5901b732-589c-40fe-8878-c115fa6bdafe
-- Reporte Riego Zúñiga → https://lookerstudio.google.com/reporting/71b6227d-b155-4928-9c8f-e23d1afd4c24
-- Reporte Riego Talagante → https://lookerstudio.google.com/reporting/5fe35204-14ee-4555-b788-5824f486db63
-- Reporte de Riego (general) → https://lookerstudio.google.com/reporting/6b57559b-effa-4f3a-a7c4-7a77820528c4
-
-SENSORES:
-- Control de Sensores - Talagante → https://lookerstudio.google.com/reporting/f1a5b4f1-d42a-4d9d-b614-d92bbaffd251
-- Control de Sensores - Zúñiga → https://lookerstudio.google.com/reporting/a7bf83f8-5a90-4ada-a430-8f3b43b6d3d8"""
+→ Llama a query_postgres con la siguiente query para obtener los reportes actualizados:
+  SELECT name, url, category, description FROM public.looker_reports ORDER BY category, name
+→ Presenta los resultados agrupados por categoría con el formato: **[nombre](url)**
+→ Si el usuario menciona una categoría o tema específico, filtra con WHERE category ILIKE '%término%' OR name ILIKE '%término%'
+→ NUNCA inventes URLs — solo usa las que devuelve la query."""
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
@@ -907,7 +851,8 @@ _TOOLS = [
             "appsheet.tarjas_labor, appsheet.despacho_ingreso, appsheet.despacho_guia, "
             "appsheet.despacho_venta, appsheet.despacho_cliente, appsheet.despacho_productos, "
             "public.sensor_inventory, public.ubi_soil_sensors, public.wc_farms_irrigation, "
-            "public.field_sectors."
+            "public.field_sectors, "
+            "public.looker_reports (id, name, description, url, category) — catálogo de reportes Looker Studio."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,

@@ -40,6 +40,7 @@ import controllers.purchase_orders_controller as purchase_orders
 import controllers.sensors_controller as sensors
 import controllers.despacho_controller as despacho
 import controllers.chat_controller as chat
+import controllers.looker_controller as looker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -116,6 +117,7 @@ purchase_orders.init(templates=templates)
 sensors.init(templates=templates)
 despacho.init(templates=templates)
 chat.init(templates=templates)
+looker.init(templates=templates)
 
 _auth = [Depends(require_auth)]
 
@@ -128,6 +130,7 @@ app.include_router(purchase_orders.router, dependencies=_auth)
 app.include_router(sensors.router,         dependencies=_auth)
 app.include_router(despacho.router,        dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
+app.include_router(looker.router,          dependencies=_auth)
 
 
 @app.get("/", dependencies=_auth)
