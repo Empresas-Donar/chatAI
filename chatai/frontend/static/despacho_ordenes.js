@@ -7,9 +7,9 @@ function esc(s) {
 }
 function parseFecha(s) {
   if (!s) return '—';
-  // stored as DD/MM/YYYY HH:MM:SS
+  // stored as MM/DD/YYYY HH:MM:SS
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  if (m) return `${m[2]}-${m[1]}-${m[3]}`;
   return s;
 }
 
@@ -17,13 +17,10 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/despacho/ordenes/filters');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { clientes, choferes, productos } = await res.json();
+    const { clientes, productos } = await res.json();
 
     const selC = document.getElementById('fil-cliente');
     clientes.forEach(c => { const o = document.createElement('option'); o.value = o.textContent = c; selC.appendChild(o); });
-
-    const selCh = document.getElementById('fil-chofer');
-    choferes.forEach(c => { const o = document.createElement('option'); o.value = o.textContent = c; selCh.appendChild(o); });
 
     const selP = document.getElementById('fil-producto');
     productos.forEach(c => { const o = document.createElement('option'); o.value = o.textContent = c; selP.appendChild(o); });
@@ -36,7 +33,6 @@ document.getElementById('btn-apply').addEventListener('click', fetchOrdenes);
 
 async function fetchOrdenes() {
   const cliente  = document.getElementById('fil-cliente').value;
-  const chofer   = document.getElementById('fil-chofer').value;
   const producto = document.getElementById('fil-producto').value;
 
   hideError();
@@ -50,7 +46,6 @@ async function fetchOrdenes() {
   try {
     const params = new URLSearchParams();
     if (cliente)  params.set('cliente', cliente);
-    if (chofer)   params.set('chofer', chofer);
     if (producto) params.set('producto', producto);
 
     const res = await fetch('/api/despacho/ordenes?' + params);
@@ -83,13 +78,12 @@ function render({ ordenes, kpi }) {
   ordenes.forEach(r => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="white-space:nowrap">${esc(parseFecha(r.fecha_cosecha))}</td>
+      <td style="white-space:nowrap">${esc(parseFecha(r.fecha))}</td>
       <td>${esc(r.cliente)}</td>
       <td>${esc(r.producto)}</td>
-      <td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.cc)}">${esc(r.cc)}</td>
+      <td>${esc(r.descripcion)}</td>
+      <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.cc)}">${esc(r.cc)}</td>
       <td class="num">${fmtN(r.cantidad)}</td>
-      <td>${esc(r.chofer)}</td>
-      <td>${esc(r.patente)}</td>
     `;
     tbody.appendChild(tr);
   });

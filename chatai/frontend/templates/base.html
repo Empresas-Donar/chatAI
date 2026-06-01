@@ -79,9 +79,22 @@
     "label": "Odoo",
     "icon": "odoo",
     "children": [
-      { "href": "/odoo/tarjas",   "label": "Orden de compra" },
-      { "href": "/tarjas/notas",  "label": "Nota de crédito" },
-      { "href": "/despacho/guia", "label": "Guía de despacho" },
+      {
+        "label": "Tarjas",
+        "icon": "clipboard",
+        "children": [
+          { "href": "/odoo/tarjas",  "label": "Orden de compra" },
+          { "href": "/tarjas/notas", "label": "Nota de crédito" },
+        ]
+      },
+      {
+        "label": "Despachos",
+        "icon": "truck",
+        "children": [
+          { "href": "/despacho/ordenes", "label": "Órdenes de venta" },
+          { "href": "/despacho/guia",    "label": "Guía de despacho" },
+        ]
+      },
     ]
   },
   {

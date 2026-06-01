@@ -1206,13 +1206,13 @@ async def get_tarjas_notas_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
-                "WHERE nombre_campo IS NOT NULL ORDER BY nombre_campo"
+                "WHERE nombre_campo IS NOT NULL AND estado = 'Aprobado' ORDER BY nombre_campo"
             )
             campos = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "WHERE contratista IS NOT NULL AND estado = 'Aprobado' ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
     finally:
@@ -1236,7 +1236,7 @@ async def get_tarjas_notas(
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
-    filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s", "estado = 'Aprobado'"]
     params: list = [fecha_inicio, fecha_termino, contratista]
 
     if campo:

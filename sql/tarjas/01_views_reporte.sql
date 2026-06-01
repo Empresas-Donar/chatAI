@@ -56,6 +56,7 @@ SELECT DISTINCT
     )                                                                       AS "% Tipo de pago"
 
 FROM appsheet.tarjas_pagos p
+WHERE p.estado = 'Aprobado'
 ORDER BY
     p.fecha::DATE DESC,
     p.contratista,

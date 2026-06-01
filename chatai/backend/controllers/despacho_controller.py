@@ -323,31 +323,24 @@ async def get_despacho_ordenes_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT cliente FROM appsheet.despacho_resumen "
+                "SELECT DISTINCT cliente FROM appsheet.despacho_venta "
                 "WHERE cliente IS NOT NULL ORDER BY cliente"
             )
             clientes = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT chofer FROM appsheet.despacho_resumen "
-                "WHERE chofer IS NOT NULL ORDER BY chofer"
-            )
-            choferes = [r[0] for r in cur.fetchall()]
-
-            cur.execute(
-                "SELECT DISTINCT producto FROM appsheet.despacho_resumen "
+                "SELECT DISTINCT producto FROM appsheet.despacho_venta "
                 "WHERE producto IS NOT NULL ORDER BY producto"
             )
             productos = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
-    return {"clientes": clientes, "choferes": choferes, "productos": productos}
+    return {"clientes": clientes, "productos": productos}
 
 
 @router.get("/api/despacho/ordenes")
 async def get_despacho_ordenes(
     cliente: str = Query(None),
-    chofer: str = Query(None),
     producto: str = Query(None),
 ):
     try:
@@ -360,9 +353,6 @@ async def get_despacho_ordenes(
     if cliente:
         filters.append("cliente = %s")
         params.append(cliente)
-    if chofer:
-        filters.append("chofer = %s")
-        params.append(chofer)
     if producto:
         filters.append("producto = %s")
         params.append(producto)
@@ -375,24 +365,23 @@ async def get_despacho_ordenes(
                 SELECT
                     COALESCE(cliente, '—')          AS cliente,
                     COALESCE(producto, '—')         AS producto,
-                    COALESCE(cc, '—')               AS cc,
+                    COALESCE(descripcion, '—')      AS descripcion,
                     COALESCE(cantidad, '0')         AS cantidad,
-                    COALESCE(chofer, '—')           AS chofer,
-                    COALESCE(patente, '—')          AS patente,
-                    fecha_cosecha
-                FROM appsheet.despacho_resumen
+                    COALESCE(centro_costo, '—')     AS cc,
+                    fecha
+                FROM appsheet.despacho_venta
                 {where}
-                ORDER BY fecha_cosecha DESC, cliente, cc
+                ORDER BY fecha DESC, cliente, producto
             """, params)
             ordenes = _rows_to_dicts(cur)
 
             cur.execute(f"""
                 SELECT
-                    COUNT(*)                        AS total_ordenes,
+                    COUNT(*)                                        AS total_ordenes,
                     COALESCE(SUM(NULLIF(cantidad, '')::numeric), 0) AS total_cantidad,
-                    COUNT(DISTINCT cliente)         AS total_clientes,
-                    COUNT(DISTINCT cc)              AS total_ccs
-                FROM appsheet.despacho_resumen
+                    COUNT(DISTINCT cliente)                         AS total_clientes,
+                    COUNT(DISTINCT centro_costo)                    AS total_ccs
+                FROM appsheet.despacho_venta
                 {where}
             """, params)
             kpi = _rows_to_dicts(cur)[0]
