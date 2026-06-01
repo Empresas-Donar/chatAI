@@ -26,6 +26,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
+# Cloud Build injects DATABASE_URL from Secret Manager — parse it into
+# individual env vars that db.get_connection() expects.
+_db_url = os.environ.get("DATABASE_URL", "")
+if _db_url and not os.environ.get("DB_HOST"):
+    from urllib.parse import urlparse, unquote
+    _u = urlparse(_db_url)
+    os.environ["DB_USER"]     = unquote(_u.username or "")
+    os.environ["DB_PASSWORD"] = unquote(_u.password or "")
+    os.environ["DB_HOST"]     = _u.hostname or ""
+    os.environ["DB_PORT"]     = str(_u.port or 5432)
+    os.environ["DB_NAME"]     = _u.path.lstrip("/")
+
 from db import get_connection
 from auth import get_user_role
 
