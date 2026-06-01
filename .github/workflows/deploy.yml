@@ -18,6 +18,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Role security tests — bloquea el deploy si los permisos están mal ──
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install psycopg2-binary python-dotenv pytest itsdangerous fastapi
+
+      - name: Run role security tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        run: python -m pytest chatai/tests/test_roles.py -v --tb=short
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:

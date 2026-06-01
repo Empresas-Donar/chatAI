@@ -27,11 +27,18 @@ steps:
       - .
 
   # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────
-  # Note: Cloud Build's default service account lacks run.services.get permission.
-  # Run deploy manually after a successful build:
-  #   gcloud run deploy chatai \
-  #     --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest \
-  #     --region=southamerica-west1 --project=integraciones-484915 --platform=managed
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'cloud-run-deploy'
+    waitFor: ['docker-build']
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - chatai
+      - --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
+      - --region=southamerica-west1
+      - --project=integraciones-484915
+      - --platform=managed
 
 availableSecrets:
   secretManager:
