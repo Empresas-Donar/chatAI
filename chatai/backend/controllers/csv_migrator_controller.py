@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from auth import require_auth
+from auth import require_auth, require_admin
 from models.migration_models import SyncResult, TableAnalysis
 from services.csv_parser import parse_csv
 from services.sync_service import create_log_queue, get_log_queue, remove_log_queue, sync
@@ -47,7 +47,7 @@ def init(upload_dir: Path, templates: Jinja2Templates) -> None:
 
 
 @router.get("/migrador", response_class=HTMLResponse)
-async def migrador_page(request: Request):
+async def migrador_page(request: Request, _admin=Depends(require_admin)):
     return _templates.TemplateResponse(request, "index.html")
 
 

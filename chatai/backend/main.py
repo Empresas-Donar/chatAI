@@ -41,6 +41,7 @@ import controllers.sensors_controller as sensors
 import controllers.despacho_controller as despacho
 import controllers.chat_controller as chat
 import controllers.looker_controller as looker
+import controllers.roles_controller as roles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,8 +87,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# Inject current_user into every template context automatically
-from auth import get_current_user as _get_current_user
+# Inject current_user and user_role into every template context automatically
+from auth import get_current_user as _get_current_user, get_user_role as _get_user_role
 _orig_response = templates.TemplateResponse
 
 def _template_response_with_user(request, name=None, context=None, *args, **kwargs):
@@ -96,7 +97,9 @@ def _template_response_with_user(request, name=None, context=None, *args, **kwar
         name, request = request, context
         context = args[0] if args else {}
     context = context or {}
-    context.setdefault("current_user", _get_current_user(request))
+    user = _get_current_user(request)
+    context.setdefault("current_user", user)
+    context.setdefault("user_role", _get_user_role(user) if user else "user")
     return _orig_response(request, name, context, **kwargs)
 
 templates.TemplateResponse = _template_response_with_user
@@ -118,6 +121,7 @@ sensors.init(templates=templates)
 despacho.init(templates=templates)
 chat.init(templates=templates)
 looker.init(templates=templates)
+roles.init(templates=templates)
 
 _auth = [Depends(require_auth)]
 
@@ -131,6 +135,7 @@ app.include_router(sensors.router,         dependencies=_auth)
 app.include_router(despacho.router,        dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
 app.include_router(looker.router,          dependencies=_auth)
+app.include_router(roles.router,           dependencies=_auth)
 
 
 @app.get("/", dependencies=_auth)

@@ -100,10 +100,12 @@
   {
     "label": "Utilidades",
     "icon": "tools",
+    "admin_only": true,
     "children": [
       { "href": "/migrador",           "label": "Appsheet to PostgreSQL" },
       { "href": "/chat/prompt-editor", "label": "Prompt del sistema" },
       { "href": "/looker",             "label": "Looker Studio" },
+      { "href": "/utilidades/roles",   "label": "Roles de usuario" },
     ]
   },
 ] %}
@@ -122,6 +124,7 @@
 
   <div class="navbar-nav">
     {% for item in nav_menu %}
+      {% if not (item.admin_only is defined and item.admin_only and user_role != 'admin') %}
 
       {% if item.href is defined %}
         {# ── Simple top-level link ── #}
@@ -212,6 +215,7 @@
         </div>
 
       {% endif %}
+      {% endif %}{# end admin_only guard #}
     {% endfor %}
   </div>
 
@@ -257,6 +261,7 @@
   </div>
   <nav class="mobile-nav">
     {% for item in nav_menu %}
+      {% if not (item.admin_only is defined and item.admin_only and user_role != 'admin') %}
       {% if item.href is defined %}
         <a href="{{ item.href }}" class="mobile-nav-link{% if request.url.path == item.href %} active{% endif %}">
           {{ item.label }}
@@ -283,6 +288,7 @@
           {% endfor %}
         </div>
       {% endif %}
+      {% endif %}{# end admin_only guard #}
     {% endfor %}
     <a href="/logout" class="mobile-nav-logout">Cerrar sesión</a>
   </nav>

@@ -9,9 +9,11 @@ from typing import Optional
 
 _log = logging.getLogger("chat_controller")
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+
+from auth import require_admin
 
 from google import genai
 from google.genai import types
@@ -1203,17 +1205,17 @@ async def clear_history(request: Request):
 
 
 @router.get("/prompt-editor", response_class=HTMLResponse)
-async def prompt_editor_page(request: Request):
+async def prompt_editor_page(request: Request, _admin=Depends(require_admin)):
     return _templates.TemplateResponse(request, "prompt_editor.html")
 
 
 @router.get("/prompt")
-async def get_prompt():
+async def get_prompt(_admin=Depends(require_admin)):
     return JSONResponse({"prompt": _SYSTEM})
 
 
 @router.post("/prompt")
-async def update_prompt(request: Request):
+async def update_prompt(request: Request, _admin=Depends(require_admin)):
     from fastapi import HTTPException
     body = await request.json()
     new_prompt = body.get("prompt", "").strip()
@@ -1273,11 +1275,24 @@ async def get_prompt_version(version_id: str):
     })
 
 
+_ROLE_RESTRICTION_USER = """
+---
+RESTRICCIÓN DE ACCESO ACTIVA — ROL: USUARIO
+El usuario autenticado tiene rol "usuario" (acceso básico).
+NO debes responder consultas ni extraer datos de:
+- Remuneraciones, sueldos, liquidaciones, nómina, RRHH
+- Módulo de Ventas: facturación a clientes, márgenes, precios de venta, cuentas por cobrar
+Si el usuario pregunta sobre estos temas, responde exactamente:
+"No tengo permisos suficientes para acceder a esta información. Contacta a un administrador."
+---
+"""
+
 @router.post("/ask")
 async def chat_ask(request: Request):
-    from auth import get_current_user
+    from auth import get_current_user, get_user_role
     from fastapi import HTTPException
     username = get_current_user(request) or "anonymous"
+    user_role = get_user_role(username)
 
     body = await request.json()
     messages = body.get("messages", [])
@@ -1319,10 +1334,11 @@ async def chat_ask(request: Request):
         role = "user" if m["role"] == "user" else "model"
         history.append(types.Content(role=role, parts=[types.Part(text=m["parts"])]))
 
+    effective_system = _SYSTEM + (_ROLE_RESTRICTION_USER if user_role != "admin" else "")
     chat = _client.chats.create(
         model=MODEL,
         config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM,
+            system_instruction=effective_system,
             tools=[types.Tool(function_declarations=_TOOLS)],
         ),
         history=history,

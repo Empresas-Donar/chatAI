@@ -7,13 +7,17 @@ Flow:
   3. GET  /logout clears the cookie → redirect to /login
 
 Cookie is signed with ITSDANGEROUS using SECRET_KEY from .env.
+
+Roles (stored in public.user_roles):
+  admin — full access including Remuneraciones/Ventas and Utilidades
+  user  — read access; blocked from sensitive modules
 """
 
 import os
 import secrets
 from typing import Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -68,6 +72,47 @@ def check_credentials(username: str, password: str) -> bool:
     user_ok = secrets.compare_digest(username.encode(), expected_user.encode())
     pass_ok = secrets.compare_digest(password.encode(), expected_pass.encode())
     return user_ok and pass_ok
+
+
+def get_user_role(email: str) -> str:
+    """Return 'admin' or 'user' for a given email.
+
+    Bootstrap rule: if the user_roles table is empty, everyone is admin
+    so the first administrator can seed the table without being locked out.
+    Once at least one row exists, only explicitly assigned roles apply.
+    """
+    if not email:
+        return "user"
+    try:
+        from db import get_connection
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM public.user_roles")
+                total = cur.fetchone()[0]
+                if total == 0:
+                    return "admin"
+                cur.execute(
+                    "SELECT role FROM public.user_roles WHERE email = %s",
+                    (email.strip().lower(),)
+                )
+                row = cur.fetchone()
+                return row[0] if row else "user"
+        finally:
+            conn.close()
+    except Exception:
+        return "user"
+
+
+def require_admin(request: Request):
+    """FastAPI dependency — raises 403 if user is not an admin."""
+    user = get_current_user(request)
+    if not user:
+        raise _LoginRedirect(request.url.path)
+    role = get_user_role(user)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Acceso restringido a administradores")
+    return user
 
 
 class _LoginRedirect(Exception):

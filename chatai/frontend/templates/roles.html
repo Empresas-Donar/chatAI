@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+
+{% block title %}Roles de usuario — Donar{% endblock %}
+
+{% block body %}
+<div class="rl-page">
+
+  <div class="rl-header">
+    <div>
+      <h1 class="rl-title">Roles de usuario</h1>
+      <p class="rl-sub">Asigna o modifica el rol de cada usuario de la plataforma. Los cambios aplican en el siguiente inicio de sesión.</p>
+    </div>
+    <button class="rl-btn rl-btn--primary" id="rlNewBtn">+ Asignar rol</button>
+  </div>
+
+  <!-- ── Legend ── -->
+  <div class="rl-legend">
+    <div class="rl-legend-item">
+      <span class="rl-badge rl-badge--admin">Administrador</span>
+      <span class="rl-legend-desc">Acceso completo: Remuneraciones, Ventas, Utilidades y todos los módulos.</span>
+    </div>
+    <div class="rl-legend-item">
+      <span class="rl-badge rl-badge--user">Usuario</span>
+      <span class="rl-legend-desc">Acceso a Inventario, Compras, Producción, Contabilidad Básica y Operaciones. Sin acceso a Remuneraciones/RRHH ni Ventas.</span>
+    </div>
+  </div>
+
+  <!-- ── Modal form ── -->
+  <div class="rl-overlay" id="rlOverlay" style="display:none">
+    <div class="rl-modal">
+      <div class="rl-modal-header">
+        <span class="rl-modal-title" id="rlModalTitle">Asignar rol</span>
+        <button class="rl-modal-close" id="rlCloseBtn" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="rl-modal-body">
+        <label class="rl-label">Email <span class="rl-required">*</span></label>
+        <input class="rl-input" id="rlFldEmail" type="email" placeholder="usuario@empresasdonar.cl" maxlength="200" />
+
+        <label class="rl-label">Rol <span class="rl-required">*</span></label>
+        <div class="rl-radio-group">
+          <label class="rl-radio-option">
+            <input type="radio" name="rlRole" value="admin" id="rlRoleAdmin" />
+            <span class="rl-radio-label">
+              <span class="rl-badge rl-badge--admin">Administrador</span>
+              <span class="rl-radio-desc">Acceso irrestricto a todos los módulos, incluyendo Remuneraciones y Ventas.</span>
+            </span>
+          </label>
+          <label class="rl-radio-option">
+            <input type="radio" name="rlRole" value="user" id="rlRoleUser" checked />
+            <span class="rl-radio-label">
+              <span class="rl-badge rl-badge--user">Usuario</span>
+              <span class="rl-radio-desc">Acceso operacional. No puede ver sueldos, facturación comercial ni utilidades.</span>
+            </span>
+          </label>
+        </div>
+
+        <p class="rl-form-error" id="rlFormError" style="display:none"></p>
+      </div>
+      <div class="rl-modal-footer">
+        <button class="rl-btn rl-btn--secondary" id="rlCancelBtn">Cancelar</button>
+        <button class="rl-btn rl-btn--primary" id="rlSaveBtn">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Table ── -->
+  <div class="rl-table-wrap" id="rlTableWrap">
+    <table class="rl-table" id="rlTable" style="display:none">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Rol</th>
+          <th>Última conexión</th>
+          <th>Mensajes en chat</th>
+          <th>Asignado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rlTableBody"></tbody>
+    </table>
+    <p class="rl-empty" id="rlEmpty">Cargando…</p>
+  </div>
+
+</div>
+
+<style>
+.rl-page {
+  padding: 28px 32px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.rl-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.rl-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.rl-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── Legend ── */
+.rl-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+}
+.rl-legend-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.rl-legend-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Badges ── */
+.rl-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rl-badge--admin {
+  background: #ebf4ff;
+  color: #2b6cb0;
+  border: 1px solid #bee3f8;
+}
+.rl-badge--user {
+  background: #f0fff4;
+  color: #276749;
+  border: 1px solid #9ae6b4;
+}
+
+/* ── Buttons ── */
+.rl-btn {
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.rl-btn--primary {
+  background: var(--terra);
+  color: #fff;
+  border-color: var(--terra);
+}
+.rl-btn--primary:hover:not(:disabled) { background: var(--terra-dark); }
+.rl-btn--primary:disabled             { opacity: 0.5; cursor: not-allowed; }
+.rl-btn--secondary {
+  background: none;
+  color: var(--text-muted);
+}
+.rl-btn--secondary:hover:not(:disabled) { background: var(--bg-warm); color: var(--text); }
+.rl-btn--danger {
+  background: none;
+  color: #e53e3e;
+  border-color: transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.rl-btn--danger:hover { background: #fff5f5; }
+.rl-btn--icon {
+  background: none;
+  border-color: transparent;
+  color: var(--text-light);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.rl-btn--icon:hover { background: var(--bg-warm); color: var(--text); }
+
+/* ── Modal ── */
+.rl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.rl-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+}
+.rl-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.rl-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.rl-modal-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.rl-modal-close:hover { background: var(--bg-warm); color: var(--text); }
+.rl-modal-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rl-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-light);
+  margin-bottom: 2px;
+  display: block;
+}
+.rl-required { color: #e53e3e; }
+.rl-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.rl-input:focus { outline: none; border-color: var(--terra); }
+.rl-input:disabled { opacity: 0.55; cursor: not-allowed; background: var(--bg-warm); }
+
+/* ── Radio group ── */
+.rl-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rl-radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.rl-radio-option:has(input:checked) {
+  border-color: var(--terra);
+  background: var(--bg-warm);
+}
+.rl-radio-option input[type="radio"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--terra);
+}
+.rl-radio-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rl-radio-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.rl-form-error {
+  font-size: 12px;
+  color: #e53e3e;
+  margin: 0;
+}
+.rl-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Table ── */
+.rl-table-wrap { overflow-x: auto; }
+.rl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.rl-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-light);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--border);
+}
+.rl-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: middle;
+}
+.rl-table tbody tr:hover td { background: var(--bg-warm); }
+.rl-table tbody tr:last-child td { border-bottom: none; }
+.rl-table-actions { display: flex; gap: 4px; justify-content: flex-end; }
+
+.rl-td-muted { color: var(--text-muted); font-size: 12px; }
+
+.rl-chat-count {
+  display: inline-block;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 28px;
+  text-align: center;
+}
+.rl-chat-none { color: var(--text-light); font-size: 12px; }
+
+.rl-empty {
+  font-size: 13px;
+  color: var(--text-light);
+  text-align: center;
+  padding: 48px 0;
+}
+
+@media (max-width: 600px) {
+  .rl-page { padding: 16px; }
+  .rl-header { flex-direction: column; }
+  .rl-table th:nth-child(4),
+  .rl-table td:nth-child(4),
+  .rl-table th:nth-child(5),
+  .rl-table td:nth-child(5) { display: none; }
+}
+</style>
+
+<script>
+(function () {
+  const overlay    = document.getElementById('rlOverlay');
+  const modalTitle = document.getElementById('rlModalTitle');
+  const fldEmail   = document.getElementById('rlFldEmail');
+  const formError  = document.getElementById('rlFormError');
+  const saveBtn    = document.getElementById('rlSaveBtn');
+  const tbody      = document.getElementById('rlTableBody');
+  const table      = document.getElementById('rlTable');
+  const empty      = document.getElementById('rlEmpty');
+
+  let _editingEmail = null;
+  let _rows = [];
+
+  function getRoleValue() {
+    return document.querySelector('input[name="rlRole"]:checked')?.value || 'user';
+  }
+
+  function setRoleValue(val) {
+    const el = document.querySelector(`input[name="rlRole"][value="${val}"]`);
+    if (el) el.checked = true;
+  }
+
+  // ── Modal ──
+  function openModal(row) {
+    _editingEmail = row ? row.email : null;
+    modalTitle.textContent = row ? 'Editar rol' : 'Asignar rol';
+    fldEmail.value = row ? row.email : '';
+    fldEmail.disabled = !!row;
+    setRoleValue(row ? row.role : 'user');
+    hideError();
+    overlay.style.display = 'flex';
+    if (!row) fldEmail.focus();
+  }
+
+  function closeModal() {
+    overlay.style.display = 'none';
+    _editingEmail = null;
+    fldEmail.disabled = false;
+  }
+
+  function showError(msg) { formError.textContent = msg; formError.style.display = 'block'; }
+  function hideError()    { formError.textContent = ''; formError.style.display = 'none'; }
+
+  document.getElementById('rlNewBtn').addEventListener('click', () => openModal(null));
+  document.getElementById('rlCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('rlCancelBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+  // ── Save ──
+  saveBtn.addEventListener('click', async () => {
+    hideError();
+    const email = fldEmail.value.trim().toLowerCase();
+    const role  = getRoleValue();
+    if (!email) { showError('El email es obligatorio.'); fldEmail.focus(); return; }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando…';
+    try {
+      const res = await fetch('/api/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error al guardar');
+      closeModal();
+      await loadRoles();
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar';
+    }
+  });
+
+  // ── Delete ──
+  async function deleteRole(email) {
+    if (!confirm(`¿Eliminar el rol de "${email}"?\n\nEl usuario quedará con acceso de tipo Usuario por defecto.`)) return;
+    try {
+      const res = await fetch(`/api/roles/${encodeURIComponent(email)}`, { method: 'DELETE' });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Error'); }
+      await loadRoles();
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
+  // ── Render ──
+  function renderRows(rows) {
+    if (rows.length === 0) {
+      table.style.display = 'none';
+      empty.textContent = 'No hay roles asignados. Usa el botón "+" para agregar el primero.';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    table.style.display = '';
+
+    try {
+      tbody.innerHTML = rows.map(r => {
+        const lastSeen  = r.last_seen || '—';
+        const chatCount = (r.chat_messages > 0)
+          ? `<span class="rl-chat-count">${Number(r.chat_messages)}</span>`
+          : '<span class="rl-chat-none">—</span>';
+        return `<tr>
+          <td>${escHtml(r.email)}</td>
+          <td><span class="rl-badge rl-badge--${escHtml(r.role)}">${r.role === 'admin' ? 'Administrador' : 'Usuario'}</span></td>
+          <td class="rl-td-muted">${escHtml(lastSeen)}</td>
+          <td>${chatCount}</td>
+          <td class="rl-td-muted">${escHtml(r.created_at)}</td>
+          <td>
+            <div class="rl-table-actions">
+              <button class="rl-btn rl-btn--icon" data-edit="${escHtml(r.email)}" title="Editar">✏️</button>
+              <button class="rl-btn rl-btn--danger" data-del="${escHtml(r.email)}" title="Eliminar">Eliminar</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    } catch(err) {
+      empty.textContent = 'Error al renderizar tabla: ' + err.message;
+      empty.style.display = 'block';
+      table.style.display = 'none';
+      return;
+    }
+
+    tbody.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = _rows.find(r => r.email === btn.dataset.edit);
+        if (row) openModal(row);
+      });
+    });
+    tbody.querySelectorAll('[data-del]').forEach(btn => {
+      btn.addEventListener('click', () => deleteRole(btn.dataset.del));
+    });
+  }
+
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Load ──
+  async function loadRoles() {
+    empty.textContent = 'Cargando…';
+    empty.style.display = 'block';
+    table.style.display = 'none';
+    try {
+      const res  = await fetch('/api/roles');
+      if (res.status === 403) {
+        empty.textContent = 'Acceso restringido a administradores.';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        empty.textContent = `Error del servidor (${res.status}): ${err.detail || res.statusText}`;
+        return;
+      }
+      const data = await res.json();
+      _rows = data.roles || [];
+      renderRows(_rows);
+    } catch(e) {
+      empty.textContent = 'Error al cargar los roles: ' + e.message;
+    }
+  }
+
+  loadRoles();
+})();
+</script>
+{% endblock body %}
