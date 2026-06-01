@@ -97,7 +97,7 @@ async def list_roles(_admin=Depends(require_admin)):
                     r.role,
                     TO_CHAR(r.created_at AT TIME ZONE 'America/Santiago', 'DD/MM/YYYY HH24:MI') AS created_at,
                     TO_CHAR(r.updated_at AT TIME ZONE 'America/Santiago', 'DD/MM/YYYY HH24:MI') AS updated_at,
-                    TO_CHAR(MAX(h.created_at) AT TIME ZONE 'America/Santiago', 'DD/MM/YYYY HH24:MI') AS last_seen,
+                    TO_CHAR(MAX(h.created_at) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santiago', 'DD/MM/YYYY HH24:MI') AS last_seen,
                     COUNT(CASE WHEN h.role = 'user' THEN 1 END) AS chat_messages
                 FROM public.user_roles r
                 LEFT JOIN public.chat_history h ON h.username = r.email
