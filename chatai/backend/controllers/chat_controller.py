@@ -937,7 +937,8 @@ _PK_CANDIDATES = ["id", "name", "id_Resumen", "id_resumen", "id_guia", "id_venta
 
 def _extract_table_name(sql: str) -> str:
     """Extract the main table name from a SQL query."""
-    table_match = re.search(r'\bFROM\s+([`"\w\.]+)', sql, re.IGNORECASE)
+    # Include hyphens to handle BQ paths like `ace-scarab-484515-v1.odoo_data.Tabla`
+    table_match = re.search(r'\bFROM\s+([`"\w\.\-]+)', sql, re.IGNORECASE)
     if not table_match:
         return "tabla desconocida"
     table = table_match.group(1).strip('`"')
@@ -1046,8 +1047,8 @@ def _save_messages(username: str, user_msg: str, model_reply: str, traces: list 
             cur.execute(
                 "INSERT INTO public.chat_history (username, role, message, traces, charts) VALUES (%s, %s, %s, %s, %s)",
                 (username, "model", model_reply,
-                 json.dumps(traces) if traces else None,
-                 json.dumps(charts) if charts else None),
+                 json.dumps(traces, default=str) if traces else None,
+                 json.dumps(charts, default=str) if charts else None),
             )
         conn.commit()
     except Exception:
