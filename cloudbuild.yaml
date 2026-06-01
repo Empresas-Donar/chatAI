@@ -8,7 +8,7 @@ steps:
     args:
       - -c
       - |
-        pip install --quiet psycopg2-binary python-dotenv pytest itsdangerous &&
+        pip install --quiet psycopg2-binary python-dotenv pytest itsdangerous fastapi &&
         python -m pytest chatai/tests/test_roles.py -v --tb=short
     secretEnv:
       - DATABASE_URL
