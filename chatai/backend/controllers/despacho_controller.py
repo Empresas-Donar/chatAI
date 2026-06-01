@@ -391,6 +391,62 @@ async def get_despacho_ordenes(
     return {"ordenes": ordenes, "kpi": kpi}
 
 
+@router.get("/api/despacho/ordenes/download")
+async def download_despacho_ordenes(
+    cliente: str = Query(None),
+    producto: str = Query(None),
+):
+    """CSV de órdenes de venta listo para importar en Odoo."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    filters = []
+    params: list = []
+    if cliente:
+        filters.append("cliente = %s")
+        params.append(cliente)
+    if producto:
+        filters.append("producto = %s")
+        params.append(producto)
+
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT
+                    COALESCE(cliente, '')     AS cliente,
+                    COALESCE(producto, '')    AS producto,
+                    COALESCE(descripcion, '') AS descripcion,
+                    COALESCE(cantidad, '0')   AS cantidad,
+                    COALESCE(centro_costo, '') AS centro_costo,
+                    fecha
+                FROM appsheet.despacho_venta
+                {where}
+                ORDER BY fecha DESC, cliente, producto
+            """, params)
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(["Fecha", "Cliente", "Producto", "Descripción", "Centro de Costo", "Cantidad"])
+    for r in rows:
+        writer.writerow([r[5], r[0], r[1], r[2], r[4], r[3]])
+
+    output.seek(0)
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    filename = f"ordenes_venta_{today}.csv"
+    return StreamingResponse(
+        iter([output.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ===========================================================================
 # Resumen de despacho — dashboard view
 # ===========================================================================

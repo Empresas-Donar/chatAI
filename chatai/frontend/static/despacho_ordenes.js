@@ -31,6 +31,15 @@ async function loadFilters() {
 
 document.getElementById('btn-apply').addEventListener('click', fetchOrdenes);
 
+document.getElementById('btn-download').addEventListener('click', () => {
+  const cliente  = document.getElementById('fil-cliente').value;
+  const producto = document.getElementById('fil-producto').value;
+  const params = new URLSearchParams();
+  if (cliente)  params.set('cliente', cliente);
+  if (producto) params.set('producto', producto);
+  window.location.href = '/api/despacho/ordenes/download?' + params;
+});
+
 async function fetchOrdenes() {
   const cliente  = document.getElementById('fil-cliente').value;
   const producto = document.getElementById('fil-producto').value;
@@ -39,6 +48,7 @@ async function fetchOrdenes() {
   document.getElementById('kpi-bar').classList.add('hidden');
   document.getElementById('table-wrap').classList.add('hidden');
   document.getElementById('empty-box').classList.add('hidden');
+  document.getElementById('btn-download').disabled = true;
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true; btn.textContent = 'Cargando…';
@@ -57,6 +67,7 @@ async function fetchOrdenes() {
       return;
     }
     render(data);
+    document.getElementById('btn-download').disabled = false;
   } catch (e) {
     showError('Error: ' + e.message);
   } finally {

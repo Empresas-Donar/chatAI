@@ -29,9 +29,12 @@
       <label>Producto</label>
       <select id="fil-producto"><option value="">Todos</option></select>
     </div>
-    <div class="filter-group" style="flex:0;min-width:auto;justify-content:flex-end">
+    <div class="filter-group" style="flex:0;min-width:auto;justify-content:flex-end;gap:8px;display:flex;flex-direction:column">
       <label>&nbsp;</label>
-      <button class="btn btn-primary" id="btn-apply">Consultar</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" id="btn-apply">Consultar</button>
+        <button class="btn btn-secondary" id="btn-download" disabled title="Consulta primero para habilitar la descarga">↓ CSV</button>
+      </div>
     </div>
   </div>
 
