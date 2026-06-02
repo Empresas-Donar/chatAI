@@ -1051,7 +1051,8 @@ def _save_messages(username: str, user_msg: str, model_reply: str, traces: list 
                  json.dumps(charts, default=str) if charts else None),
             )
         conn.commit()
-    except Exception:
+    except Exception as e:
+        _log.error("_save_messages failed user=%s error=%s", username, e)
         conn.rollback()
     finally:
         conn.close()
@@ -1423,7 +1424,7 @@ async def chat_ask(request: Request):
     # and no tool was called (i.e. Gemini answered from memory)
     _has_numbers = bool(re.search(r'\b\d[\d\.]{2,}\b', final_text))
     _has_source  = "__source_badge__" in final_text or "📊 Fuente:" in final_text
-    _tool_was_called = len(collected_badges) > 0 or len(collected_charts) > 0
+    _tool_was_called = len(collected_badges) > 0 or len(collected_charts) > 0 or len(collected_traces) > 0
 
     if _has_numbers and not _has_source and not _tool_was_called:
         _log.warning(
