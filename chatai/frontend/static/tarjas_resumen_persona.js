@@ -201,6 +201,11 @@ function currentParams() {
   return params;
 }
 
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 function downloadExcel() {
   const params = currentParams();
   window.location.href = '/api/tarjas/resumen-persona/download-excel?' + params;
