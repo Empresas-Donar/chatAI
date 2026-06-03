@@ -110,44 +110,26 @@
 /* Download buttons */
 .filter-actions { display: flex; gap: 6px; align-items: flex-end; }
 
-@media print {
-  .page-header, .filter-bar { display: none !important; }
-  body { background: white !important; }
-  table { font-size: 9px; }
-  th, td { padding: 2px 4px; }
-}
+
 
 /* Print header — only visible when printing */
 #print-header {
   display: none;
 }
+
 @media print {
-  #print-header {
-    display: block;
-    margin-bottom: 16px;
-    border-bottom: 2px solid #1F4E79;
-    padding-bottom: 8px;
+  /* Hide navigation and filter bar */
+  nav, header, .filter-bar, .filter-actions, .page-header { display: none !important; }
+
+  /* Print header visible */
+  #print-header { display: block !important; }
+
+  /* Full width, no scroll clipping */
+  .trp-pivot-scroll, .tc-pivot-scroll, [style*="overflow"] {
+    overflow: visible !important;
+    max-width: none !important;
   }
-  #print-header h2 {
-    font-size: 15px;
-    font-weight: 700;
-    color: #1F4E79;
-    margin: 0 0 4px 0;
-  }
-  #print-header .ph-filters {
-    font-size: 10px;
-    color: #444;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  #print-header .ph-chip {
-    background: #f0f4f8;
-    border: 1px solid #ccd6e0;
-    border-radius: 4px;
-    padding: 1px 6px;
-  }
-  #print-header .ph-chip strong {
-    color: #1F4E79;
-  }
+
+  /* Prevent page breaks inside rows */
+  tr { page-break-inside: avoid; }
 }
