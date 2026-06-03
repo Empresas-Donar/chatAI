@@ -224,13 +224,7 @@ document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/resumen-horas/download-excel?' + currentParams();
 });
 document.getElementById('btn-pdf').addEventListener('click', () => {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('Horas extra por trabajador — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'),
-    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
-    'Tipo de pago': g('fil-tipo'),
-  });
+  window.open('/api/tarjas/resumen-horas/download-pdf?' + currentParams(), '_blank');
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {

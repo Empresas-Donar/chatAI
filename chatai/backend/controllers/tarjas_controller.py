@@ -38,6 +38,7 @@ import re
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
+from xhtml2pdf import pisa
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -103,6 +104,59 @@ def _serialize(v):
 def _rows_to_dicts(cur):
     cols = [d[0] for d in cur.description]
     return [{k: _serialize(v) for k, v in zip(cols, r)} for r in cur.fetchall()]
+
+
+# ===========================================================================
+# PDF helpers
+# ===========================================================================
+
+_PDF_CSS = """
+@page { size: A4 landscape; margin: 12mm 10mm; }
+body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #1a1a1a; margin: 0; }
+.ph { background: #1A1208; color: #F2C04A; padding: 8px 12px; margin-bottom: 12px; }
+.ph h1 { font-size: 13pt; font-weight: bold; color: #F2C04A; margin: 0 0 3px 0; }
+.ph-sub { font-size: 7.5pt; color: #C4A870; margin: 0; }
+.ph-chips { background: #2E1D08; padding: 5px 12px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { background: #3D2D10; border: 1px solid #5a4020; border-radius: 3px; padding: 2px 7px; font-size: 7pt; color: #e8d5a0; }
+.chip b { color: #F2C04A; }
+table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+th { background: #1A1208; color: #F2C04A; padding: 5px 6px; text-align: left; border: 1px solid #3D2D10; font-weight: bold; }
+th.num { text-align: right; }
+td { padding: 3px 6px; border: 1px solid #ddd; vertical-align: middle; }
+tr:nth-child(even) td { background: #faf8f5; }
+tr.worker-first td { border-top: 1.5px solid #F2C04A; }
+.num { text-align: right; }
+.total { text-align: right; font-weight: bold; background: #fdf6e3; border-left: 1.5px solid #F2C04A; }
+.section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #1A1208; }
+"""
+
+def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, filters: dict) -> str:
+    now = datetime.date.today().strftime("%-d de %B de %Y")
+    chips = ""
+    for k, v in filters.items():
+        if v:
+            chips += f'<span class="chip"><b>{k}:</b> {v}</span> '
+    return f"""
+    <div class="ph">
+      <h1>{title}</h1>
+      <p class="ph-sub">Generado el {now}</p>
+    </div>
+    <div class="ph-chips">
+      <span class="chip"><b>Desde:</b> {fecha_inicio}</span>
+      <span class="chip"><b>Hasta:</b> {fecha_termino}</span>
+      {chips}
+    </div>
+    """
+
+def _render_pdf(html: str, filename: str) -> StreamingResponse:
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ===========================================================================
@@ -1824,6 +1878,299 @@ async def download_tarjas_resumen_persona_tractorista_excel(
     for i in range(len(dates)+1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(4+i)].width=14
     return _excel_response(wb, f"tarjas_tractorista_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+# ===========================================================================
+# PDF download endpoints
+# ===========================================================================
+
+@router.get("/api/tarjas/resumen-persona/download-pdf")
+async def download_tarjas_resumen_persona_pdf(
+    fecha_inicio: str = Query(...), fecha_termino: str = Query(...),
+    trabajador: str = Query(None), tipo_pago: str = Query(None),
+    contratista: str = Query(None), empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+                f"COALESCE(SUM(total_trabajado),0) AS total "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    dates = sorted({r["fecha"] for r in rows})
+    workers: dict = {}
+    for r in rows:
+        k = (r["trabajador"] or "", r["tipo_pago"] or "")
+        if k not in workers:
+            workers[k] = {"by_date": {}, "total": 0}
+        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
+        workers[k]["total"] += float(r["total"] or 0)
+    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+
+    fmtCLP = lambda v: f"${v:,.0f}".replace(",", ".")
+    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%-d %b")}</th>' for d in dates)
+    rows_html = ""
+    prev = None
+    for (trab, tipo), entry in sorted_workers:
+        is_first = prev != trab
+        prev = trab
+        cls = "worker-first" if is_first else ""
+        rows_html += f'<tr class="{cls}"><td>{"<b>" + trab + "</b>" if is_first else ""}</td><td>{tipo}</td>'
+        for d in dates:
+            v = entry["by_date"].get(d, 0)
+            rows_html += f'<td class="num">{"" if not v else fmtCLP(v)}</td>'
+        rows_html += f'<td class="total">{fmtCLP(entry["total"])}</td></tr>'
+
+    header = _pdf_header("Detalle trabajador — Tarjas", fecha_inicio, fecha_termino,
+                         {"Empresa": empresa, "Contratista": contratista, "Trabajador": trabajador, "Tipo de pago": tipo_pago})
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <p class="section-title">Resumen por trabajador</p>
+    <table><thead>
+      <tr><th>Trabajador</th><th>Tipo de pago</th>{date_headers}<th class="num">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/general/download-pdf")
+async def download_tarjas_general_pdf(
+    fecha_inicio: str = Query(...), fecha_termino: str = Query(...),
+    centro_costo: str = Query(None), tipo_pago: str = Query(None),
+    labor: str = Query(None), contratista: str = Query(None), empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    where, params = _build_pagos_where(
+        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
+        contratista=contratista, nombre_campo=_empresa_to_campo(empresa),
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT trabajador, contratista, ROUND(AVG(total_trabajado)::numeric,0) AS promedio,
+                       COALESCE(SUM(total_trabajado),0) AS total
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY trabajador, contratista ORDER BY total DESC
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".")
+    rows_html = "".join(
+        f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td>'
+        f'<td class="num">{fmtCLP(r["promedio"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
+        for r in rows
+    )
+    header = _pdf_header("General — Tarjas", fecha_inicio, fecha_termino,
+                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <p class="section-title">Ranking por persona</p>
+    <table><thead>
+      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Promedio</th><th class="num">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"general_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/detalle/download-pdf")
+async def download_tarjas_detalle_pdf(
+    fecha_inicio: str = Query(...), fecha_termino: str = Query(...),
+    contratista: str = Query(None), centro_costo: str = Query(None),
+    tipo_pago: str = Query(None), labor: str = Query(None),
+    campo: str = Query(None), empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    filters = ["fecha BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
+    if campo: filters.append("nombre_campo = %s"); params.append(campo)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT tipo_pago, "CC" AS cc, "Nombre Labor" AS labor, jornadas,
+                       total_unitario, total_labor AS total, contratista, nombre_campo, fecha::text AS fecha
+                FROM appsheet.tarjas_reporte {where}
+                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
+    rows_html = "".join(
+        f'<tr><td>{r["tipo_pago"]}</td><td>{r["cc"]}</td><td>{r["labor"]}</td>'
+        f'<td>{r["contratista"]}</td><td>{r["nombre_campo"]}</td><td class="num">{r["jornadas"]}</td>'
+        f'<td class="num">{fmtCLP(r["total_unitario"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
+        for r in rows
+    )
+    header = _pdf_header("Detalle de la semana — Tarjas", fecha_inicio, fecha_termino,
+                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Tipo pago</th><th>CC</th><th>Labor</th><th>Contratista</th><th>Campo</th>
+      <th class="num">Jornadas</th><th class="num">Unitario</th><th class="num">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/contratista/download-pdf")
+async def download_tarjas_contratista_pdf(
+    fecha_inicio: str = Query(...), fecha_termino: str = Query(...),
+    contratista: str = Query(None), centro_costo: str = Query(None),
+    tipo_pago: str = Query(None), labor: str = Query(None), empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if centro_costo: filters.append("cuartel_cc = %s"); params.append(centro_costo)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if labor: filters.append("labor = %s"); params.append(labor)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT trabajador, contratista, labor, tipo_pago,
+                       COALESCE(SUM(total_trabajado),0) AS total, fecha::date::text AS fecha
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
+                ORDER BY contratista, trabajador, fecha::date
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".")
+    rows_html = "".join(
+        f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td><td>{r["labor"]}</td>'
+        f'<td>{r["tipo_pago"]}</td><td>{r["fecha"]}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
+        for r in rows
+    )
+    header = _pdf_header("Detalle contratista — Tarjas", fecha_inicio, fecha_termino,
+                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>Contratista</th><th>Labor</th><th>Tipo de pago</th><th>Fecha</th><th class="num">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"contratista_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/resumen-horas/download-pdf")
+async def download_tarjas_resumen_horas_pdf(
+    fecha_inicio: str = Query(...), fecha_termino: str = Query(...),
+    trabajador: str = Query(None), tipo_pago: str = Query(None),
+    contratista: str = Query(None), empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_trabajadas::numeric ELSE 0 END),0)::int AS horas "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    dates = sorted({r["fecha"] for r in rows})
+    workers: dict = {}
+    for r in rows:
+        k = (r["trabajador"] or "", r["tipo_pago"] or "")
+        if k not in workers:
+            workers[k] = {"by_date": {}, "total": 0}
+        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + (r["horas"] or 0)
+        workers[k]["total"] += (r["horas"] or 0)
+    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+
+    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%-d %b")}</th>' for d in dates)
+    rows_html = ""
+    prev = None
+    for (trab, tipo), entry in sorted_workers:
+        is_first = prev != trab
+        prev = trab
+        cls = "worker-first" if is_first else ""
+        rows_html += f'<tr class="{cls}"><td>{"<b>" + trab + "</b>" if is_first else ""}</td><td>{tipo}</td>'
+        for d in dates:
+            v = entry["by_date"].get(d, 0)
+            rows_html += f'<td class="num">{v if v else ""}</td>'
+        rows_html += f'<td class="total">{entry["total"]}</td></tr>'
+
+    header = _pdf_header("Horas extra por trabajador — Tarjas", fecha_inicio, fecha_termino,
+                         {"Empresa": empresa, "Contratista": contratista, "Trabajador": trabajador, "Tipo de pago": tipo_pago})
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>Tipo de pago</th>{date_headers}<th class="num">Total hrs</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"horas_{fecha_inicio}_{fecha_termino}.pdf")
 
 
 # ===========================================================================

@@ -206,12 +206,7 @@ function downloadExcel() {
 }
 
 function downloadPdf() {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('Detalle trabajador — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Empresa': g('fil-empresa'), 'Contratista': g('fil-contratista'),
-    'Trabajador': g('fil-trabajador'), 'Tipo de pago': g('fil-tipo'),
-  });
+  window.open('/api/tarjas/resumen-persona/download-pdf?' + currentParams(), '_blank');
 }
 
 function printWithHeader(title, filters) {

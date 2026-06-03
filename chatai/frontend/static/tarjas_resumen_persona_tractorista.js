@@ -236,13 +236,7 @@ document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/resumen-persona-tractorista/download-excel?' + currentParams();
 });
 document.getElementById('btn-pdf').addEventListener('click', () => {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('Detalle trabajador tractorista — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'),
-    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
-    'Tipo de pago': g('fil-tipo'), 'Máquina': g('fil-maquina'),
-  });
+  window.open('/api/tarjas/resumen-persona-tractorista/download-pdf?' + currentParams(), '_blank');
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {

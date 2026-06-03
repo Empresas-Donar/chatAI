@@ -175,13 +175,7 @@ document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/detalle-tractorista/download-excel?' + currentParams();
 });
 document.getElementById('btn-pdf').addEventListener('click', () => {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('Detalle tractorista — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'),
-    'Empresa': g('fil-empresa'), 'Campo': g('fil-campo'),
-    'CC': g('fil-cc'), 'Labor': g('fil-labor'),
-  });
+  window.open('/api/tarjas/detalle-tractorista/download-pdf?' + currentParams(), '_blank');
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {

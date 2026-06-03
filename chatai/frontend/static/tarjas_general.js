@@ -231,13 +231,7 @@ document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/general/download-excel?' + currentParams();
 });
 document.getElementById('btn-pdf').addEventListener('click', () => {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('General — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'),
-    'Empresa': g('fil-empresa'), 'CC': g('fil-cc'),
-    'Tipo de pago': g('fil-tipo'), 'Labor': g('fil-labor'),
-  });
+  window.open('/api/tarjas/general/download-pdf?' + currentParams(), '_blank');
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
