@@ -57,26 +57,15 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 
-# Empresa label → nombre_campo value mapping
-_EMPRESA_MAP: dict[str, str] = {
-    "Donar Dos": "ISLA DE MAIPO",
-    "Donar Uno (Talagante)": "TALAGANTE",
-}
-# Reverse: nombre_campo → label
-_CAMPO_TO_EMPRESA: dict[str, str] = {v: k for k, v in _EMPRESA_MAP.items()}
-
 def _empresa_to_campo(empresa: str | None) -> str | None:
-    """Convert empresa label from UI to nombre_campo DB value."""
-    if not empresa:
-        return None
-    return _EMPRESA_MAP.get(empresa, empresa)
+    return empresa or None
 
 
 def _get_empresas(cur, table: str = "appsheet.tarjas_pagos", extra_where: str = "") -> list[str]:
-    """Return distinct empresa labels from nombre_campo in the given table."""
+    """Return distinct nombre_campo values as empresa options."""
     where = f"WHERE nombre_campo IS NOT NULL {('AND ' + extra_where) if extra_where else ''}"
     cur.execute(f"SELECT DISTINCT nombre_campo FROM {table} {where} ORDER BY nombre_campo")
-    return [_CAMPO_TO_EMPRESA.get(r[0], r[0]) for r in cur.fetchall()]
+    return [r[0] for r in cur.fetchall()]
 
 
 def _resolve_maquina_column(cur):
