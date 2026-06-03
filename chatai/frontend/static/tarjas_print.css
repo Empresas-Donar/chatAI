@@ -1,0 +1,306 @@
+/* tarjas_print.css — Clean print styles for all tarjas reports */
+
+@media print {
+  /* ── Page setup ──────────────────────────────────────────────────── */
+  @page {
+    size: A4 landscape;
+    margin: 15mm 12mm 12mm 12mm;
+  }
+
+  /* ── Hide everything except content ─────────────────────────────── */
+  nav,
+  header,
+  .filter-bar,
+  .filter-actions,
+  .page-header,
+  .empty-state,
+  #empty-state,
+  .btn,
+  button {
+    display: none !important;
+  }
+
+  /* ── Base reset ──────────────────────────────────────────────────── */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    background: #fff !important;
+    color: #1a1a1a !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+    font-size: 10pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .container {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* ── Print header ────────────────────────────────────────────────── */
+  #print-header {
+    display: block !important;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #C4503A;
+  }
+
+  #print-header h2 {
+    font-size: 14pt !important;
+    font-weight: 700 !important;
+    color: #C4503A !important;
+    margin: 0 0 6px 0 !important;
+    padding: 0 !important;
+  }
+
+  #print-header .ph-filters {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    font-size: 8pt !important;
+    color: #444 !important;
+  }
+
+  #print-header .ph-chip {
+    background: #f5f0ea !important;
+    border: 1px solid #ddd !important;
+    border-radius: 3px !important;
+    padding: 1px 7px !important;
+    white-space: nowrap;
+  }
+
+  #print-header .ph-chip strong {
+    color: #C4503A !important;
+  }
+
+  /* ── Section titles ──────────────────────────────────────────────── */
+  .tg-card-title,
+  .td-section-title,
+  .trp-section-title,
+  .tc-section-title {
+    font-size: 10pt !important;
+    font-weight: 700 !important;
+    color: #1a1a1a !important;
+    margin: 0 0 6px 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+  }
+
+  /* ── Card wrappers: strip chrome ─────────────────────────────────── */
+  .tg-card,
+  .tg-tables-row,
+  .tg-chart-section,
+  .td-summary-table-wrap,
+  .td-summary-row,
+  .td-detail-section,
+  .td-tract-summary-only,
+  .table-card,
+  .trp-pivot-section,
+  .tc-pivot-section {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 12px 0 !important;
+  }
+
+  /* ── Two-column layout: stack for print ─────────────────────────── */
+  .tg-tables-row {
+    display: block !important;
+  }
+
+  .tg-card {
+    width: 100% !important;
+    margin-bottom: 12px !important;
+  }
+
+  /* ── Hide charts (they don't print well) ─────────────────────────── */
+  .tg-chart-section,
+  .td-chart-wrap,
+  canvas {
+    display: none !important;
+  }
+
+  /* ── Scroll containers: unclip ───────────────────────────────────── */
+  .trp-pivot-scroll,
+  .tc-pivot-scroll,
+  .td-pivot-scroll,
+  [style*="overflow-x"],
+  [style*="overflow: auto"],
+  div[style*="overflow"] {
+    overflow: visible !important;
+    max-width: none !important;
+    width: 100% !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: none !important;
+  }
+
+  /* ── Tables ──────────────────────────────────────────────────────── */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 8pt !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+  }
+
+  /* Reset sticky headers */
+  thead th {
+    position: static !important;
+    z-index: auto !important;
+  }
+
+  /* Header row */
+  th {
+    background: #C4503A !important;
+    color: #fff !important;
+    font-weight: 700 !important;
+    padding: 5px 7px !important;
+    text-align: left !important;
+    border: 1px solid #a03020 !important;
+    white-space: nowrap;
+    font-size: 8pt !important;
+  }
+
+  /* Super-header (orange) → unify with red */
+  thead tr.trp-superheader th,
+  thead tr.trp-superheader th.th-empty {
+    background: #C4503A !important;
+    color: #fff !important;
+    border-color: #a03020 !important;
+    font-size: 7pt !important;
+    padding: 3px 7px !important;
+  }
+
+  /* Numeric header cells */
+  th.th-date,
+  th.th-total,
+  th.num {
+    text-align: right !important;
+    background: #C4503A !important;
+  }
+
+  th.th-total {
+    background: #9e3d2c !important;
+  }
+
+  /* Body cells */
+  td {
+    padding: 4px 7px !important;
+    border: 1px solid #ddd !important;
+    vertical-align: middle !important;
+    white-space: nowrap;
+    color: #1a1a1a !important;
+    background: #fff !important;
+    font-size: 8pt !important;
+  }
+
+  /* Alternating rows */
+  tbody tr:nth-child(even) td {
+    background: #faf8f5 !important;
+  }
+
+  /* Worker-first border */
+  tbody tr.worker-first td {
+    border-top: 1.5px solid #C4503A !important;
+  }
+
+  /* Value cells */
+  .cell-value,
+  .cell-value.has-value {
+    text-align: right !important;
+    background: #fff8f0 !important;
+    font-weight: 600 !important;
+  }
+
+  .cell-zero {
+    text-align: right !important;
+    color: #bbb !important;
+    background: #fff !important;
+  }
+
+  /* Total column */
+  .cell-total,
+  td.cell-total {
+    background: #fef3c7 !important;
+    font-weight: 800 !important;
+    text-align: right !important;
+    border-left: 1.5px solid #C4503A !important;
+  }
+
+  /* Tipo badge cells */
+  .tipo-trato,
+  .tc-tipo-trato {
+    background: #dbeafe !important;
+    color: #1e40af !important;
+    border-radius: 3px !important;
+    padding: 1px 5px !important;
+    font-size: 7pt !important;
+  }
+
+  .tipo-aldia,
+  .tc-tipo-aldia {
+    background: #ffedd5 !important;
+    color: #9a3412 !important;
+    border-radius: 3px !important;
+    padding: 1px 5px !important;
+    font-size: 7pt !important;
+  }
+
+  /* Worker/contractor cells */
+  .cell-worker {
+    font-weight: 600 !important;
+    max-width: none !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+  }
+
+  /* Bar charts inside cells → just show text */
+  .bar-wrap {
+    display: block !important;
+  }
+  .bar {
+    display: none !important;
+  }
+  .bar-text {
+    display: inline !important;
+    font-weight: 600 !important;
+  }
+
+  /* Summary table (detalle) */
+  .td-summary-table {
+    width: auto !important;
+    min-width: 260px !important;
+  }
+
+  /* Table count badge */
+  .table-header {
+    display: none !important;
+  }
+
+  /* ── Page breaks ──────────────────────────────────────────────────── */
+  tr {
+    page-break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  .tg-card,
+  .td-detail-section,
+  .trp-pivot-section {
+    page-break-inside: avoid;
+  }
+}
