@@ -2027,30 +2027,37 @@ async def download_tarjas_detalle_pdf(
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT tipo_pago, "CC" AS cc, "Nombre Labor" AS labor, jornadas,
-                       total_unitario, total_labor AS total, contratista, nombre_campo, fecha::text AS fecha
+                SELECT tipo_pago, "Nombre Labor" AS labor, "CC" AS cc, jornadas,
+                       total_unitario, total_labor AS total,
+                       CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
+                       "%% Tipo de pago" AS pct_pago, nombre_campo, fecha::text AS fecha
                 FROM appsheet.tarjas_reporte {where}
-                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
             """, params)
             rows = _rows_to_dicts(cur)
     finally:
         conn.close()
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
+    fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
     rows_html = "".join(
-        f'<tr><td>{r["tipo_pago"]}</td><td>{r["cc"]}</td><td>{r["labor"]}</td>'
-        f'<td>{r["contratista"]}</td><td>{r["nombre_campo"]}</td><td class="num">{r["jornadas"]}</td>'
-        f'<td class="num">{fmtCLP(r["total_unitario"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
+        f'<tr><td>{r["tipo_pago"]}</td><td>{r["labor"]}</td><td>{r["cc"]}</td>'
+        f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
+        f'<td class="num">{r["jornadas"]}</td>'
+        f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
+        f'<td class="total">{fmtCLP(r["total"])}</td>'
+        f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
     )
     header = _pdf_header("Detalle de la semana — Tarjas", fecha_inicio, fecha_termino,
-                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+                         {"Empresa": empresa, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
     <table><thead>
-      <tr><th>Tipo pago</th><th>CC</th><th>Labor</th><th>Contratista</th><th>Campo</th>
-      <th class="num">Jornadas</th><th class="num">Unitario</th><th class="num">Total</th></tr>
+      <tr><th>Tipo pago</th><th>Labor</th><th>CC</th>
+      <th class="num">Costo/hora</th><th class="num">Jornadas</th>
+      <th class="num">Unitario</th><th class="num">Total</th><th class="num">% pago</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
