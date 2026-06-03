@@ -63,7 +63,7 @@ async function queryData() {
   const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
 
   const add = (key, id) => {
-    const v = document.getElementById(id).value;
+    const v = document.getElementById(id)?.value;
     if (v) params.append(key, v);
   };
   add('centro_costo', 'fil-cc');
@@ -197,7 +197,6 @@ function currentParams() {
   add('centro_costo','fil-cc'); add('tipo_pago','fil-tipo'); add('labor','fil-labor');
   add('contratista','fil-contratista');
   add('empresa','fil-empresa');
-  add('empresa', 'fil-empresa');
   return p;
 }
 function setDownloadEnabled(on) {

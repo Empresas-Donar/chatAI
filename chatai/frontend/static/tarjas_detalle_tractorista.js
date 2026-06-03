@@ -60,7 +60,7 @@ async function queryData() {
   });
 
   const add = (key, id) => {
-    const v = document.getElementById(id).value;
+    const v = document.getElementById(id)?.value;
     if (v) params.append(key, v);
   };
   add('contratista', 'fil-contratista');
@@ -139,8 +139,9 @@ function currentParams() {
   const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
   add('contratista','fil-contratista');
   add('empresa','fil-empresa');
-  add('empresa', 'fil-empresa'); add('centro_costo','fil-cc');
-  add('labor','fil-labor'); add('campo','fil-campo');
+  add('centro_costo','fil-cc');
+  add('labor','fil-labor');
+  add('campo','fil-campo');
   return p;
 }
 function setDownloadEnabled(on) {

@@ -204,7 +204,8 @@ async def get_tarjas_general(
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     where, params = _build_pagos_where(
-        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor, contratista=contratista
+        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
+        contratista=contratista, nombre_campo=_empresa_to_campo(empresa),
     )
 
     try:
@@ -240,6 +241,7 @@ async def get_tarjas_general(
             p_where, p_params = _build_pagos_where(
                 fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
                 alias="p", contratista=contratista,
+                nombre_campo=_empresa_to_campo(empresa),
             )
             cur.execute(f"""
                 WITH top_workers AS (
@@ -1470,7 +1472,8 @@ async def download_tarjas_general_excel(
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
     where, params = _build_pagos_where(
-        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor, contratista=contratista
+        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
+        contratista=contratista, nombre_campo=_empresa_to_campo(empresa),
     )
     try:
         with conn.cursor() as cur:
