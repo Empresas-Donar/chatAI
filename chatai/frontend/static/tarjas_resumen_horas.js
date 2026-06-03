@@ -66,6 +66,8 @@ async function queryData() {
   if (vTrab) params.append('trabajador', vTrab);
   if (vTipo) params.append('tipo_pago', vTipo);
   if (vCont) params.append('contratista', vCont);
+  const vEmp = document.getElementById('fil-empresa').value;
+  if (vEmp) params.append('empresa', vEmp);
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -207,7 +209,8 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('Horas extra por trabajador — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'Trabajador': g('fil-trabajador'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
     'Tipo de pago': g('fil-tipo'),
   });
 });

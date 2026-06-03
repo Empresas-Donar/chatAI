@@ -36,6 +36,7 @@ async function loadFilters() {
     const data = await res.json();
 
     fillSelect('fil-contratista', data.contratistas, 'Todos');
+    fillSelect('fil-empresa', data.empresas, 'Todas');
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
     fillSelect('fil-campo', data.campos, 'Todos');
@@ -66,6 +67,7 @@ async function queryData() {
     if (v) params.append(key, v);
   };
   add('contratista', 'fil-contratista');
+  add('empresa', 'fil-empresa');
   add('centro_costo', 'fil-cc');
   add('tipo_pago', 'fil-tipo');
   add('labor', 'fil-labor');
@@ -195,7 +197,9 @@ function currentParams() {
     fecha_termino: document.getElementById('fil-to').value,
   });
   const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
-  add('contratista','fil-contratista'); add('centro_costo','fil-cc');
+  add('contratista','fil-contratista');
+  add('empresa','fil-empresa');
+  add('empresa', 'fil-empresa'); add('centro_costo','fil-cc');
   add('tipo_pago','fil-tipo'); add('labor','fil-labor'); add('campo','fil-campo');
   return p;
 }
@@ -222,7 +226,8 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('Detalle de la semana — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'Campo': g('fil-campo'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'Campo': g('fil-campo'),
     'CC': g('fil-cc'), 'Tipo de pago': g('fil-tipo'), 'Labor': g('fil-labor'),
   });
 });

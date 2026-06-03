@@ -76,6 +76,7 @@ async function queryData() {
   add('tipo_pago', 'fil-tipo');
   add('maquina', 'fil-maquina');
   add('contratista', 'fil-contratista');
+  add('empresa', 'fil-empresa');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -220,7 +221,8 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('Detalle trabajador tractorista — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'Trabajador': g('fil-trabajador'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
     'Tipo de pago': g('fil-tipo'), 'Máquina': g('fil-maquina'),
   });
 });

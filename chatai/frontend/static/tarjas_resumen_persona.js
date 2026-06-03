@@ -209,7 +209,8 @@ function downloadPdf() {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('Detalle trabajador — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'Trabajador': g('fil-trabajador'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
     'Tipo de pago': g('fil-tipo'),
   });
 }

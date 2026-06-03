@@ -38,6 +38,7 @@ async function loadFilters() {
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
     fillSelect('fil-contratista', data.contratistas, 'Todos');
+    fillSelect('fil-empresa', data.empresas, 'Todas');
     if (data.maquinas && data.maquinas.length) {
       fillSelect('fil-maquina', data.maquinas, 'Todas');
       document.getElementById('maquina-filter-wrap').style.display = '';
@@ -67,6 +68,7 @@ async function queryData() {
   add('labor', 'fil-labor');
   add('maquina', 'fil-maquina');
   add('contratista', 'fil-contratista');
+  add('empresa', 'fil-empresa');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -195,7 +197,8 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('General tractorista — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'CC': g('fil-cc'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'CC': g('fil-cc'),
     'Labor': g('fil-labor'), 'Máquina': g('fil-maquina'),
   });
 });

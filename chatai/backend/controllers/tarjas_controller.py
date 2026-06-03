@@ -57,6 +57,27 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 
+# Empresa label → nombre_campo value mapping
+_EMPRESA_MAP: dict[str, str] = {
+    "Donar Dos": "ISLA DE MAIPO",
+    "Donar Uno (Talagante)": "TALAGANTE",
+}
+# Reverse: nombre_campo → label
+_CAMPO_TO_EMPRESA: dict[str, str] = {v: k for k, v in _EMPRESA_MAP.items()}
+
+def _empresa_to_campo(empresa: str | None) -> str | None:
+    """Convert empresa label from UI to nombre_campo DB value."""
+    if not empresa:
+        return None
+    return _EMPRESA_MAP.get(empresa, empresa)
+
+
+def _get_empresas(cur, table: str = "appsheet.tarjas_pagos", extra_where: str = "") -> list[str]:
+    """Return distinct empresa labels from nombre_campo in the given table."""
+    where = f"WHERE nombre_campo IS NOT NULL {('AND ' + extra_where) if extra_where else ''}"
+    cur.execute(f"SELECT DISTINCT nombre_campo FROM {table} {where} ORDER BY nombre_campo")
+    return [_CAMPO_TO_EMPRESA.get(r[0], r[0]) for r in cur.fetchall()]
+
 
 def _resolve_maquina_column(cur):
     """Return appsheet.tarjas_pagos column for machine/tractor, if any."""
@@ -136,6 +157,7 @@ async def get_tarjas_general_filters():
                 "WHERE contratista IS NOT NULL ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
@@ -144,12 +166,13 @@ async def get_tarjas_general_filters():
         "tipos_pago": tipos_pago,
         "labores": labores,
         "contratistas": contratistas,
+        "empresas": empresas,
     }
 
 
 def _build_pagos_where(
     fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
-    alias="", contratista=None,
+    alias="", contratista=None, nombre_campo=None,
 ):
     """Build WHERE clause + params for tarjas_pagos queries."""
     pfx = f"{alias}." if alias else ""
@@ -167,6 +190,9 @@ def _build_pagos_where(
     if contratista:
         filters.append(f"{pfx}contratista = %s")
         params.append(contratista)
+    if nombre_campo:
+        filters.append(f"{pfx}nombre_campo = %s")
+        params.append(nombre_campo)
     return "WHERE " + " AND ".join(filters), params
 
 
@@ -178,6 +204,7 @@ async def get_tarjas_general(
     tipo_pago: str = Query(None),
     labor: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -288,11 +315,13 @@ async def get_tarjas_filters():
 
             cur.execute('SELECT DISTINCT nombre_campo FROM appsheet.tarjas_reporte ORDER BY nombre_campo')
             campos = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_reporte")
     finally:
         conn.close()
 
     return {
         "contratistas": contratistas,
+        "empresas": empresas,
         "centros_costo": centros_costo,
         "labores": labores,
         "campos": campos,
@@ -304,6 +333,7 @@ async def get_tarjas_detail(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
@@ -323,6 +353,9 @@ async def get_tarjas_detail(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
     if centro_costo:
         filters.append('"CC" = %s')
         params.append(centro_costo)
@@ -436,11 +469,13 @@ async def get_tarjas_detalle_tractorista_filters():
                 f'WHERE {_TRACTORISTA_SQL} ORDER BY nombre_campo'
             )
             campos = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_reporte", extra_where="LOWER(TRIM(tipo_pago)) = 'tractorista'")
     finally:
         conn.close()
 
     return {
         "contratistas": contratistas,
+        "empresas": empresas,
         "centros_costo": centros_costo,
         "labores": labores,
         "campos": campos,
@@ -452,6 +487,7 @@ async def get_tarjas_detalle_tractorista(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     labor: str = Query(None),
     campo: str = Query(None),
@@ -471,6 +507,9 @@ async def get_tarjas_detalle_tractorista(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
     if centro_costo:
         filters.append('"CC" = %s')
         params.append(centro_costo)
@@ -570,11 +609,13 @@ async def get_tarjas_contractor_filters():
                 "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
     return {
         "contratistas": contratistas,
+        "empresas": empresas,
         "centros_costo": centros_costo,
         "labores": labores,
         "tipos_pago": tipos_pago,
@@ -586,6 +627,7 @@ async def get_tarjas_contractor_data(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
@@ -605,6 +647,9 @@ async def get_tarjas_contractor_data(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
     if centro_costo:
         filters.append("cuartel_cc = %s")
         params.append(centro_costo)
@@ -686,11 +731,13 @@ async def get_tarjas_contractor_tractorista_filters():
                     ).format(col=psql.Identifier(maq_col))
                 )
                 maquinas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos", extra_where="LOWER(TRIM(tipo_pago)) = 'tractorista'")
     finally:
         conn.close()
 
     return {
         "contratistas": contratistas,
+        "empresas": empresas,
         "centros_costo": centros_costo,
         "labores": labores,
         "maquinas": maquinas,
@@ -703,6 +750,7 @@ async def get_tarjas_contractor_tractorista_data(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     labor: str = Query(None),
     maquina: str = Query(None),
@@ -722,6 +770,9 @@ async def get_tarjas_contractor_tractorista_data(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
     if centro_costo:
         filters.append("cuartel_cc = %s")
         params.append(centro_costo)
@@ -793,6 +844,7 @@ async def get_tarjas_resumen_persona_filters():
                 "WHERE contratista IS NOT NULL ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
@@ -800,6 +852,7 @@ async def get_tarjas_resumen_persona_filters():
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
         "contratistas": contratistas,
+        "empresas": empresas,
     }
 
 
@@ -810,6 +863,7 @@ async def get_tarjas_resumen_persona(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     """Return worker-level rows for the resumen pivot table."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -832,6 +886,9 @@ async def get_tarjas_resumen_persona(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
 
     where = "WHERE " + " AND ".join(filters)
 
@@ -862,6 +919,7 @@ async def download_tarjas_resumen_persona_excel(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     """Descarga la tabla pivot resumen-persona como Excel."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -883,6 +941,9 @@ async def download_tarjas_resumen_persona_excel(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
 
     where = "WHERE " + " AND ".join(filters)
 
@@ -1006,6 +1067,7 @@ async def get_tarjas_resumen_horas_filters():
                 "WHERE contratista IS NOT NULL ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
@@ -1013,6 +1075,7 @@ async def get_tarjas_resumen_horas_filters():
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
         "contratistas": contratistas,
+        "empresas": empresas,
     }
 
 
@@ -1023,6 +1086,7 @@ async def get_tarjas_resumen_horas(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     """Return worker hours grouped by date for the pivot table."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -1045,6 +1109,9 @@ async def get_tarjas_resumen_horas(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
 
     where = "WHERE " + " AND ".join(filters)
 
@@ -1119,6 +1186,7 @@ async def get_tarjas_resumen_persona_tractorista_filters():
                     ).format(col=psql.Identifier(maq_col))
                 )
                 maquinas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos", extra_where="LOWER(TRIM(tipo_pago)) = 'tractorista'")
     finally:
         conn.close()
 
@@ -1126,6 +1194,7 @@ async def get_tarjas_resumen_persona_tractorista_filters():
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
         "contratistas": contratistas,
+        "empresas": empresas,
         "maquinas": maquinas,
         "maquina_column": maq_col,
     }
@@ -1139,6 +1208,7 @@ async def get_tarjas_resumen_persona_tractorista(
     tipo_pago: str = Query(None),
     maquina: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     """Worker × date pivot rows using total_tractor (tractorista only)."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -1161,6 +1231,9 @@ async def get_tarjas_resumen_persona_tractorista(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
 
     try:
         with conn.cursor() as cur:
@@ -1244,6 +1317,7 @@ async def get_tarjas_general_tractorista_filters():
                     ).format(col=psql.Identifier(maq_col))
                 )
                 maquinas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos", extra_where="LOWER(TRIM(tipo_pago)) = 'tractorista'")
     finally:
         conn.close()
 
@@ -1251,6 +1325,7 @@ async def get_tarjas_general_tractorista_filters():
         "centros_costo": centros_costo,
         "labores": labores,
         "contratistas": contratistas,
+        "empresas": empresas,
         "maquinas": maquinas,
         "maquina_column": maq_col,
     }
@@ -1264,6 +1339,7 @@ async def get_tarjas_general_tractorista(
     labor: str = Query(None),
     maquina: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1285,6 +1361,9 @@ async def get_tarjas_general_tractorista(
     if contratista:
         filters.append("contratista = %s")
         params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
 
     try:
         with conn.cursor() as cur:
@@ -1393,6 +1472,7 @@ async def download_tarjas_general_excel(
     tipo_pago: str = Query(None),
     labor: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1434,6 +1514,7 @@ async def download_tarjas_detalle_excel(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
@@ -1448,6 +1529,7 @@ async def download_tarjas_detalle_excel(
     filters = ["fecha BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
     if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
     if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
@@ -1486,6 +1568,7 @@ async def download_tarjas_contratista_excel(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
@@ -1499,6 +1582,7 @@ async def download_tarjas_contratista_excel(
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     if centro_costo: filters.append("cuartel_cc = %s"); params.append(centro_costo)
     if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
     if labor: filters.append("labor = %s"); params.append(labor)
@@ -1531,6 +1615,7 @@ async def download_tarjas_detalle_tractorista_excel(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
+    empresa: str = Query(None),
     centro_costo: str = Query(None),
     labor: str = Query(None),
     campo: str = Query(None),
@@ -1544,6 +1629,7 @@ async def download_tarjas_detalle_tractorista_excel(
     filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
     if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
     if campo: filters.append("nombre_campo = %s"); params.append(campo)
@@ -1582,6 +1668,7 @@ async def download_tarjas_general_tractorista_excel(
     centro_costo: str = Query(None),
     labor: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1594,6 +1681,7 @@ async def download_tarjas_general_tractorista_excel(
     if centro_costo: filters.append("cuartel_cc = %s"); params.append(centro_costo)
     if labor: filters.append("labor = %s"); params.append(labor)
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     try:
         with conn.cursor() as cur:
@@ -1628,6 +1716,7 @@ async def download_tarjas_resumen_horas_excel(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1640,6 +1729,7 @@ async def download_tarjas_resumen_horas_excel(
     if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
     if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     try:
         with conn.cursor() as cur:
@@ -1688,6 +1778,7 @@ async def download_tarjas_resumen_persona_tractorista_excel(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1700,6 +1791,7 @@ async def download_tarjas_resumen_persona_tractorista_excel(
     if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
     if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
     if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     try:
         with conn.cursor() as cur:

@@ -42,6 +42,7 @@ async function loadFilters() {
     fillSelect('fil-tipo', data.tipos_pago, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
     fillSelect('fil-contratista', data.contratistas, 'Todos');
+    fillSelect('fil-empresa', data.empresas, 'Todas');
   } catch (e) {
     console.error('Error loading filters:', e);
   }
@@ -69,6 +70,7 @@ async function queryData() {
   add('tipo_pago', 'fil-tipo');
   add('labor', 'fil-labor');
   add('contratista', 'fil-contratista');
+  add('empresa', 'fil-empresa');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -194,6 +196,8 @@ function currentParams() {
   const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
   add('centro_costo','fil-cc'); add('tipo_pago','fil-tipo'); add('labor','fil-labor');
   add('contratista','fil-contratista');
+  add('empresa','fil-empresa');
+  add('empresa', 'fil-empresa');
   return p;
 }
 function setDownloadEnabled(on) {
@@ -219,7 +223,8 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
   const g = id => document.getElementById(id)?.value || '';
   printWithHeader('General — Tarjas', {
     'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'), 'CC': g('fil-cc'),
+    'Contratista': g('fil-contratista'),
+    'Empresa': g('fil-empresa'), 'CC': g('fil-cc'),
     'Tipo de pago': g('fil-tipo'), 'Labor': g('fil-labor'),
   });
 });
