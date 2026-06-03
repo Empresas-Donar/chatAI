@@ -43,6 +43,12 @@ async function loadFilters() {
         `<option value="${esc(t)}">${esc(t)}</option>`
       ).join('');
 
+    const selCont = document.getElementById('fil-contratista');
+    selCont.innerHTML = '<option value="">Todos</option>' +
+      data.contratistas.map(c =>
+        `<option value="${esc(c)}">${esc(c)}</option>`
+      ).join('');
+
     if (data.maquinas && data.maquinas.length) {
       const selMaq = document.getElementById('fil-maquina');
       selMaq.innerHTML = '<option value="">Todas</option>' +
@@ -69,6 +75,7 @@ async function queryData() {
   add('trabajador', 'fil-trabajador');
   add('tipo_pago', 'fil-tipo');
   add('maquina', 'fil-maquina');
+  add('contratista', 'fil-contratista');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -82,12 +89,14 @@ async function queryData() {
     if (!data.rows.length) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
+      setDownloadEnabled(false);
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.rows);
     document.getElementById('pivot-section').style.display = '';
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -179,7 +188,27 @@ function renderPivot(rows) {
   document.getElementById('pivot-tbody').innerHTML = html;
 }
 
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const add = (key, id) => { const el = document.getElementById(id); if (el?.value) p.append(key, el.value); };
+  add('trabajador','fil-trabajador'); add('tipo_pago','fil-tipo');
+  add('maquina','fil-maquina'); add('contratista','fil-contratista');
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/resumen-persona-tractorista/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
+
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
 });

@@ -14,3 +14,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Download buttons */
+.filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+
+@media print {
+  .page-header, .filter-bar { display: none !important; }
+  body { background: white !important; }
+  table { font-size: 9px; }
+  th, td { padding: 2px 4px; }
+}

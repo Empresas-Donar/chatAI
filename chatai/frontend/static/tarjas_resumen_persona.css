@@ -134,3 +134,19 @@
 .trp-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
 
 .trp-pivot .cell-null { color: var(--text-muted); }
+
+/* Download buttons */
+.filter-actions {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* Print / PDF */
+@media print {
+  .page-header, .trp-filter-bar { display: none !important; }
+  .trp-pivot-scroll { overflow: visible !important; }
+  .trp-pivot { font-size: 9px; }
+  .trp-pivot th, .trp-pivot td { padding: 2px 4px; }
+  body { background: white !important; }
+}

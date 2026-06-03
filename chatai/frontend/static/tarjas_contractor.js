@@ -98,12 +98,14 @@ async function queryData() {
     if (!data.rows.length) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
+      setDownloadEnabled(false);
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.columns, data.rows);
     document.getElementById('pivot-section').style.display = '';
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -212,8 +214,28 @@ function renderPivot(columns, rows) {
   tbody.innerHTML = html;
 }
 
+// ── Download helpers ──────────────────────────────────────────────────
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
+  add('contratista','fil-contratista'); add('centro_costo','fil-cc');
+  add('tipo_pago','fil-tipo'); add('labor','fil-labor');
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/contratista/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

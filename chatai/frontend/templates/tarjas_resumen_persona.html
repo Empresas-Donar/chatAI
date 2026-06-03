@@ -3,7 +3,7 @@
 {% block title %}Resumen por persona operacional — Tarjas{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v=1" />
+<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v=2" />
 {% endblock %}
 
 {% block body %}
@@ -31,11 +31,19 @@
       <select id="fil-trabajador"><option value="">Todos</option></select>
     </div>
     <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
       <label>Tipo de pago</label>
       <select id="fil-tipo"><option value="">Todos</option></select>
     </div>
     <div>
       <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
     </div>
   </div>
 
@@ -60,5 +68,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_resumen_persona.js?v=1"></script>
+<script src="/static/tarjas_resumen_persona.js?v=2"></script>
 {% endblock %}

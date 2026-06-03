@@ -37,6 +37,7 @@ async function loadFilters() {
     const data = await res.json();
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
+    fillSelect('fil-contratista', data.contratistas, 'Todos');
     if (data.maquinas && data.maquinas.length) {
       fillSelect('fil-maquina', data.maquinas, 'Todas');
       document.getElementById('maquina-filter-wrap').style.display = '';
@@ -65,6 +66,7 @@ async function queryData() {
   add('centro_costo', 'fil-cc');
   add('labor', 'fil-labor');
   add('maquina', 'fil-maquina');
+  add('contratista', 'fil-contratista');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -79,6 +81,7 @@ async function queryData() {
     if (!hasData) {
       hide('tables-section'); hide('chart-section');
       show('empty-state');
+      setDownloadEnabled(false);
       return;
     }
 
@@ -87,6 +90,7 @@ async function queryData() {
     renderRanking(data.person_ranking);
     renderChart(data.chart_data);
     show('tables-section'); show('chart-section');
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -159,7 +163,27 @@ function renderChart(data) {
   });
 }
 
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
+  add('centro_costo','fil-cc'); add('labor','fil-labor');
+  add('maquina','fil-maquina'); add('contratista','fil-contratista');
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/general-tractorista/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
+
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
 });

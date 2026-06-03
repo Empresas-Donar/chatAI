@@ -40,7 +40,15 @@
       <select id="fil-labor"><option value="">Todas</option></select>
     </div>
     <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
       <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
     </div>
   </div>
 
@@ -98,5 +106,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_general.js?v=1"></script>
+<script src="/static/tarjas_general.js?v=2"></script>
 {% endblock %}

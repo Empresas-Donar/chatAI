@@ -41,6 +41,12 @@ async function loadFilters() {
       data.tipos_pago.map(t =>
         `<option value="${esc(t)}">${esc(t)}</option>`
       ).join('');
+
+    const selCont = document.getElementById('fil-contratista');
+    selCont.innerHTML = '<option value="">Todos</option>' +
+      data.contratistas.map(c =>
+        `<option value="${esc(c)}">${esc(c)}</option>`
+      ).join('');
   } catch (e) {
     console.error('Error loading filters:', e);
   }
@@ -56,8 +62,10 @@ async function queryData() {
 
   const vTrab = document.getElementById('fil-trabajador').value;
   const vTipo = document.getElementById('fil-tipo').value;
+  const vCont = document.getElementById('fil-contratista').value;
   if (vTrab) params.append('trabajador', vTrab);
   if (vTipo) params.append('tipo_pago', vTipo);
+  if (vCont) params.append('contratista', vCont);
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -71,12 +79,14 @@ async function queryData() {
     if (!data.rows.length) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
+      setDownloadEnabled(false);
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.rows);
     document.getElementById('pivot-section').style.display = '';
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -129,7 +139,6 @@ function renderPivot(rows) {
   // Tbody
   const tbody = document.getElementById('pivot-tbody');
   let html = '';
-  let prevWorker = null;
 
   sortedWorkers.forEach(w => {
     const tipoEntries = [...w.tipos.entries()];
@@ -161,8 +170,31 @@ function renderPivot(rows) {
   tbody.innerHTML = html;
 }
 
+// ── Download helpers ──────────────────────────────────────────────────
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const vTrab = document.getElementById('fil-trabajador').value;
+  const vTipo = document.getElementById('fil-tipo').value;
+  const vCont = document.getElementById('fil-contratista').value;
+  if (vTrab) p.append('trabajador', vTrab);
+  if (vTipo) p.append('tipo_pago', vTipo);
+  if (vCont) p.append('contratista', vCont);
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/resumen-horas/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

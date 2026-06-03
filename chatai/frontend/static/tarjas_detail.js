@@ -84,6 +84,7 @@ async function queryData() {
       document.getElementById('summary-section').style.display = 'none';
       document.getElementById('detail-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
+      setDownloadEnabled(false);
       return;
     }
 
@@ -93,6 +94,7 @@ async function queryData() {
     renderDetail(data.rows, data.count);
     document.getElementById('summary-section').style.display = '';
     document.getElementById('detail-section').style.display = '';
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -186,8 +188,28 @@ function renderDetail(rows, count) {
   }).join('');
 }
 
+// ── Download helpers ─────────────────────────────────────────────────
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
+  add('contratista','fil-contratista'); add('centro_costo','fil-cc');
+  add('tipo_pago','fil-tipo'); add('labor','fil-labor'); add('campo','fil-campo');
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 // ── Events ───────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/detalle/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

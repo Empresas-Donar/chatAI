@@ -40,6 +40,12 @@ async function loadFilters() {
         `<option value="${esc(t.trabajador)}">${esc(t.trabajador)}</option>`
       ).join('');
 
+    const selContratista = document.getElementById('fil-contratista');
+    selContratista.innerHTML = '<option value="">Todos</option>' +
+      data.contratistas.map(c =>
+        `<option value="${esc(c)}">${esc(c)}</option>`
+      ).join('');
+
     const selTipo = document.getElementById('fil-tipo');
     selTipo.innerHTML = '<option value="">Todos</option>' +
       data.tipos_pago.map(t =>
@@ -59,8 +65,10 @@ async function queryData() {
   const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
 
   const vTrab = document.getElementById('fil-trabajador').value;
+  const vContratista = document.getElementById('fil-contratista').value;
   const vTipo = document.getElementById('fil-tipo').value;
   if (vTrab) params.append('trabajador', vTrab);
+  if (vContratista) params.append('contratista', vContratista);
   if (vTipo) params.append('tipo_pago', vTipo);
 
   const btn = document.getElementById('btn-apply');
@@ -75,12 +83,14 @@ async function queryData() {
     if (!data.rows.length) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
+      setDownloadEnabled(false);
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.rows);
     document.getElementById('pivot-section').style.display = '';
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -166,8 +176,38 @@ function renderPivot(rows) {
   tbody.innerHTML = html;
 }
 
+// ── Download helpers ──────────────────────────────────────────────────
+function currentParams() {
+  const from = document.getElementById('fil-from').value;
+  const to   = document.getElementById('fil-to').value;
+  const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
+  const vTrab = document.getElementById('fil-trabajador').value;
+  const vContratista = document.getElementById('fil-contratista').value;
+  const vTipo = document.getElementById('fil-tipo').value;
+  if (vTrab) params.append('trabajador', vTrab);
+  if (vContratista) params.append('contratista', vContratista);
+  if (vTipo) params.append('tipo_pago', vTipo);
+  return params;
+}
+
+function downloadExcel() {
+  const params = currentParams();
+  window.location.href = '/api/tarjas/resumen-persona/download-excel?' + params;
+}
+
+function downloadPdf() {
+  window.print();
+}
+
+function setDownloadEnabled(enabled) {
+  document.getElementById('btn-excel').disabled = !enabled;
+  document.getElementById('btn-pdf').disabled = !enabled;
+}
+
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', downloadExcel);
+document.getElementById('btn-pdf').addEventListener('click', downloadPdf);
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

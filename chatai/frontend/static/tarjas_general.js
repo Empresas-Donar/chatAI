@@ -41,6 +41,7 @@ async function loadFilters() {
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-tipo', data.tipos_pago, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
+    fillSelect('fil-contratista', data.contratistas, 'Todos');
   } catch (e) {
     console.error('Error loading filters:', e);
   }
@@ -67,6 +68,7 @@ async function queryData() {
   add('centro_costo', 'fil-cc');
   add('tipo_pago', 'fil-tipo');
   add('labor', 'fil-labor');
+  add('contratista', 'fil-contratista');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -81,6 +83,7 @@ async function queryData() {
     if (!hasData) {
       hide('tables-section'); hide('chart-section');
       show('empty-state');
+      setDownloadEnabled(false);
       return;
     }
 
@@ -89,6 +92,7 @@ async function queryData() {
     renderRanking(data.person_ranking);
     renderChart(data.chart_data);
     show('tables-section'); show('chart-section');
+    setDownloadEnabled(true);
   } catch (e) {
     console.error('Query error:', e);
   } finally {
@@ -181,8 +185,28 @@ function renderChart(data) {
   });
 }
 
+// ── Download helpers ──────────────────────────────────────────────────
+function currentParams() {
+  const p = new URLSearchParams({
+    fecha_inicio: document.getElementById('fil-from').value,
+    fecha_termino: document.getElementById('fil-to').value,
+  });
+  const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
+  add('centro_costo','fil-cc'); add('tipo_pago','fil-tipo'); add('labor','fil-labor');
+  add('contratista','fil-contratista');
+  return p;
+}
+function setDownloadEnabled(on) {
+  document.getElementById('btn-excel').disabled = !on;
+  document.getElementById('btn-pdf').disabled = !on;
+}
+
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-excel').addEventListener('click', () => {
+  window.location.href = '/api/tarjas/general/download-excel?' + currentParams();
+});
+document.getElementById('btn-pdf').addEventListener('click', () => window.print());
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

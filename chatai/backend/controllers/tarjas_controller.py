@@ -36,6 +36,9 @@ import io
 import logging
 import re
 
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -127,6 +130,12 @@ async def get_tarjas_general_filters():
                 "WHERE labor IS NOT NULL ORDER BY labor"
             )
             labores = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
 
@@ -134,18 +143,15 @@ async def get_tarjas_general_filters():
         "centros_costo": centros_costo,
         "tipos_pago": tipos_pago,
         "labores": labores,
+        "contratistas": contratistas,
     }
 
 
 def _build_pagos_where(
     fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
-    alias="",
+    alias="", contratista=None,
 ):
-    """Build WHERE clause + params for tarjas_pagos queries.
-
-    If *alias* is provided (e.g. "p"), column references are prefixed
-    with it so the clause is safe inside JOINs.
-    """
+    """Build WHERE clause + params for tarjas_pagos queries."""
     pfx = f"{alias}." if alias else ""
     filters = [f"{pfx}fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -158,6 +164,9 @@ def _build_pagos_where(
     if labor:
         filters.append(f"{pfx}labor = %s")
         params.append(labor)
+    if contratista:
+        filters.append(f"{pfx}contratista = %s")
+        params.append(contratista)
     return "WHERE " + " AND ".join(filters), params
 
 
@@ -168,6 +177,7 @@ async def get_tarjas_general(
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
+    contratista: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -178,7 +188,7 @@ async def get_tarjas_general(
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
     where, params = _build_pagos_where(
-        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor
+        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor, contratista=contratista
     )
 
     try:
@@ -213,7 +223,7 @@ async def get_tarjas_general(
             # 3) Daily average by labor × cuadrilla (top 6 workers)
             p_where, p_params = _build_pagos_where(
                 fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
-                alias="p",
+                alias="p", contratista=contratista,
             )
             cur.execute(f"""
                 WITH top_workers AS (
@@ -757,7 +767,7 @@ async def tarjas_resumen_persona_page(request: Request):
 
 @router.get("/api/tarjas/resumen-persona/filters")
 async def get_tarjas_resumen_persona_filters():
-    """Distinct trabajador + tipo_pago for filter dropdowns."""
+    """Distinct trabajador + tipo_pago + contratista for filter dropdowns."""
     try:
         conn = get_connection()
     except Exception as exc:
@@ -777,12 +787,19 @@ async def get_tarjas_resumen_persona_filters():
                 "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
 
     return {
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
+        "contratistas": contratistas,
     }
 
 
@@ -792,6 +809,7 @@ async def get_tarjas_resumen_persona(
     fecha_termino: str = Query(...),
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
+    contratista: str = Query(None),
 ):
     """Return worker-level rows for the resumen pivot table."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -811,6 +829,9 @@ async def get_tarjas_resumen_persona(
     if tipo_pago:
         filters.append("tipo_pago = %s")
         params.append(tipo_pago)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
 
     where = "WHERE " + " AND ".join(filters)
 
@@ -834,6 +855,120 @@ async def get_tarjas_resumen_persona(
     }
 
 
+@router.get("/api/tarjas/resumen-persona/download-excel")
+async def download_tarjas_resumen_persona_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    trabajador: str = Query(None),
+    tipo_pago: str = Query(None),
+    contratista: str = Query(None),
+):
+    """Descarga la tabla pivot resumen-persona como Excel."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador:
+        filters.append("trabajador = %s")
+        params.append(trabajador)
+    if tipo_pago:
+        filters.append("tipo_pago = %s")
+        params.append(tipo_pago)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
+                f"COALESCE(SUM(total_trabajado), 0) AS total_trabajado "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
+                "ORDER BY trabajador, tipo_pago, fecha::date",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    # Build pivot: worker+tipo → date → total
+    dates = sorted({r["fecha"] for r in rows})
+
+    workers: dict = {}
+    for r in rows:
+        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
+        if key not in workers:
+            workers[key] = {"by_date": {}, "total": 0}
+        workers[key]["by_date"][r["fecha"]] = (
+            workers[key]["by_date"].get(r["fecha"], 0) + float(r["total_trabajado"] or 0)
+        )
+        workers[key]["total"] += float(r["total_trabajado"] or 0)
+
+    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumen por persona"
+
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(bold=True, color="FFFFFF")
+    total_fill = PatternFill("solid", fgColor="D6E4F0")
+    money_fmt = '#,##0'
+
+    # Header row
+    headers = ["Trabajador", "Contratista", "Tipo de pago"] + [
+        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+    ] + ["Total"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # Data rows
+    row_num = 2
+    for (trab, cont, tipo), entry in sorted_workers:
+        ws.cell(row=row_num, column=1, value=trab)
+        ws.cell(row=row_num, column=2, value=cont)
+        ws.cell(row=row_num, column=3, value=tipo)
+        for col, d in enumerate(dates, 4):
+            val = entry["by_date"].get(d, 0)
+            c = ws.cell(row=row_num, column=col, value=val if val else None)
+            c.number_format = money_fmt
+        total_cell = ws.cell(row=row_num, column=4 + len(dates), value=entry["total"])
+        total_cell.number_format = money_fmt
+        total_cell.fill = total_fill
+        total_cell.font = Font(bold=True)
+        row_num += 1
+
+    # Column widths
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 24
+    ws.column_dimensions["C"].width = 18
+    for i in range(len(dates) + 1):
+        col_letter = openpyxl.utils.get_column_letter(4 + i)
+        ws.column_dimensions[col_letter].width = 14
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"resumen_persona_{fecha_inicio}_{fecha_termino}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ===========================================================================
 # Resumen hora extra por persona — Worker hours pivot (worker × date)
 # ===========================================================================
@@ -845,7 +980,7 @@ async def tarjas_resumen_horas_page(request: Request):
 
 @router.get("/api/tarjas/resumen-horas/filters")
 async def get_tarjas_resumen_horas_filters():
-    """Distinct trabajador + tipo_pago for the hours report."""
+    """Distinct trabajador + tipo_pago + contratista for the hours report."""
     try:
         conn = get_connection()
     except Exception as exc:
@@ -865,12 +1000,19 @@ async def get_tarjas_resumen_horas_filters():
                 "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
 
     return {
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
+        "contratistas": contratistas,
     }
 
 
@@ -880,6 +1022,7 @@ async def get_tarjas_resumen_horas(
     fecha_termino: str = Query(...),
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
+    contratista: str = Query(None),
 ):
     """Return worker hours grouped by date for the pivot table."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -899,6 +1042,9 @@ async def get_tarjas_resumen_horas(
     if tipo_pago:
         filters.append("tipo_pago = %s")
         params.append(tipo_pago)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
 
     where = "WHERE " + " AND ".join(filters)
 
@@ -957,6 +1103,12 @@ async def get_tarjas_resumen_persona_tractorista_filters():
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
 
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                f"WHERE {_TRACTORISTA_PAGOS_SQL} AND contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+
             maquinas = []
             if maq_col:
                 cur.execute(
@@ -973,6 +1125,7 @@ async def get_tarjas_resumen_persona_tractorista_filters():
     return {
         "trabajadores": trabajadores,
         "tipos_pago": tipos_pago,
+        "contratistas": contratistas,
         "maquinas": maquinas,
         "maquina_column": maq_col,
     }
@@ -985,6 +1138,7 @@ async def get_tarjas_resumen_persona_tractorista(
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
     maquina: str = Query(None),
+    contratista: str = Query(None),
 ):
     """Worker × date pivot rows using total_tractor (tractorista only)."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -1004,6 +1158,9 @@ async def get_tarjas_resumen_persona_tractorista(
     if tipo_pago:
         filters.append("tipo_pago = %s")
         params.append(tipo_pago)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
 
     try:
         with conn.cursor() as cur:
@@ -1071,6 +1228,12 @@ async def get_tarjas_general_tractorista_filters():
             )
             labores = [r[0] for r in cur.fetchall()]
 
+            cur.execute(
+                "SELECT DISTINCT contratista " + base
+                + "AND contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+
             maquinas = []
             if maq_col:
                 cur.execute(
@@ -1087,6 +1250,7 @@ async def get_tarjas_general_tractorista_filters():
     return {
         "centros_costo": centros_costo,
         "labores": labores,
+        "contratistas": contratistas,
         "maquinas": maquinas,
         "maquina_column": maq_col,
     }
@@ -1099,6 +1263,7 @@ async def get_tarjas_general_tractorista(
     centro_costo: str = Query(None),
     labor: str = Query(None),
     maquina: str = Query(None),
+    contratista: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -1117,6 +1282,9 @@ async def get_tarjas_general_tractorista(
     if labor:
         filters.append("labor = %s")
         params.append(labor)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
 
     try:
         with conn.cursor() as cur:
@@ -1185,6 +1353,393 @@ async def get_tarjas_general_tractorista(
         "person_ranking": person_ranking,
         "chart_data": chart_data,
     }
+
+
+# ===========================================================================
+# Excel download helpers
+# ===========================================================================
+
+def _excel_response(wb: "openpyxl.Workbook", filename: str) -> StreamingResponse:
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _excel_header_style():
+    from openpyxl.styles import Font, PatternFill, Alignment
+    fill = PatternFill("solid", fgColor="1F4E79")
+    font = Font(bold=True, color="FFFFFF")
+    align = Alignment(horizontal="center")
+    return fill, font, align
+
+
+def _apply_header(ws, headers):
+    fill, font, align = _excel_header_style()
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.fill = fill; c.font = font; c.alignment = align
+
+
+@router.get("/api/tarjas/general/download-excel")
+async def download_tarjas_general_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    centro_costo: str = Query(None),
+    tipo_pago: str = Query(None),
+    labor: str = Query(None),
+    contratista: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    where, params = _build_pagos_where(
+        fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor, contratista=contratista
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT trabajador, contratista, labor, tipo_pago,
+                       ROUND(AVG(total_trabajado)::numeric,2) AS promedio,
+                       COALESCE(SUM(total_trabajado),0) AS total
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY trabajador, contratista, labor, tipo_pago
+                ORDER BY total DESC
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "General"
+    _apply_header(ws, ["Trabajador", "Contratista", "Labor", "Tipo de pago", "Promedio", "Total"])
+    money = '#,##0'; money2 = '#,##0.00'
+    for i, r in enumerate(rows, 2):
+        ws.cell(i, 1, r["trabajador"]); ws.cell(i, 2, r["contratista"])
+        ws.cell(i, 3, r["labor"]); ws.cell(i, 4, r["tipo_pago"])
+        c5 = ws.cell(i, 5, float(r["promedio"] or 0)); c5.number_format = money2
+        c6 = ws.cell(i, 6, float(r["total"] or 0)); c6.number_format = money
+    for col, w in zip("ABCDEF", [28, 24, 28, 16, 14, 14]):
+        ws.column_dimensions[col].width = w
+    return _excel_response(wb, f"tarjas_general_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/detalle/download-excel")
+async def download_tarjas_detalle_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    centro_costo: str = Query(None),
+    tipo_pago: str = Query(None),
+    labor: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
+    if campo: filters.append("nombre_campo = %s"); params.append(campo)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
+                       jornadas, total_unitario, total_labor AS costo_total,
+                       "%% Tipo de pago" AS pct_pago, contratista, nombre_campo, fecha::text AS fecha
+                FROM appsheet.tarjas_reporte {where}
+                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle"
+    _apply_header(ws, ["Tipo de pago", "CC", "Labor", "Jornadas", "Total unitario",
+                        "Costo total", "% Tipo pago", "Contratista", "Campo", "Fecha"])
+    money = '#,##0'
+    for i, r in enumerate(rows, 2):
+        ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["centro_costo"]); ws.cell(i,3,r["labor"])
+        ws.cell(i,4,r["jornadas"])
+        c5=ws.cell(i,5,float(r["total_unitario"] or 0)); c5.number_format=money
+        c6=ws.cell(i,6,float(r["costo_total"] or 0)); c6.number_format=money
+        ws.cell(i,7,float(r["pct_pago"] or 0))
+        ws.cell(i,8,r["contratista"]); ws.cell(i,9,r["nombre_campo"]); ws.cell(i,10,r["fecha"])
+    for col,w in zip("ABCDEFGHIJ",[14,10,28,10,14,14,12,24,20,12]):
+        ws.column_dimensions[col].width=w
+    return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/contratista/download-excel")
+async def download_tarjas_contratista_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    centro_costo: str = Query(None),
+    tipo_pago: str = Query(None),
+    labor: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if centro_costo: filters.append("cuartel_cc = %s"); params.append(centro_costo)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if labor: filters.append("labor = %s"); params.append(labor)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, labor, tipo_pago, cuartel_cc, "
+                f"total_trabajado, fecha::date::text AS fecha "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "ORDER BY contratista, trabajador, fecha::date", params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Por contratista"
+    _apply_header(ws, ["Trabajador","Contratista","Labor","Tipo de pago","CC","Total","Fecha"])
+    money = '#,##0'
+    for i,r in enumerate(rows,2):
+        ws.cell(i,1,r["trabajador"]); ws.cell(i,2,r["contratista"]); ws.cell(i,3,r["labor"])
+        ws.cell(i,4,r["tipo_pago"]); ws.cell(i,5,r["cuartel_cc"])
+        c=ws.cell(i,6,float(r["total_trabajado"] or 0)); c.number_format=money
+        ws.cell(i,7,r["fecha"])
+    for col,w in zip("ABCDEFG",[28,24,28,16,12,14,12]):
+        ws.column_dimensions[col].width=w
+    return _excel_response(wb, f"tarjas_contratista_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/detalle-tractorista/download-excel")
+async def download_tarjas_detalle_tractorista_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
+    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
+    if campo: filters.append("nombre_campo = %s"); params.append(campo)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
+                       jornadas, total_unitario, total_labor AS costo_total,
+                       contratista, nombre_campo, fecha::text AS fecha
+                FROM appsheet.tarjas_reporte {where}
+                ORDER BY contratista, "CC", "Nombre Labor"
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle tractorista"
+    _apply_header(ws, ["Tipo de pago","CC","Labor","Jornadas","Total unitario",
+                        "Costo total","Contratista","Campo","Fecha"])
+    money = '#,##0'
+    for i,r in enumerate(rows,2):
+        ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["centro_costo"]); ws.cell(i,3,r["labor"])
+        ws.cell(i,4,r["jornadas"])
+        c5=ws.cell(i,5,float(r["total_unitario"] or 0)); c5.number_format=money
+        c6=ws.cell(i,6,float(r["costo_total"] or 0)); c6.number_format=money
+        ws.cell(i,7,r["contratista"]); ws.cell(i,8,r["nombre_campo"]); ws.cell(i,9,r["fecha"])
+    for col,w in zip("ABCDEFGHI",[14,10,28,10,14,14,24,20,12]):
+        ws.column_dimensions[col].width=w
+    return _excel_response(wb, f"tarjas_detalle_tractorista_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/general-tractorista/download-excel")
+async def download_tarjas_general_tractorista_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    contratista: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if centro_costo: filters.append("cuartel_cc = %s"); params.append(centro_costo)
+    if labor: filters.append("labor = %s"); params.append(labor)
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT trabajador, contratista, labor, tipo_pago,
+                       ROUND(AVG(total_tractor)::numeric,2) AS promedio,
+                       COALESCE(SUM(total_tractor),0) AS total
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY trabajador, contratista, labor, tipo_pago
+                ORDER BY total DESC
+            """, params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "General tractorista"
+    _apply_header(ws, ["Trabajador","Contratista","Labor","Tipo de pago","Promedio","Total"])
+    money = '#,##0'; money2 = '#,##0.00'
+    for i,r in enumerate(rows,2):
+        ws.cell(i,1,r["trabajador"]); ws.cell(i,2,r["contratista"])
+        ws.cell(i,3,r["labor"]); ws.cell(i,4,r["tipo_pago"])
+        c5=ws.cell(i,5,float(r["promedio"] or 0)); c5.number_format=money2
+        c6=ws.cell(i,6,float(r["total"] or 0)); c6.number_format=money
+    for col,w in zip("ABCDEF",[28,24,28,16,14,14]):
+        ws.column_dimensions[col].width=w
+    return _excel_response(wb, f"tarjas_general_tractorista_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/resumen-horas/download-excel")
+async def download_tarjas_resumen_horas_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    trabajador: str = Query(None),
+    tipo_pago: str = Query(None),
+    contratista: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
+                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_trabajadas::numeric ELSE 0 END),0)::int AS horas "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
+                "ORDER BY trabajador, tipo_pago, fecha::date", params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    # Build pivot: worker → tipo_pago → date → hours
+    dates = sorted({r["fecha"] for r in rows})
+    workers: dict = {}
+    for r in rows:
+        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
+        if key not in workers:
+            workers[key] = {"by_date": {}, "total": 0}
+        workers[key]["by_date"][r["fecha"]] = workers[key]["by_date"].get(r["fecha"],0) + (r["horas"] or 0)
+        workers[key]["total"] += (r["horas"] or 0)
+    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Horas extra"
+    headers = ["Trabajador","Contratista","Tipo de pago"] + [
+        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+    ] + ["Total"]
+    _apply_header(ws, headers)
+    from openpyxl.styles import PatternFill, Font
+    total_fill = PatternFill("solid", fgColor="D6E4F0")
+    for row_num, ((trab, cont, tipo), entry) in enumerate(sorted_workers, 2):
+        ws.cell(row_num,1,trab); ws.cell(row_num,2,cont); ws.cell(row_num,3,tipo)
+        for col,d in enumerate(dates,4):
+            v=entry["by_date"].get(d,0); ws.cell(row_num,col,v if v else None)
+        tc=ws.cell(row_num,4+len(dates),entry["total"]); tc.fill=total_fill; tc.font=Font(bold=True)
+    ws.column_dimensions["A"].width=28; ws.column_dimensions["B"].width=24; ws.column_dimensions["C"].width=18
+    for i in range(len(dates)+1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(4+i)].width=12
+    return _excel_response(wb, f"tarjas_horas_{fecha_inicio}_{fecha_termino}.xlsx")
+
+
+@router.get("/api/tarjas/resumen-persona-tractorista/download-excel")
+async def download_tarjas_resumen_persona_tractorista_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    trabajador: str = Query(None),
+    tipo_pago: str = Query(None),
+    contratista: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador: filters.append("trabajador = %s"); params.append(trabajador)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
+                f"COALESCE(SUM(total_tractor),0) AS total_tractor "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
+                "ORDER BY trabajador, tipo_pago, fecha::date", params)
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+    dates = sorted({r["fecha"] for r in rows})
+    workers: dict = {}
+    for r in rows:
+        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
+        if key not in workers:
+            workers[key] = {"by_date": {}, "total": 0}
+        workers[key]["by_date"][r["fecha"]] = workers[key]["by_date"].get(r["fecha"],0) + float(r["total_tractor"] or 0)
+        workers[key]["total"] += float(r["total_tractor"] or 0)
+    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Tractorista"
+    headers = ["Trabajador","Contratista","Tipo de pago"] + [
+        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+    ] + ["Total"]
+    _apply_header(ws, headers)
+    from openpyxl.styles import PatternFill, Font
+    total_fill = PatternFill("solid", fgColor="D6E4F0"); money = '#,##0'
+    for row_num, ((trab, cont, tipo), entry) in enumerate(sorted_workers, 2):
+        ws.cell(row_num,1,trab); ws.cell(row_num,2,cont); ws.cell(row_num,3,tipo)
+        for col,d in enumerate(dates,4):
+            v=entry["by_date"].get(d,0)
+            c=ws.cell(row_num,col,v if v else None)
+            if v: c.number_format=money
+        tc=ws.cell(row_num,4+len(dates),entry["total"]); tc.number_format=money
+        tc.fill=total_fill; tc.font=Font(bold=True)
+    ws.column_dimensions["A"].width=28; ws.column_dimensions["B"].width=24; ws.column_dimensions["C"].width=18
+    for i in range(len(dates)+1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(4+i)].width=14
+    return _excel_response(wb, f"tarjas_tractorista_{fecha_inicio}_{fecha_termino}.xlsx")
 
 
 # ===========================================================================
