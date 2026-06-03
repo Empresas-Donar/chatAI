@@ -76,6 +76,7 @@ async function queryData() {
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
   btn.textContent = 'Cargando…';
+  let _hasData = false;
 
   try {
     const res = await fetch('/api/tarjas/detalle?' + params);
@@ -86,7 +87,6 @@ async function queryData() {
       document.getElementById('summary-section').style.display = 'none';
       document.getElementById('detail-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
-      setDownloadEnabled(false);
       return;
     }
 
@@ -96,12 +96,13 @@ async function queryData() {
     renderDetail(data.rows, data.count);
     document.getElementById('summary-section').style.display = '';
     document.getElementById('detail-section').style.display = '';
-    setDownloadEnabled(true);
+    _hasData = true;
   } catch (e) {
     console.error('Query error:', e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Consultar';
+    setDownloadEnabled(_hasData);
   }
 }
 

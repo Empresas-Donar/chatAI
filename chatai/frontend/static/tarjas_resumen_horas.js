@@ -78,6 +78,7 @@ async function queryData() {
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
   btn.textContent = 'Cargando…';
+  let _hasData = false;
 
   try {
     const res = await fetch('/api/tarjas/resumen-horas?' + params);
@@ -87,19 +88,19 @@ async function queryData() {
     if (!data.rows.length) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
-      setDownloadEnabled(false);
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.rows);
     document.getElementById('pivot-section').style.display = '';
-    setDownloadEnabled(true);
+    _hasData = true;
   } catch (e) {
     console.error('Query error:', e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Consultar';
+    setDownloadEnabled(_hasData);
   }
 }
 

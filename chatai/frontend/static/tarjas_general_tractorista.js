@@ -73,6 +73,7 @@ async function queryData() {
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
   btn.textContent = 'Cargando…';
+  let _hasData = false;
 
   try {
     const res = await fetch('/api/tarjas/general-tractorista?' + params);
@@ -83,7 +84,6 @@ async function queryData() {
     if (!hasData) {
       hide('tables-section'); hide('chart-section');
       show('empty-state');
-      setDownloadEnabled(false);
       return;
     }
 
@@ -92,12 +92,13 @@ async function queryData() {
     renderRanking(data.person_ranking);
     renderChart(data.chart_data);
     show('tables-section'); show('chart-section');
-    setDownloadEnabled(true);
+    _hasData = true;
   } catch (e) {
     console.error('Query error:', e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Consultar';
+    setDownloadEnabled(_hasData);
   }
 }
 
