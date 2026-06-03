@@ -247,8 +247,13 @@ function printWithHeader(title, filters) {
     + '<p class="ph-subtitle">Generado el ' + now + '</p>'
     + '</div></div>'
     + '<div class="ph-filters">' + chips + '</div>';
-  document.getElementById('print-header').innerHTML = html;
+  const el = document.getElementById('print-header');
+  el.innerHTML = html;
   window.print();
+  window.addEventListener('afterprint', function cleanup() {
+    el.innerHTML = '';
+    window.removeEventListener('afterprint', cleanup);
+  });
 }
 
 // ── Events ────────────────────────────────────────────────────────────
