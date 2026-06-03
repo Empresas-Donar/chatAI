@@ -373,6 +373,41 @@ async def get_tarjas_filters():
     }
 
 
+def _build_detalle_filters(
+    fecha_inicio, fecha_termino, contratista=None, empresa=None,
+    centro_costo=None, tipo_pago=None, labor=None, campo=None,
+):
+    filters = ["fecha BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista: filters.append("contratista = %s"); params.append(contratista)
+    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
+    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
+    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
+    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
+    if campo: filters.append("nombre_campo = %s"); params.append(campo)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _query_detalle_rows(cur, where, params):
+    cur.execute(f"""
+        SELECT
+            tipo_pago,
+            "Nombre Labor"    AS labor,
+            "CC"              AS centro_costo,
+            jornadas,
+            total_unitario,
+            total_labor       AS costo_total,
+            CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
+            "%% Tipo de pago" AS pct_pago,
+            nombre_campo,
+            fecha::text       AS fecha
+        FROM appsheet.tarjas_reporte
+        {where}
+        ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
+    """, params)
+    return _rows_to_dicts(cur)
+
+
 @router.get("/api/tarjas/detalle")
 async def get_tarjas_detail(
     fecha_inicio: str = Query(...),
@@ -392,63 +427,21 @@ async def get_tarjas_detail(
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
-    filters = ["fecha BETWEEN %s AND %s"]
-    params: list = [fecha_inicio, fecha_termino]
-
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    if centro_costo:
-        filters.append('"CC" = %s')
-        params.append(centro_costo)
-    if tipo_pago:
-        filters.append("tipo_pago = %s")
-        params.append(tipo_pago)
-    if labor:
-        filters.append('"Nombre Labor" = %s')
-        params.append(labor)
-    if campo:
-        filters.append("nombre_campo = %s")
-        params.append(campo)
-
-    where = "WHERE " + " AND ".join(filters)
+    where, params = _build_detalle_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, tipo_pago, labor, campo
+    )
 
     try:
         with conn.cursor() as cur:
-            # Summary by tipo_pago
             cur.execute(f"""
-                SELECT
-                    tipo_pago,
-                    COALESCE(SUM(total_labor), 0) AS total_pagar,
-                    COALESCE(SUM(jornadas), 0)    AS jornadas
-                FROM appsheet.tarjas_reporte
-                {where}
-                GROUP BY tipo_pago
-                ORDER BY tipo_pago
+                SELECT tipo_pago,
+                       COALESCE(SUM(total_labor), 0) AS total_pagar,
+                       COALESCE(SUM(jornadas), 0)    AS jornadas
+                FROM appsheet.tarjas_reporte {where}
+                GROUP BY tipo_pago ORDER BY tipo_pago
             """, params)
             resumen = _rows_to_dicts(cur)
-
-            # Detail rows
-            cur.execute(f"""
-                SELECT
-                    tipo_pago,
-                    "Nombre Labor"    AS labor,
-                    "CC"              AS centro_costo,
-                    jornadas,
-                    total_unitario,
-                    total_labor       AS costo_total,
-                    CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
-                    "%% Tipo de pago" AS pct_pago,
-                    nombre_campo,
-                    fecha::text       AS fecha
-                FROM appsheet.tarjas_reporte
-                {where}
-                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
-            """, params)
-            rows = _rows_to_dicts(cur)
+            rows = _query_detalle_rows(cur, where, params)
     finally:
         conn.close()
 
@@ -1572,41 +1565,27 @@ async def download_tarjas_detalle_excel(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
-    filters = ["fecha BETWEEN %s AND %s"]
-    params: list = [fecha_inicio, fecha_termino]
-    if contratista: filters.append("contratista = %s"); params.append(contratista)
-    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
-    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
-    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
-    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
-    if campo: filters.append("nombre_campo = %s"); params.append(campo)
-    where = "WHERE " + " AND ".join(filters)
+    where, params = _build_detalle_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, tipo_pago, labor, campo
+    )
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT tipo_pago, "Nombre Labor" AS labor, "CC" AS centro_costo,
-                       jornadas, total_unitario, total_labor AS costo_total,
-                       CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
-                       "%% Tipo de pago" AS pct_pago, nombre_campo, fecha::text AS fecha
-                FROM appsheet.tarjas_reporte {where}
-                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
-            """, params)
-            rows = _rows_to_dicts(cur)
+            rows = _query_detalle_rows(cur, where, params)
     finally:
         conn.close()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle"
-    _apply_header(ws, ["Tipo de pago", "Labor", "CC", "Jornadas", "Total unitario",
-                        "Costo total", "Costo por hora", "% Tipo pago", "Campo", "Fecha"])
+    _apply_header(ws, ["Tipo de pago", "Labor", "CC", "Costo por hora", "Jornadas",
+                        "Total unitario", "Costo total", "% Tipo pago", "Campo", "Fecha"])
     money = '#,##0'
     for i, r in enumerate(rows, 2):
         ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["labor"]); ws.cell(i,3,r["centro_costo"])
-        ws.cell(i,4,r["jornadas"])
-        c5=ws.cell(i,5,float(r["total_unitario"] or 0)); c5.number_format=money
-        c6=ws.cell(i,6,float(r["costo_total"] or 0)); c6.number_format=money
-        c7=ws.cell(i,7,float(r["costo_hora"] or 0) if r["costo_hora"] is not None else None); c7.number_format=money
+        c4=ws.cell(i,4,float(r["costo_hora"]) if r["costo_hora"] is not None else None); c4.number_format=money
+        ws.cell(i,5,r["jornadas"])
+        c6=ws.cell(i,6,float(r["total_unitario"] or 0)); c6.number_format=money
+        c7=ws.cell(i,7,float(r["costo_total"] or 0)); c7.number_format=money
         ws.cell(i,8,float(r["pct_pago"] or 0))
         ws.cell(i,9,r["nombre_campo"]); ws.cell(i,10,r["fecha"])
-    for col,w in zip("ABCDEFGHIJ",[14,28,10,10,14,14,14,12,20,12]):
+    for col,w in zip("ABCDEFGHIJ",[14,28,10,14,10,14,14,12,20,12]):
         ws.column_dimensions[col].width=w
     return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
 
@@ -2015,37 +1994,23 @@ async def download_tarjas_detalle_pdf(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
-    filters = ["fecha BETWEEN %s AND %s"]
-    params: list = [fecha_inicio, fecha_termino]
-    if contratista: filters.append("contratista = %s"); params.append(contratista)
-    if centro_costo: filters.append('"CC" = %s'); params.append(centro_costo)
-    if tipo_pago: filters.append("tipo_pago = %s"); params.append(tipo_pago)
-    if labor: filters.append('"Nombre Labor" = %s'); params.append(labor)
-    if campo: filters.append("nombre_campo = %s"); params.append(campo)
-    if empresa: filters.append("nombre_campo = %s"); params.append(_empresa_to_campo(empresa))
-    where = "WHERE " + " AND ".join(filters)
+    where, params = _build_detalle_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, tipo_pago, labor, campo
+    )
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT tipo_pago, "Nombre Labor" AS labor, "CC" AS cc, jornadas,
-                       total_unitario, total_labor AS total,
-                       CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
-                       "%% Tipo de pago" AS pct_pago, nombre_campo, fecha::text AS fecha
-                FROM appsheet.tarjas_reporte {where}
-                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
-            """, params)
-            rows = _rows_to_dicts(cur)
+            rows = _query_detalle_rows(cur, where, params)
     finally:
         conn.close()
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
     rows_html = "".join(
-        f'<tr><td>{r["tipo_pago"]}</td><td>{r["labor"]}</td><td>{r["cc"]}</td>'
+        f'<tr><td>{r["tipo_pago"]}</td><td>{r["labor"]}</td><td>{r["centro_costo"]}</td>'
         f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
         f'<td class="num">{r["jornadas"]}</td>'
         f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
-        f'<td class="total">{fmtCLP(r["total"])}</td>'
+        f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
         f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
     )
