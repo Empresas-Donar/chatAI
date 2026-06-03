@@ -203,13 +203,29 @@ function setDownloadEnabled(on) {
   document.getElementById('btn-excel').disabled = !on;
   document.getElementById('btn-pdf').disabled = !on;
 }
+function printWithHeader(title, filters) {
+  const chips = Object.entries(filters)
+    .filter(([,v]) => v)
+    .map(([k,v]) => `<span class="ph-chip"><strong>${esc(k)}:</strong> ${esc(v)}</span>`)
+    .join('');
+  document.getElementById('print-header').innerHTML =
+    `<h2>${esc(title)}</h2><div class="ph-filters">${chips}</div>`;
+  window.print();
+}
 
 // ── Events ───────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/detalle/download-excel?' + currentParams();
 });
-document.getElementById('btn-pdf').addEventListener('click', () => window.print());
+document.getElementById('btn-pdf').addEventListener('click', () => {
+  const g = id => document.getElementById(id)?.value || '';
+  printWithHeader('Detalle de la semana — Tarjas', {
+    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
+    'Contratista': g('fil-contratista'), 'Campo': g('fil-campo'),
+    'CC': g('fil-cc'), 'Tipo de pago': g('fil-tipo'), 'Labor': g('fil-labor'),
+  });
+});
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });

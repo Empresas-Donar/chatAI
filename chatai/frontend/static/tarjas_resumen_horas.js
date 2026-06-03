@@ -188,13 +188,29 @@ function setDownloadEnabled(on) {
   document.getElementById('btn-excel').disabled = !on;
   document.getElementById('btn-pdf').disabled = !on;
 }
+function printWithHeader(title, filters) {
+  const chips = Object.entries(filters)
+    .filter(([,v]) => v)
+    .map(([k,v]) => `<span class="ph-chip"><strong>${esc(k)}:</strong> ${esc(v)}</span>`)
+    .join('');
+  document.getElementById('print-header').innerHTML =
+    `<h2>${esc(title)}</h2><div class="ph-filters">${chips}</div>`;
+  window.print();
+}
 
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/resumen-horas/download-excel?' + currentParams();
 });
-document.getElementById('btn-pdf').addEventListener('click', () => window.print());
+document.getElementById('btn-pdf').addEventListener('click', () => {
+  const g = id => document.getElementById(id)?.value || '';
+  printWithHeader('Horas extra por trabajador — Tarjas', {
+    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
+    'Contratista': g('fil-contratista'), 'Trabajador': g('fil-trabajador'),
+    'Tipo de pago': g('fil-tipo'),
+  });
+});
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
