@@ -48,37 +48,71 @@
   /* ── Print header ────────────────────────────────────────────────── */
   #print-header {
     display: block !important;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #C4503A;
-  }
-
-  #print-header h2 {
-    font-size: 14pt !important;
-    font-weight: 700 !important;
-    color: #C4503A !important;
-    margin: 0 0 6px 0 !important;
+    background: #1A1208 !important;
+    color: #F2C04A !important;
+    border-radius: 0 !important;
+    margin-bottom: 16px !important;
     padding: 0 !important;
   }
 
+  /* Top band: logo + report title */
+  #print-header .ph-top {
+    display: flex !important;
+    align-items: center !important;
+    gap: 14px !important;
+    padding: 10px 14px !important;
+    background: #1A1208 !important;
+  }
+
+  #print-header .ph-logo {
+    height: 36px !important;
+    width: auto !important;
+    display: block !important;
+    flex-shrink: 0 !important;
+  }
+
+  #print-header .ph-title-block {
+    flex: 1 !important;
+  }
+
+  #print-header h2 {
+    font-size: 13pt !important;
+    font-weight: 800 !important;
+    color: #F2C04A !important;
+    margin: 0 0 2px 0 !important;
+    padding: 0 !important;
+    letter-spacing: 0.3px !important;
+  }
+
+  #print-header .ph-subtitle {
+    font-size: 8pt !important;
+    color: #C4A870 !important;
+    margin: 0 !important;
+  }
+
+  /* Bottom band: filter chips */
   #print-header .ph-filters {
     display: flex !important;
     flex-wrap: wrap !important;
-    gap: 6px !important;
-    font-size: 8pt !important;
-    color: #444 !important;
+    gap: 5px !important;
+    padding: 7px 14px !important;
+    background: #2E1D08 !important;
+    border-top: 1px solid #3D2D10 !important;
   }
 
   #print-header .ph-chip {
-    background: #f5f0ea !important;
-    border: 1px solid #ddd !important;
+    background: #3D2D10 !important;
+    border: 1px solid #5a4020 !important;
     border-radius: 3px !important;
-    padding: 1px 7px !important;
-    white-space: nowrap;
+    padding: 2px 8px !important;
+    white-space: nowrap !important;
+    font-size: 7.5pt !important;
+    color: #e8d5a0 !important;
   }
 
   #print-header .ph-chip strong {
-    color: #C4503A !important;
+    color: #F2C04A !important;
+    font-weight: 700 !important;
   }
 
   /* ── Section titles ──────────────────────────────────────────────── */
@@ -163,22 +197,22 @@
 
   /* Header row */
   th {
-    background: #C4503A !important;
-    color: #fff !important;
+    background: #1A1208 !important;
+    color: #F2C04A !important;
     font-weight: 700 !important;
     padding: 5px 7px !important;
     text-align: left !important;
-    border: 1px solid #a03020 !important;
+    border: 1px solid #3D2D10 !important;
     white-space: nowrap;
     font-size: 8pt !important;
   }
 
-  /* Super-header (orange) → unify with red */
+  /* Super-header */
   thead tr.trp-superheader th,
   thead tr.trp-superheader th.th-empty {
-    background: #C4503A !important;
-    color: #fff !important;
-    border-color: #a03020 !important;
+    background: #2E1D08 !important;
+    color: #C4A870 !important;
+    border-color: #3D2D10 !important;
     font-size: 7pt !important;
     padding: 3px 7px !important;
   }
@@ -188,11 +222,12 @@
   th.th-total,
   th.num {
     text-align: right !important;
-    background: #C4503A !important;
+    background: #1A1208 !important;
   }
 
   th.th-total {
-    background: #9e3d2c !important;
+    background: #0f0c04 !important;
+    color: #F2C04A !important;
   }
 
   /* Body cells */
@@ -213,7 +248,7 @@
 
   /* Worker-first border */
   tbody tr.worker-first td {
-    border-top: 1.5px solid #C4503A !important;
+    border-top: 1.5px solid #F2C04A !important;
   }
 
   /* Value cells */
@@ -233,10 +268,11 @@
   /* Total column */
   .cell-total,
   td.cell-total {
-    background: #fef3c7 !important;
+    background: #fdf6e3 !important;
     font-weight: 800 !important;
     text-align: right !important;
-    border-left: 1.5px solid #C4503A !important;
+    border-left: 1.5px solid #F2C04A !important;
+    color: #1A1208 !important;
   }
 
   /* Tipo badge cells */

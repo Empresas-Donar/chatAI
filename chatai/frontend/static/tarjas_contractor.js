@@ -238,6 +238,20 @@ function printWithHeader(title, filters) {
     .filter(([,v]) => v)
     .map(([k,v]) => `<span class="ph-chip"><strong>${esc(k)}:</strong> ${esc(v)}</span>`)
     .join('');
+  const now = new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });
+  document.getElementById('print-header').innerHTML = `
+    <div class="ph-top">
+      <img class="ph-logo" src="/static/img/donar_logo.png" alt="Empresas Donar" />
+      <div class="ph-title-block">
+        <h2>${esc(title)}</h2>
+        <p class="ph-subtitle">Generado el ${now}</p>
+      </div>
+    </div>
+    <div class="ph-filters">${chips}</div>
+  `;
+  window.print();
+}:</strong> ${esc(v)}</span>`)
+    .join('');
   document.getElementById('print-header').innerHTML =
     `<h2>${esc(title)}</h2><div class="ph-filters">${chips}</div>`;
   window.print();
