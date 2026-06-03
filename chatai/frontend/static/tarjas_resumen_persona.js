@@ -46,6 +46,12 @@ async function loadFilters() {
         `<option value="${esc(c)}">${esc(c)}</option>`
       ).join('');
 
+    const selEmpresa = document.getElementById('fil-empresa');
+    selEmpresa.innerHTML = '<option value="">Todas</option>' +
+      data.empresas.map(e =>
+        `<option value="${esc(e)}">${esc(e)}</option>`
+      ).join('');
+
     const selTipo = document.getElementById('fil-tipo');
     selTipo.innerHTML = '<option value="">Todos</option>' +
       data.tipos_pago.map(t =>
@@ -67,9 +73,11 @@ async function queryData() {
   const vTrab = document.getElementById('fil-trabajador').value;
   const vContratista = document.getElementById('fil-contratista').value;
   const vTipo = document.getElementById('fil-tipo').value;
+  const vEmp = document.getElementById('fil-empresa').value;
   if (vTrab) params.append('trabajador', vTrab);
   if (vContratista) params.append('contratista', vContratista);
   if (vTipo) params.append('tipo_pago', vTipo);
+  if (vEmp) params.append('empresa', vEmp);
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -184,9 +192,11 @@ function currentParams() {
   const vTrab = document.getElementById('fil-trabajador').value;
   const vContratista = document.getElementById('fil-contratista').value;
   const vTipo = document.getElementById('fil-tipo').value;
+  const vEmp = document.getElementById('fil-empresa').value;
   if (vTrab) params.append('trabajador', vTrab);
   if (vContratista) params.append('contratista', vContratista);
   if (vTipo) params.append('tipo_pago', vTipo);
+  if (vEmp) params.append('empresa', vEmp);
   return params;
 }
 
@@ -198,40 +208,18 @@ function downloadExcel() {
 function printWithHeader(title, filters) {
   const chips = Object.entries(filters)
     .filter(([,v]) => v)
-    .map(([k,v]) => `<span class="ph-chip"><strong>${esc(k)}:</strong> ${esc(v)}</span>`)
+    .map(([k,v]) => '<span class="ph-chip"><strong>' + esc(k) + ':</strong> ' + esc(v) + '</span>')
     .join('');
   const now = new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });
-  document.getElementById('print-header').innerHTML = `
-    <div class="ph-top">
-      <img class="ph-logo" src="/static/img/donar_logo.png" alt="Empresas Donar" />
-      <div class="ph-title-block">
-        <h2>${esc(title)}</h2>
-        <p class="ph-subtitle">Generado el ${now}</p>
-      </div>
-    </div>
-    <div class="ph-filters">${chips}</div>
-  `;
+  const html = '<div class="ph-top">'
+    + '<img class="ph-logo" src="/static/img/donar_logo.png" alt="Empresas Donar" />'
+    + '<div class="ph-title-block">'
+    + '<h2>' + esc(title) + '</h2>'
+    + '<p class="ph-subtitle">Generado el ' + now + '</p>'
+    + '</div></div>'
+    + '<div class="ph-filters">' + chips + '</div>';
+  document.getElementById('print-header').innerHTML = html;
   window.print();
-}:</strong> ${esc(v)}</span>`)
-    .join('');
-  document.getElementById('print-header').innerHTML =
-    `<h2>${esc(title)}</h2><div class="ph-filters">${chips}</div>`;
-  window.print();
-}
-
-function downloadPdf() {
-  const g = id => document.getElementById(id)?.value || '';
-  printWithHeader('Detalle trabajador — Tarjas', {
-    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
-    'Contratista': g('fil-contratista'),
-    'Empresa': g('fil-empresa'), 'Trabajador': g('fil-trabajador'),
-    'Tipo de pago': g('fil-tipo'),
-  });
-}
-
-function setDownloadEnabled(enabled) {
-  document.getElementById('btn-excel').disabled = !enabled;
-  document.getElementById('btn-pdf').disabled = !enabled;
 }
 
 // ── Events ────────────────────────────────────────────────────────────
