@@ -205,6 +205,15 @@ function downloadExcel() {
   window.location.href = '/api/tarjas/resumen-persona/download-excel?' + params;
 }
 
+function downloadPdf() {
+  const g = id => document.getElementById(id)?.value || '';
+  printWithHeader('Detalle trabajador — Tarjas', {
+    'Desde': g('fil-from'), 'Hasta': g('fil-to'),
+    'Empresa': g('fil-empresa'), 'Contratista': g('fil-contratista'),
+    'Trabajador': g('fil-trabajador'), 'Tipo de pago': g('fil-tipo'),
+  });
+}
+
 function printWithHeader(title, filters) {
   const chips = Object.entries(filters)
     .filter(([,v]) => v)
