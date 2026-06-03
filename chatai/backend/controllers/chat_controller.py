@@ -1361,20 +1361,24 @@ async def chat_ask(request: Request):
         for part in fn_calls:
             fn = part.function_call
             result = _call_tool(fn.name, dict(fn.args))
+            _log.info("tool_call name=%s result_len=%d", fn.name, len(result))
             # Collect source badges, traces and charts
             try:
                 parsed = json.loads(result)
                 badge = parsed.get("__source_badge__", "")
                 trace = parsed.get("__trace__")
                 chart = parsed.get("__chart__")
+                _log.info("tool_result has_trace=%s has_badge=%s has_chart=%s row_count=%s",
+                          trace is not None, bool(badge), chart is not None,
+                          trace.get("row_count") if trace else "n/a")
                 if badge:
                     collected_badges.append(badge.strip())
                 if trace:
                     collected_traces.append(trace)
                 if chart:
                     collected_charts.append(chart)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.error("tool_result parse error: %s", e)
             tool_parts.append(
                 types.Part(
                     function_response=types.FunctionResponse(
@@ -1385,6 +1389,9 @@ async def chat_ask(request: Request):
             )
 
         response = chat.send_message(tool_parts)
+
+    _log.info("agentic_loop done badges=%d traces=%d charts=%d",
+              len(collected_badges), len(collected_traces), len(collected_charts))
 
     try:
         # Join all text parts (Gemini may split text + function_response across parts)
@@ -1442,6 +1449,8 @@ async def chat_ask(request: Request):
         cache.put(user_question, embedding, final_text, collected_traces, collected_charts or None)
 
     # Persist to DB (fire and forget — don't block the response)
+    _log.info("saving user=%s traces=%d charts=%d tool_was_called=%s",
+              username, len(collected_traces), len(collected_charts), _tool_was_called)
     _save_messages(username, user_question, final_text,
                    collected_traces if collected_traces else None,
                    collected_charts if collected_charts else None)
