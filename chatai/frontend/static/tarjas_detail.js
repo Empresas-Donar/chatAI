@@ -180,9 +180,9 @@ function renderDetail(rows, count) {
     const label = TIPO_LABEL[r.tipo_pago] || r.tipo_pago;
     return `<tr>
       <td><span class="${cls}">${esc(label)}</span></td>
-      <td>${esc(String(r.centro_costo ?? ''))}</td>
       <td>${esc(r.labor ?? '')}</td>
-      <td>${esc(r.contratista ?? '')}</td>
+      <td>${esc(String(r.centro_costo ?? ''))}</td>
+      <td class="num">${r.costo_hora != null ? fmtCLP.format(r.costo_hora) : '—'}</td>
       <td class="num">${r.jornadas ?? '—'}</td>
       <td class="num">${r.total_unitario != null ? fmtCLP.format(r.total_unitario) : '—'}</td>
       <td class="num">${r.costo_total != null ? fmtCLP.format(r.costo_total) : '—'}</td>

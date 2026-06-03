@@ -435,18 +435,18 @@ async def get_tarjas_detail(
             cur.execute(f"""
                 SELECT
                     tipo_pago,
-                    "CC"              AS centro_costo,
                     "Nombre Labor"    AS labor,
+                    "CC"              AS centro_costo,
                     jornadas,
                     total_unitario,
                     total_labor       AS costo_total,
+                    CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
                     "%% Tipo de pago" AS pct_pago,
-                    contratista,
                     nombre_campo,
                     fecha::text       AS fecha
                 FROM appsheet.tarjas_reporte
                 {where}
-                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
             """, params)
             rows = _rows_to_dicts(cur)
     finally:
@@ -1584,27 +1584,29 @@ async def download_tarjas_detalle_excel(
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
+                SELECT tipo_pago, "Nombre Labor" AS labor, "CC" AS centro_costo,
                        jornadas, total_unitario, total_labor AS costo_total,
-                       "%% Tipo de pago" AS pct_pago, contratista, nombre_campo, fecha::text AS fecha
+                       CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
+                       "%% Tipo de pago" AS pct_pago, nombre_campo, fecha::text AS fecha
                 FROM appsheet.tarjas_reporte {where}
-                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+                ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
             """, params)
             rows = _rows_to_dicts(cur)
     finally:
         conn.close()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle"
-    _apply_header(ws, ["Tipo de pago", "CC", "Labor", "Jornadas", "Total unitario",
-                        "Costo total", "% Tipo pago", "Contratista", "Campo", "Fecha"])
+    _apply_header(ws, ["Tipo de pago", "Labor", "CC", "Jornadas", "Total unitario",
+                        "Costo total", "Costo por hora", "% Tipo pago", "Campo", "Fecha"])
     money = '#,##0'
     for i, r in enumerate(rows, 2):
-        ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["centro_costo"]); ws.cell(i,3,r["labor"])
+        ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["labor"]); ws.cell(i,3,r["centro_costo"])
         ws.cell(i,4,r["jornadas"])
         c5=ws.cell(i,5,float(r["total_unitario"] or 0)); c5.number_format=money
         c6=ws.cell(i,6,float(r["costo_total"] or 0)); c6.number_format=money
-        ws.cell(i,7,float(r["pct_pago"] or 0))
-        ws.cell(i,8,r["contratista"]); ws.cell(i,9,r["nombre_campo"]); ws.cell(i,10,r["fecha"])
-    for col,w in zip("ABCDEFGHIJ",[14,10,28,10,14,14,12,24,20,12]):
+        c7=ws.cell(i,7,float(r["costo_hora"] or 0) if r["costo_hora"] is not None else None); c7.number_format=money
+        ws.cell(i,8,float(r["pct_pago"] or 0))
+        ws.cell(i,9,r["nombre_campo"]); ws.cell(i,10,r["fecha"])
+    for col,w in zip("ABCDEFGHIJ",[14,28,10,10,14,14,14,12,20,12]):
         ws.column_dimensions[col].width=w
     return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
 

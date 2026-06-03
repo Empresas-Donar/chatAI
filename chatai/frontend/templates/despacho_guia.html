@@ -3,8 +3,8 @@
 {% block title %}Guía de Despacho — Empresas Donar{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/purchase_orders.css?v=2" />
-<link rel="stylesheet" href="/static/despacho_guia.css?v=2" />
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/despacho_guia.css?v={{ static_v }}" />
 {% endblock %}
 
 {% block body %}
@@ -62,5 +62,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/despacho_guia.js?v=2"></script>
+<script src="/static/despacho_guia.js?v={{ static_v }}"></script>
 {% endblock %}

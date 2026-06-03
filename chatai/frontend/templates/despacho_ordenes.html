@@ -3,8 +3,8 @@
 {% block title %}Órdenes de Venta — Empresas Donar{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/purchase_orders.css?v=1" />
-<link rel="stylesheet" href="/static/despacho_ordenes.css?v=1" />
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/despacho_ordenes.css?v={{ static_v }}" />
 {% endblock %}
 
 {% block body %}
@@ -90,5 +90,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/despacho_ordenes.js?v=1"></script>
+<script src="/static/despacho_ordenes.js?v={{ static_v }}"></script>
 {% endblock %}

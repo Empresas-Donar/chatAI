@@ -4,9 +4,9 @@
 
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="/static/tarjas_general.css?v=2" />
-<link rel="stylesheet" href="/static/tarjas_general_tractorista.css?v=2" />
-<link rel="stylesheet" href="/static/tarjas_print.css?v=2" />
+<link rel="stylesheet" href="/static/tarjas_general.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_general_tractorista.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 {% endblock %}
 
 {% block body %}
@@ -114,5 +114,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_general_tractorista.js?v=3"></script>
+<script src="/static/tarjas_general_tractorista.js?v={{ static_v }}"></script>
 {% endblock %}

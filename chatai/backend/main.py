@@ -85,7 +85,9 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+import time as _time
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.globals["static_v"] = int(_time.time())
 
 # Inject current_user and user_role into every template context automatically
 from auth import get_current_user as _get_current_user, get_user_role as _get_user_role
