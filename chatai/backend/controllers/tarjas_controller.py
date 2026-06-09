@@ -392,17 +392,25 @@ def _query_detalle_rows(cur, where, params):
     cur.execute(f"""
         SELECT
             tipo_pago,
-            "Nombre Labor"    AS labor,
-            "CC"              AS centro_costo,
-            jornadas,
-            total_unitario,
-            total_labor       AS costo_total,
-            CASE WHEN jornadas > 0 THEN ROUND((total_labor / jornadas)::numeric, 0) ELSE NULL END AS costo_hora,
-            "%% Tipo de pago" AS pct_pago,
-            nombre_campo,
-            fecha::text       AS fecha
+            "Nombre Labor"                                            AS labor,
+            "CC"                                                      AS centro_costo,
+            SUM(jornadas)                                             AS jornadas,
+            CASE WHEN SUM(jornadas) > 0
+                 THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+                 ELSE NULL END                                        AS total_unitario,
+            SUM(total_labor)                                          AS costo_total,
+            CASE WHEN SUM(jornadas) > 0
+                 THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 0)
+                 ELSE NULL END                                        AS costo_hora,
+            ROUND(
+                SUM(total_labor)::numeric
+                / NULLIF(SUM(SUM(total_labor)) OVER (PARTITION BY tipo_pago), 0) * 100,
+                2
+            )                                                         AS pct_pago,
+            nombre_campo
         FROM appsheet.tarjas_reporte
         {where}
+        GROUP BY tipo_pago, "Nombre Labor", "CC", nombre_campo
         ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
     """, params)
     return _rows_to_dicts(cur)
@@ -578,17 +586,19 @@ async def get_tarjas_detalle_tractorista(
             cur.execute(f"""
                 SELECT
                     tipo_pago,
-                    "CC"              AS centro_costo,
-                    "Nombre Labor"    AS labor,
-                    jornadas,
-                    total_unitario,
-                    total_labor       AS costo_total,
+                    "CC"                  AS centro_costo,
+                    "Nombre Labor"        AS labor,
+                    SUM(jornadas)         AS jornadas,
+                    CASE WHEN SUM(jornadas) > 0
+                         THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+                         ELSE NULL END    AS total_unitario,
+                    SUM(total_labor)      AS costo_total,
                     contratista,
-                    nombre_campo,
-                    fecha::text       AS fecha
+                    nombre_campo
                 FROM appsheet.tarjas_reporte
                 {where}
-                ORDER BY contratista, fecha::date, "CC", "Nombre Labor"
+                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
+                ORDER BY contratista, "CC", "Nombre Labor"
             """, params)
             rows = _rows_to_dicts(cur)
     finally:
@@ -1575,7 +1585,7 @@ async def download_tarjas_detalle_excel(
         conn.close()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle"
     _apply_header(ws, ["Tipo de pago", "Labor", "CC", "Costo por hora", "Jornadas",
-                        "Total unitario", "Costo total", "% Tipo pago", "Campo", "Fecha"])
+                        "Total unitario", "Costo total", "% Tipo pago", "Campo"])
     money = '#,##0'
     for i, r in enumerate(rows, 2):
         ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["labor"]); ws.cell(i,3,r["centro_costo"])
@@ -1584,8 +1594,8 @@ async def download_tarjas_detalle_excel(
         c6=ws.cell(i,6,float(r["total_unitario"] or 0)); c6.number_format=money
         c7=ws.cell(i,7,float(r["costo_total"] or 0)); c7.number_format=money
         ws.cell(i,8,float(r["pct_pago"] or 0))
-        ws.cell(i,9,r["nombre_campo"]); ws.cell(i,10,r["fecha"])
-    for col,w in zip("ABCDEFGHIJ",[14,28,10,14,10,14,14,12,20,12]):
+        ws.cell(i,9,r["nombre_campo"])
+    for col,w in zip("ABCDEFGHI",[14,28,10,14,10,14,14,12,20]):
         ws.column_dimensions[col].width=w
     return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
 
@@ -1665,9 +1675,14 @@ async def download_tarjas_detalle_tractorista_excel(
         with conn.cursor() as cur:
             cur.execute(f"""
                 SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
-                       jornadas, total_unitario, total_labor AS costo_total,
-                       contratista, nombre_campo, fecha::text AS fecha
+                       SUM(jornadas) AS jornadas,
+                       CASE WHEN SUM(jornadas) > 0
+                            THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+                            ELSE NULL END AS total_unitario,
+                       SUM(total_labor) AS costo_total,
+                       contratista, nombre_campo
                 FROM appsheet.tarjas_reporte {where}
+                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
                 ORDER BY contratista, "CC", "Nombre Labor"
             """, params)
             rows = _rows_to_dicts(cur)
@@ -1675,15 +1690,15 @@ async def download_tarjas_detalle_tractorista_excel(
         conn.close()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Detalle tractorista"
     _apply_header(ws, ["Tipo de pago","CC","Labor","Jornadas","Total unitario",
-                        "Costo total","Contratista","Campo","Fecha"])
+                        "Costo total","Contratista","Campo"])
     money = '#,##0'
     for i,r in enumerate(rows,2):
         ws.cell(i,1,r["tipo_pago"]); ws.cell(i,2,r["centro_costo"]); ws.cell(i,3,r["labor"])
         ws.cell(i,4,r["jornadas"])
         c5=ws.cell(i,5,float(r["total_unitario"] or 0)); c5.number_format=money
         c6=ws.cell(i,6,float(r["costo_total"] or 0)); c6.number_format=money
-        ws.cell(i,7,r["contratista"]); ws.cell(i,8,r["nombre_campo"]); ws.cell(i,9,r["fecha"])
-    for col,w in zip("ABCDEFGHI",[14,10,28,10,14,14,24,20,12]):
+        ws.cell(i,7,r["contratista"]); ws.cell(i,8,r["nombre_campo"])
+    for col,w in zip("ABCDEFGH",[14,10,28,10,14,14,24,20]):
         ws.column_dimensions[col].width=w
     return _excel_response(wb, f"tarjas_detalle_tractorista_{fecha_inicio}_{fecha_termino}.xlsx")
 
