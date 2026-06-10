@@ -10,7 +10,6 @@ Routes:
   GET  /api/purchase-orders/odoo-export   → CSV export for Odoo import
 """
 
-import csv
 import datetime
 import decimal
 import io
@@ -175,8 +174,8 @@ async def export_odoo_csv(
     fecha_termino: str,
 ):
     """
-    Export tarjas_reporte_odoo as a CSV file ready for Odoo import.
-    Column names match Odoo's expected field names exactly.
+    Export tarjas_reporte_odoo as an .xlsx file ready for Odoo import.
+    Format matches the manual upload template: partner_id only on first row.
     """
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -190,60 +189,63 @@ async def export_odoo_csv(
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    "Vendedor",
-                    "Lineas del pedido/Producto/Nombre",
-                    SUM("Lineas del pedido/Cantidad")       AS "Lineas del pedido/Cantidad",
-                    "Lineas del pedido/Código de Distribución Analítica/Código",
-                    CASE WHEN SUM("Lineas del pedido/Cantidad") > 0
-                         THEN ROUND(
-                             SUM("Lineas del pedido/Cantidad" * "Lineas del pedido/Precio un.")
-                             / SUM("Lineas del pedido/Cantidad"), 2)
-                         ELSE NULL END                      AS "Lineas del pedido/Precio un.",
                     "partner_id",
                     "order_line/product_id",
-                    SUM("order_line/product_qty")           AS "order_line/product_qty",
+                    SUM("order_line/product_qty")               AS "order_line/product_qty",
                     "order_line/analytic_distribution",
                     CASE WHEN SUM("order_line/product_qty") > 0
                          THEN ROUND(
                              SUM("order_line/product_qty" * "order_line/price_unit")
                              / SUM("order_line/product_qty"), 2)
-                         ELSE NULL END                      AS "order_line/price_unit"
+                         ELSE NULL END                          AS "order_line/price_unit"
                 FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor"      = %s
                   AND "nombre_campo"  = %s
                   AND "fecha" BETWEEN %s AND %s
                 GROUP BY
-                    "Vendedor",
-                    "Lineas del pedido/Producto/Nombre",
-                    "Lineas del pedido/Código de Distribución Analítica/Código",
                     "partner_id",
                     "order_line/product_id",
                     "order_line/analytic_distribution"
-                ORDER BY "Lineas del pedido/Código de Distribución Analítica/Código",
-                         "Lineas del pedido/Producto/Nombre"
+                ORDER BY "order_line/product_id"
             """, (contratista, empresa, fecha_inicio, fecha_termino))
-            columns = [d[0] for d in cur.description]
             rows = cur.fetchall()
     finally:
         conn.close()
 
-    # Build CSV in memory
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=",", quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(columns)
-    for row in rows:
-        writer.writerow([
-            str(v) if v is not None else ""
-            for v in row
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hoja1"
+
+    headers = [
+        "partner_id",
+        "order_line/product_id",
+        "order_line/product_qty",
+        "order_line/analytic_distribution",
+        "order_line/price_unit",
+    ]
+    ws.append(headers)
+
+    for i, row in enumerate(rows):
+        partner_id, product_id, qty, analytic, price = row
+        ws.append([
+            partner_id if i == 0 else None,
+            product_id,
+            float(qty) if qty is not None else None,
+            analytic,
+            float(price) if price is not None else None,
         ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
 
     filename = (
         f"odoo_{contratista.replace(' ', '_')}_{empresa.replace(' ', '_')}"
-        f"_{fecha_inicio}_{fecha_termino}.csv"
+        f"_{fecha_inicio}_{fecha_termino}.xlsx"
     )
-    output.seek(0)
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
