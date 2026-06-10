@@ -205,7 +205,7 @@ async def export_odoo_csv(
                   AND "nombre_campo"  = %s
                   AND "fecha" BETWEEN %s AND %s
                   AND "order_line/product_id" IS NOT NULL
-                  AND "order_line/analytic_distribution" NOT LIKE '%"": %'
+                  AND "order_line/analytic_distribution" NOT LIKE '%%"": %%'
                 GROUP BY
                     "partner_id",
                     "order_line/product_id",
