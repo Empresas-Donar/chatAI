@@ -16,6 +16,8 @@ import io
 import logging
 import re
 
+import openpyxl
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -214,7 +216,6 @@ async def export_odoo_csv(
     finally:
         conn.close()
 
-    import openpyxl
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Hoja1"
