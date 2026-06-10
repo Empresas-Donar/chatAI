@@ -113,21 +113,21 @@ def _rows_to_dicts(cur):
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 10mm; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #1a1a1a; margin: 0; }
-.ph { background: #1A1208; color: #F2C04A; padding: 8px 12px; margin-bottom: 12px; }
-.ph h1 { font-size: 13pt; font-weight: bold; color: #F2C04A; margin: 0 0 3px 0; }
-.ph-sub { font-size: 7.5pt; color: #C4A870; margin: 0; }
-.ph-chips { background: #2E1D08; padding: 5px 12px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 5px; }
-.chip { background: #3D2D10; border: 1px solid #5a4020; border-radius: 3px; padding: 2px 7px; font-size: 7pt; color: #e8d5a0; }
-.chip b { color: #F2C04A; }
+.ph { background: #f8f9fa; border-bottom: 2px solid #2563eb; padding: 8px 12px; margin-bottom: 8px; }
+.ph h1 { font-size: 13pt; font-weight: bold; color: #1e3a5f; margin: 0 0 2px 0; }
+.ph-sub { font-size: 7.5pt; color: #6b7280; margin: 0; }
+.ph-chips { background: #ffffff; padding: 5px 0; margin-bottom: 10px; }
+.chip { display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 3px; padding: 2px 7px; font-size: 7pt; color: #1e40af; margin: 2px 3px 2px 0; }
+.chip b { color: #1e3a5f; }
 table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
-th { background: #1A1208; color: #F2C04A; padding: 5px 6px; text-align: left; border: 1px solid #3D2D10; font-weight: bold; }
+th { background: #1e3a5f; color: #ffffff; padding: 5px 6px; text-align: left; border: 1px solid #2d4f78; font-weight: bold; }
 th.num { text-align: right; }
-td { padding: 3px 6px; border: 1px solid #ddd; vertical-align: middle; }
-tr:nth-child(even) td { background: #faf8f5; }
-tr.worker-first td { border-top: 1.5px solid #F2C04A; }
+td { padding: 3px 6px; border: 1px solid #e5e7eb; vertical-align: middle; }
+tr:nth-child(even) td { background: #f9fafb; }
+tr.worker-first td { border-top: 1.5px solid #2563eb; }
 .num { text-align: right; }
-.total { text-align: right; font-weight: bold; background: #fdf6e3; border-left: 1.5px solid #F2C04A; }
-.section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #1A1208; }
+.total { text-align: right; font-weight: bold; background: #eff6ff; border-left: 1.5px solid #2563eb; }
+.section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #1e3a5f; }
 """
 
 def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, filters: dict) -> str:
@@ -2030,7 +2030,7 @@ async def download_tarjas_detalle_pdf(
         for r in rows
     )
     header = _pdf_header("Detalle de la semana — Tarjas", fecha_inicio, fecha_termino,
-                         {"Empresa": empresa, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
