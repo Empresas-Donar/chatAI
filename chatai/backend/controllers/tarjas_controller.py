@@ -112,22 +112,22 @@ def _rows_to_dicts(cur):
 
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 10mm; }
-body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #1a1a1a; margin: 0; }
-.ph { background: #f8f9fa; border-bottom: 2px solid #2563eb; padding: 8px 12px; margin-bottom: 8px; }
-.ph h1 { font-size: 13pt; font-weight: bold; color: #1e3a5f; margin: 0 0 2px 0; }
-.ph-sub { font-size: 7.5pt; color: #6b7280; margin: 0; }
-.ph-chips { background: #ffffff; padding: 5px 0; margin-bottom: 10px; }
-.chip { display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 3px; padding: 2px 7px; font-size: 7pt; color: #1e40af; margin: 2px 3px 2px 0; }
-.chip b { color: #1e3a5f; }
+body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111111; margin: 0; }
+.ph { border-bottom: 1px solid #cccccc; padding: 6px 0 8px 0; margin-bottom: 6px; }
+.ph h1 { font-size: 12pt; font-weight: bold; color: #111111; margin: 0 0 2px 0; }
+.ph-sub { font-size: 7pt; color: #555555; margin: 0; }
+.ph-chips { padding: 4px 0; margin-bottom: 8px; }
+.chip { display: inline-block; border: 1px solid #aaaaaa; border-radius: 2px; padding: 1px 6px; font-size: 7pt; color: #333333; margin: 2px 3px 2px 0; }
+.chip b { color: #111111; }
 table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
-th { background: #1e3a5f; color: #ffffff; padding: 5px 6px; text-align: left; border: 1px solid #2d4f78; font-weight: bold; }
+th { background: #eeeeee; color: #111111; padding: 5px 6px; text-align: left; border: 1px solid #aaaaaa; font-weight: bold; }
 th.num { text-align: right; }
-td { padding: 3px 6px; border: 1px solid #e5e7eb; vertical-align: middle; }
-tr:nth-child(even) td { background: #f9fafb; }
-tr.worker-first td { border-top: 1.5px solid #2563eb; }
+td { padding: 3px 6px; border: 1px solid #cccccc; vertical-align: middle; }
+tr:nth-child(even) td { background: #f7f7f7; }
+tr.worker-first td { border-top: 1.5px solid #888888; }
 .num { text-align: right; }
-.total { text-align: right; font-weight: bold; background: #eff6ff; border-left: 1.5px solid #2563eb; }
-.section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #1e3a5f; }
+.total { text-align: right; font-weight: bold; border-left: 1.5px solid #888888; }
+.section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #111111; }
 """
 
 def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, filters: dict) -> str:
