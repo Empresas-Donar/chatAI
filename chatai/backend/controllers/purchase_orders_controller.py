@@ -14,9 +14,12 @@ import datetime
 import decimal
 import io
 import logging
+import os
 import re
 
 import openpyxl
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -26,6 +29,69 @@ from auth import require_auth
 from db import get_connection
 
 logger = logging.getLogger("controllers.purchase_orders")
+
+
+def _get_bq_client():
+    key_path = os.getenv("BQ_KEY_PATH")
+    project = os.getenv("BQ_PROJECT", "ace-scarab-484515-v1")
+    credentials = service_account.Credentials.from_service_account_file(key_path)
+    return bigquery.Client(project=project, credentials=credentials)
+
+
+def _sync_labores(conn, fecha_inicio: str, fecha_termino: str, vendedor: str, nombre_campo: str):
+    """Find labores without a product code in the given period and auto-map from BigQuery."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT r."Nombre Labor"
+            FROM appsheet.tarjas_reporte r
+            WHERE r.fecha BETWEEN %s AND %s
+              AND r.contratista = %s
+              AND r.nombre_campo = %s
+              AND COALESCE(
+                  (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
+                   WHERE TRIM(REGEXP_REPLACE(LOWER(l.labor), '\s+', ' ', 'g'))
+                       = TRIM(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'))
+                   LIMIT 1),
+                  (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
+                   WHERE r."Nombre Labor" ~ '^\[[\d.]+\]'
+                     AND l.codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^\[([\d.]+)\]'))
+                   LIMIT 1),
+                  (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
+                   WHERE r."Nombre Labor" ~ '^[\d]+\.[\d]+-'
+                     AND l.codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^([\d]+\.[\d]+)-'))
+                   LIMIT 1)
+              ) IS NULL
+        """, (fecha_inicio, fecha_termino, vendedor, nombre_campo))
+        unmapped = [row[0] for row in cur.fetchall()]
+
+    if not unmapped:
+        return
+
+    bq = _get_bq_client()
+    placeholders = ", ".join(f"'{labor.replace(chr(39), chr(39)*2)}'" for labor in unmapped)
+    query = f"""
+        SELECT
+            JSON_VALUE(p.name, '$.es_CL') AS nombre,
+            p.default_code                AS codigo
+        FROM `ace-scarab-484515-v1.odoo_data.Producto` p
+        WHERE p.default_code IS NOT NULL
+          AND JSON_VALUE(p.name, '$.es_CL') IN ({placeholders})
+    """
+    results = bq.query(query).result()
+    matches = {row.nombre: row.codigo for row in results}
+
+    if not matches:
+        return
+
+    with conn.cursor() as cur:
+        for labor, codigo in matches.items():
+            cur.execute("""
+                INSERT INTO appsheet.tarjas_labores (codigo_labor, labor)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+            """, (codigo, labor))
+            logger.info(f"Auto-mapped labor: '{labor}' → {codigo}")
+    conn.commit()
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -186,6 +252,11 @@ async def export_odoo_csv(
         conn = get_connection()
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    try:
+        _sync_labores(conn, fecha_inicio, fecha_termino, contratista, empresa)
+    except Exception as exc:
+        logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
 
     try:
         with conn.cursor() as cur:

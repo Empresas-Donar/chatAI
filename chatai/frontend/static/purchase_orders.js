@@ -174,14 +174,33 @@ function hideError() {
 }
 
 // ── Odoo export ──────────────────────────────────────────────────────────
-document.getElementById('btn-odoo-export').addEventListener('click', () => {
+document.getElementById('btn-odoo-export').addEventListener('click', async () => {
   if (!_lastParams) return;
-  const a = document.createElement('a');
-  a.href = '/api/purchase-orders/odoo-export?' + _lastParams;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const btn = document.getElementById('btn-odoo-export');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generando archivo…';
+  try {
+    const res = await fetch('/api/purchase-orders/odoo-export?' + _lastParams);
+    if (!res.ok) throw new Error('Error al generar el archivo');
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : 'odoo-export.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Error al exportar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────
