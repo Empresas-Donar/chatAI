@@ -1,10 +1,12 @@
 -- =============================================================================
 -- TARJAS: Vista reporte para importación a Odoo
 -- Columnas mapeadas a los campos de pedido de Odoo (order_line/*)
+-- Mantiene granularidad diaria para que los filtros por fecha funcionen.
+-- La consolidación por rango se hace en la query del endpoint.
 -- Fuentes:
 --   tarjas_reporte   → datos de pago por labor/contratista/día (solo Aprobado)
 --   tarjas_labores   → código de producto Odoo (order_line/product_id)
---   tarjas_cc        → distribución analítica Odoo (valor_odoo JSONB) + cultivo de referencia
+--   tarjas_cc        → distribución analítica Odoo (valor_odoo JSONB)
 --
 -- Estrategias de join para product_id (en orden de prioridad):
 --   l1 → nombre exacto normalizado (espacios múltiples colapsados)

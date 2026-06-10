@@ -117,18 +117,24 @@ async def get_purchase_order(
                 SELECT
                     contratista,
                     nombre_campo,
-                    fecha,
                     tipo_pago,
                     "CC",
                     "Nombre Labor",
-                    jornadas,
-                    total_unitario,
-                    total_labor,
-                    "%% Tipo de pago"
+                    SUM(jornadas)                                              AS jornadas,
+                    CASE WHEN SUM(jornadas) > 0
+                         THEN ROUND(SUM(total_labor)::numeric / SUM(jornadas), 2)
+                         ELSE NULL END                                         AS total_unitario,
+                    SUM(total_labor)                                           AS total_labor,
+                    ROUND(
+                        SUM(total_labor)::numeric
+                        / NULLIF(SUM(SUM(total_labor)) OVER (PARTITION BY tipo_pago), 0) * 100,
+                        2
+                    )                                                          AS pct_pago
                 FROM appsheet.tarjas_reporte
                 WHERE contratista  = %s
                   AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
+                GROUP BY contratista, nombre_campo, tipo_pago, "CC", "Nombre Labor"
                 ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
             """, (contratista, empresa, fecha_inicio, fecha_termino))
             rows = cur.fetchall()
@@ -141,7 +147,6 @@ async def get_purchase_order(
 
     data = [{k: _serialize(v) for k, v in zip(columns, r)} for r in rows]
 
-    # Aggregate totals across the full date range
     total_trato  = sum(r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO)
     total_al_dia = sum(r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_AL_DIA)
     total_pagar  = total_trato + total_al_dia
@@ -187,20 +192,34 @@ async def export_odoo_csv(
                 SELECT
                     "Vendedor",
                     "Lineas del pedido/Producto/Nombre",
-                    "Lineas del pedido/Cantidad",
+                    SUM("Lineas del pedido/Cantidad")       AS "Lineas del pedido/Cantidad",
                     "Lineas del pedido/Código de Distribución Analítica/Código",
-                    "Lineas del pedido/Precio un.",
+                    CASE WHEN SUM("Lineas del pedido/Cantidad") > 0
+                         THEN ROUND(
+                             SUM("Lineas del pedido/Cantidad" * "Lineas del pedido/Precio un.")
+                             / SUM("Lineas del pedido/Cantidad"), 2)
+                         ELSE NULL END                      AS "Lineas del pedido/Precio un.",
                     "partner_id",
                     "order_line/product_id",
-                    "order_line/product_qty",
+                    SUM("order_line/product_qty")           AS "order_line/product_qty",
                     "order_line/analytic_distribution",
-                    "order_line/price_unit"
+                    CASE WHEN SUM("order_line/product_qty") > 0
+                         THEN ROUND(
+                             SUM("order_line/product_qty" * "order_line/price_unit")
+                             / SUM("order_line/product_qty"), 2)
+                         ELSE NULL END                      AS "order_line/price_unit"
                 FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor"      = %s
                   AND "nombre_campo"  = %s
                   AND "fecha" BETWEEN %s AND %s
-                ORDER BY "fecha",
-                         "Lineas del pedido/Código de Distribución Analítica/Código",
+                GROUP BY
+                    "Vendedor",
+                    "Lineas del pedido/Producto/Nombre",
+                    "Lineas del pedido/Código de Distribución Analítica/Código",
+                    "partner_id",
+                    "order_line/product_id",
+                    "order_line/analytic_distribution"
+                ORDER BY "Lineas del pedido/Código de Distribución Analítica/Código",
                          "Lineas del pedido/Producto/Nombre"
             """, (contratista, empresa, fecha_inicio, fecha_termino))
             columns = [d[0] for d in cur.description]
