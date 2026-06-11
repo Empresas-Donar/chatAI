@@ -50,6 +50,10 @@ def _bq_client():
 
 
 def _pg_conn():
+    # Support DATABASE_URL (used in CI) or individual vars (used locally)
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        return psycopg2.connect(database_url)
     host = os.environ["DB_HOST"]
     kwargs = dict(
         dbname=os.environ["DB_NAME"],

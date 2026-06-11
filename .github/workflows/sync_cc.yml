@@ -1,0 +1,33 @@
+name: Sync CC from Odoo (daily)
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 9:00 UTC = 6:00 AM Chile (UTC-3)
+  workflow_dispatch:        # Allow manual trigger from GitHub UI
+
+jobs:
+  sync:
+    name: Sync tarjas_cc from BigQuery
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install psycopg2-binary python-dotenv google-cloud-bigquery google-auth
+
+      - name: Write BigQuery key file
+        run: echo '${{ secrets.BQ_KEY_JSON }}' > /tmp/bq-key.json
+
+      - name: Run sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BQ_KEY_PATH: /tmp/bq-key.json
+          BQ_PROJECT: ace-scarab-484515-v1
+        run: python apps/sync_cc.py
