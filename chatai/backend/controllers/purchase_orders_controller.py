@@ -263,7 +263,7 @@ async def export_odoo_csv(
         with conn.cursor() as cur:
             # Detect excluded rows (no product_id or unmapped CC) and sum their value
             cur.execute("""
-                SELECT COALESCE(SUM(total_labor), 0)
+                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
                 FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor"     = %s
                   AND nombre_campo   = %s
