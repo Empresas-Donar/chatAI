@@ -258,8 +258,23 @@ async def export_odoo_csv(
     except Exception as exc:
         logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
 
+    excluded_amount = 0.0
     try:
         with conn.cursor() as cur:
+            # Detect excluded rows (no product_id or unmapped CC) and sum their value
+            cur.execute("""
+                SELECT COALESCE(SUM(total_labor), 0)
+                FROM appsheet.tarjas_reporte_odoo
+                WHERE "Vendedor"     = %s
+                  AND nombre_campo   = %s
+                  AND fecha BETWEEN %s AND %s
+                  AND (
+                      "order_line/product_id" IS NULL
+                      OR "order_line/analytic_distribution" LIKE '%%"": %%'
+                  )
+            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            excluded_amount = float(cur.fetchone()[0] or 0)
+
             cur.execute("""
                 SELECT
                     "partner_id",
@@ -318,8 +333,15 @@ async def export_odoo_csv(
         f"odoo_{contratista.replace(' ', '_')}_{empresa.replace(' ', '_')}"
         f"_{fecha_inicio}_{fecha_termino}.xlsx"
     )
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Access-Control-Expose-Headers": "X-Excluded-Amount",
+    }
+    if excluded_amount > 0:
+        response_headers["X-Excluded-Amount"] = str(int(excluded_amount))
+
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=response_headers,
     )

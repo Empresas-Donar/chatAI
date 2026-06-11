@@ -183,6 +183,7 @@ document.getElementById('btn-odoo-export').addEventListener('click', async () =>
   try {
     const res = await fetch('/api/purchase-orders/odoo-export?' + _lastParams);
     if (!res.ok) throw new Error('Error al generar el archivo');
+    const excludedAmount = parseInt(res.headers.get('X-Excluded-Amount') || '0');
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="?([^"]+)"?/);
@@ -195,6 +196,10 @@ document.getElementById('btn-odoo-export').addEventListener('click', async () =>
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    if (excludedAmount > 0) {
+      const fmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
+      alert(`⚠️ Advertencia: ${fmt.format(excludedAmount)} fueron excluidos del archivo porque hay labores o centros de costo sin mapear en Odoo. Contacta al administrador para completar la configuración.`);
+    }
   } catch (e) {
     alert('Error al exportar: ' + e.message);
   } finally {
