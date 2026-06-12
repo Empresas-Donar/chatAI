@@ -363,66 +363,56 @@ _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 14mm; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; margin: 0; }
 
-/* ── Header block ── */
-.doc-header {
-  border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px 14px;
-  margin-bottom: 10px;
-  display: table; width: 100%; table-layout: fixed;
+/* ── Header uses real <table> for xhtml2pdf compat ── */
+.hdr-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1;
+             margin-bottom: 10px; }
+.hdr-logo  { width: 80px; padding: 10px 12px; vertical-align: middle; text-align: center;
+             border-right: 1px solid #e2e8f0; }
+.hdr-logo-box {
+  width: 58px; height: 58px; border: 2px solid #e2e8f0;
+  font-size: 7pt; font-weight: bold; color: #64748b; line-height: 1.4;
+  background: #f8fafc; text-align: center; padding-top: 14px;
 }
-.doc-header-left  { display: table-cell; width: 120px; vertical-align: top; }
-.doc-header-mid   { display: table-cell; vertical-align: top; padding: 0 12px; }
-.doc-header-right { display: table-cell; width: 160px; vertical-align: top; text-align: right; }
-.doc-logo {
-  width: 60px; height: 60px; border: 2px solid #e2e8f0; border-radius: 50%;
-  display: table-cell; vertical-align: middle; text-align: center;
-  font-size: 7pt; font-weight: bold; color: #64748b; line-height: 1.3;
-  background: #f8fafc;
-}
-.doc-company-name { font-size: 13pt; font-weight: bold; margin-bottom: 2px; }
-.doc-company-sub  { font-size: 9pt; font-weight: 600; margin-bottom: 3px; }
-.doc-company-week { font-size: 8pt; color: #64748b; }
-.doc-date-row  { margin-bottom: 4px; font-size: 8pt; }
-.doc-date-label { font-weight: 600; display: inline-block; width: 90px; }
-.doc-date-val  {
-  background: #fef9c3; padding: 1px 6px; border-radius: 3px; font-weight: 600;
-}
-.doc-grand-total { font-size: 14pt; font-weight: 800; margin-top: 6px; }
+.hdr-mid   { padding: 10px 14px; vertical-align: top; }
+.hdr-right { width: 190px; padding: 10px 14px; vertical-align: top; text-align: right;
+             border-left: 1px solid #e2e8f0; }
+.co-name   { font-size: 14pt; font-weight: 800; margin: 0 0 3px; }
+.co-sub    { font-size: 9pt; font-weight: 600; margin: 0 0 2px; }
+.co-week   { font-size: 7.5pt; color: #64748b; margin: 0; }
+.dt-row    { margin-bottom: 5px; font-size: 8pt; }
+.dt-label  { font-weight: 600; }
+.dt-val    { background: #fef9c3; padding: 1px 7px; font-weight: 700; }
+.grand-tot { font-size: 15pt; font-weight: 800; margin-top: 8px; }
 
-/* ── Glosa ── */
-.doc-glosa { border: 1px solid #cbd5e1; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
-.doc-glosa-title {
-  background: #1e293b; color: white; text-align: center;
-  padding: 5px; font-weight: bold; font-size: 8pt; letter-spacing: .4px;
-}
-.doc-glosa-body {
-  background: #fef08a; text-align: center; padding: 7px;
-  font-size: 8.5pt; font-weight: bold; color: #1e293b;
-}
-.doc-totals { display: table; width: 100%; border-top: 2px solid #1e293b; }
-.doc-total-cell {
-  display: table-cell; text-align: center; padding: 7px 6px;
-  border-right: 1px solid #e2e8f0; width: 33%;
-}
-.doc-total-cell:last-child { border-right: none; }
-.doc-total-label { font-size: 7.5pt; font-weight: bold; color: #64748b; text-transform: uppercase; }
-.doc-total-value { font-size: 13pt; font-weight: 800; color: #1e293b; margin-top: 2px; }
-.doc-total-cell.hl { background: #fef08a; }
+/* ── Glosa uses real <table> ── */
+.glosa-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1;
+               margin-bottom: 10px; }
+.glosa-title { background: #1e293b; color: white; text-align: center;
+               padding: 6px; font-weight: 700; font-size: 8pt; letter-spacing: .5px; }
+.glosa-body  { background: #fef08a; text-align: center; padding: 8px 12px;
+               font-size: 8.5pt; font-weight: 700; color: #1e293b; }
+.totals-row  { border-top: 2px solid #1e293b; }
+.tot-cell    { text-align: center; padding: 8px 6px; width: 33%;
+               border-right: 1px solid #e2e8f0; }
+.tot-cell-hl { background: #fef08a; }
+.tot-label   { font-size: 7pt; font-weight: 700; color: #64748b; text-transform: uppercase; }
+.tot-value   { font-size: 13pt; font-weight: 800; color: #1e293b; margin-top: 2px; }
 
 /* ── Pivot table ── */
-.pivot-title { font-size: 9pt; font-weight: bold; margin: 10px 0 4px; color: #1e293b; }
-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
-thead tr { background: #1d4ed8; color: white; -pdf-keep-with-next: true; }
-thead th { padding: 6px 7px; text-align: left; font-weight: bold; white-space: nowrap; }
-thead th.num { text-align: right; }
-tbody tr:nth-child(even) { background: #f8fafc; }
-tbody td { padding: 4px 7px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
-td.num  { text-align: right; }
-td.tot  { text-align: right; font-weight: bold; background: #fef9c3; }
-tr.foot td {
+.pivot-title { font-size: 9pt; font-weight: bold; margin: 8px 0 4px; color: #1e293b; }
+.pivot-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+.pivot-table thead tr { background: #1d4ed8; color: white; }
+.pivot-table thead th { padding: 6px 8px; text-align: left; font-weight: bold; white-space: nowrap; }
+.pivot-table thead th.num { text-align: right; }
+.pivot-table tbody tr.even { background: #f8fafc; }
+.pivot-table tbody td { padding: 4px 8px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+.pivot-table td.num  { text-align: right; }
+.pivot-table td.tot  { text-align: right; font-weight: bold; background: #fef9c3; }
+.pivot-table tr.foot td {
   font-weight: bold; background: #1e293b; color: white;
-  text-align: right; border: none; padding: 5px 7px;
+  text-align: right; border: none; padding: 6px 8px;
 }
-tr.foot td:first-child { text-align: left; }
+.pivot-table tr.foot td:first-child { text-align: left; }
 """
 
 
@@ -528,8 +518,9 @@ async def billing_order_pdf(
         for d in dates:
             v = wdata.get(d, 0)
             cells += f'<td class="num">{_fmt_clp(v) if v else "-"}</td>'
+        even_cls = "even" if len(rows_html) % 2 == 0 else ""
         rows_html += (
-            f'<tr><td>{worker}</td>{cells}'
+            f'<tr class="{even_cls}"><td>{worker}</td>{cells}'
             f'<td class="tot">{_fmt_clp(row_total)}</td></tr>'
         )
 
@@ -542,49 +533,57 @@ async def billing_order_pdf(
 <style>{_PDF_CSS}</style>
 </head><body>
 
-<div class="doc-header">
-  <div class="doc-header-left">
-    <div class="doc-logo">EMPRESAS<br>DONAR</div>
-  </div>
-  <div class="doc-header-mid">
-    <div class="doc-company-name">{empresa}</div>
-    <div class="doc-company-sub">Contratista: {contratista}</div>
-    <div class="doc-company-week">{semana}</div>
-  </div>
-  <div class="doc-header-right">
-    <div class="doc-date-row">
-      <span class="doc-date-label">Fecha Inicio</span>
-      <span class="doc-date-val">{_fmt_date_display(fecha_inicio)}</span>
-    </div>
-    <div class="doc-date-row">
-      <span class="doc-date-label">Fecha Término</span>
-      <span class="doc-date-val">{_fmt_date_display(fecha_termino)}</span>
-    </div>
-    <div class="doc-grand-total">{_fmt_clp(total_pagar)}</div>
-  </div>
-</div>
+<!-- Header: 3 columns using real table -->
+<table class="hdr-table">
+  <tr>
+    <td class="hdr-logo">
+      <div class="hdr-logo-box">EMPRESAS<br>DONAR</div>
+    </td>
+    <td class="hdr-mid">
+      <p class="co-name">{empresa}</p>
+      <p class="co-sub">Contratista: {contratista}</p>
+      <p class="co-week">{semana}</p>
+    </td>
+    <td class="hdr-right">
+      <p class="dt-row">
+        <span class="dt-label">Fecha Inicio&nbsp;&nbsp;</span>
+        <span class="dt-val">{_fmt_date_display(fecha_inicio)}</span>
+      </p>
+      <p class="dt-row">
+        <span class="dt-label">Fecha Término&nbsp;&nbsp;</span>
+        <span class="dt-val">{_fmt_date_display(fecha_termino)}</span>
+      </p>
+      <p class="grand-tot">{_fmt_clp(total_pagar)}</p>
+    </td>
+  </tr>
+</table>
 
-<div class="doc-glosa">
-  <div class="doc-glosa-title">GLOSA</div>
-  <div class="doc-glosa-body">{glosa}</div>
-  <div class="doc-totals">
-    <div class="doc-total-cell">
-      <div class="doc-total-label">Total a Trato</div>
-      <div class="doc-total-value">{_fmt_clp(total_trato)}</div>
-    </div>
-    <div class="doc-total-cell">
-      <div class="doc-total-label">Total Al Día</div>
-      <div class="doc-total-value">{_fmt_clp(total_al_dia)}</div>
-    </div>
-    <div class="doc-total-cell hl">
-      <div class="doc-total-label">Total a Pagar</div>
-      <div class="doc-total-value">{_fmt_clp(total_pagar)}</div>
-    </div>
-  </div>
-</div>
+<!-- Glosa + totals: real table -->
+<table class="glosa-table">
+  <tr>
+    <td colspan="3" class="glosa-title">GLOSA</td>
+  </tr>
+  <tr>
+    <td colspan="3" class="glosa-body">{glosa}</td>
+  </tr>
+  <tr class="totals-row">
+    <td class="tot-cell">
+      <div class="tot-label">Total a Trato</div>
+      <div class="tot-value">{_fmt_clp(total_trato)}</div>
+    </td>
+    <td class="tot-cell">
+      <div class="tot-label">Total Al Día</div>
+      <div class="tot-value">{_fmt_clp(total_al_dia)}</div>
+    </td>
+    <td class="tot-cell tot-cell-hl">
+      <div class="tot-label">Total a Pagar</div>
+      <div class="tot-value">{_fmt_clp(total_pagar)}</div>
+    </td>
+  </tr>
+</table>
 
-<div class="pivot-title">ORDEN DE FACTURACIÓN</div>
-<table>
+<p class="pivot-title">ORDEN DE FACTURACIÓN</p>
+<table class="pivot-table">
   <thead>
     <tr>
       <th>Total Trabajador</th>
