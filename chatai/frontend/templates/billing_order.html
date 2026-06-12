@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Orden de Facturación — Empresas Donar{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/billing_order.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container" style="max-width:1200px">
+
+  <div class="page-header" style="margin-bottom:20px">
+    <div>
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Orden de facturación — Tarjas contratistas</h1>
+      <p style="margin:0;color:var(--text-muted);font-size:14px">
+        Genera la orden de facturación semanal por contratista y empresa. Muestra el desglose diario por trabajador.
+        Diseñada para adjuntar a la factura emitida al cliente.
+      </p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-card">
+    <div class="filter-group">
+      <label>Contratista</label>
+      <select id="sel-contractor"><option value="">Cargando…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Empresa</label>
+      <select id="sel-company"><option value="">Cargando…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Fecha Inicio</label>
+      <input type="date" id="inp-date-from" />
+    </div>
+    <div class="filter-group">
+      <label>Fecha Término</label>
+      <input type="date" id="inp-date-to" />
+    </div>
+    <div>
+      <button class="btn btn-primary" id="btn-generate">Generar orden</button>
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box hidden"></div>
+  <div id="empty-box" class="empty-state hidden">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+  <!-- Billing Order Document -->
+  <div id="bo-document">
+
+    <div class="print-actions">
+      <button class="btn btn-secondary" onclick="window.print()">Imprimir / PDF</button>
+    </div>
+
+    <!-- Header (same structure as purchase_orders) -->
+    <div class="oc-header">
+      <div class="oc-logo-block">
+        <div class="oc-logo">EMPRESAS<br>DONAR</div>
+      </div>
+      <div class="oc-company">
+        <div class="oc-company-name" id="doc-company"></div>
+        <div class="oc-company-sub">Contratista: <span id="doc-contractor"></span></div>
+        <div class="oc-company-week" id="doc-week"></div>
+      </div>
+      <div class="oc-dates">
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Inicio</span>
+          <span class="oc-date-val" id="doc-date-from"></span>
+        </div>
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Término</span>
+          <span class="oc-date-val" id="doc-date-to"></span>
+        </div>
+        <div class="oc-grand-total" id="doc-grand-total"></div>
+      </div>
+    </div>
+
+    <!-- Glosa + totals (same as purchase_orders) -->
+    <div class="oc-glosa">
+      <div class="oc-glosa-title">GLOSA</div>
+      <div class="oc-glosa-body" id="doc-glosa"></div>
+      <div class="oc-totals">
+        <div class="oc-total-cell">
+          <div class="oc-total-label">Total a Trato</div>
+          <div class="oc-total-value" id="doc-total-trato"></div>
+        </div>
+        <div class="oc-total-cell">
+          <div class="oc-total-label">Total Al Día</div>
+          <div class="oc-total-value" id="doc-total-aldia"></div>
+        </div>
+        <div class="oc-total-cell highlight">
+          <div class="oc-total-label">Total a Pagar</div>
+          <div class="oc-total-value" id="doc-total"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Worker pivot table -->
+    <div class="oc-table-wrap bo-pivot-wrap">
+      <table class="oc-table bo-pivot" id="bo-pivot-table">
+        <thead id="bo-pivot-thead"></thead>
+        <tbody id="bo-pivot-tbody"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/billing_order.js?v={{ static_v }}"></script>
+{% endblock %}

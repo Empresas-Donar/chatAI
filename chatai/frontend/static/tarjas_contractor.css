@@ -164,3 +164,56 @@
 
 /* Download buttons */
 .filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+
+/* Unir labores checkbox */
+.tc-check-option { display: flex; align-items: flex-end; padding-bottom: 2px; width: fit-content; }
+.tc-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  width: fit-content;
+}
+.tc-checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  width: 15px !important;
+  min-width: 15px !important;
+  max-width: 15px !important;
+  height: 15px;
+  flex-shrink: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/* Total column */
+.tc-pivot thead th.th-total {
+  text-align: right;
+  background: #fef3c7;
+  color: var(--text);
+  font-weight: 700;
+  border-left: 2px solid #fbbf24;
+}
+.tc-pivot tbody td.cell-total {
+  text-align: right;
+  font-weight: 600;
+  white-space: nowrap;
+  border-left: 2px solid #fbbf24;
+  background: #fffbeb;
+  color: var(--text);
+  padding: 4px 10px;
+}
+
+/* Totals footer row */
+.tc-pivot tbody tr.tc-totals-row td {
+  background: #fef3c7;
+  font-weight: 700;
+  border-top: 2px solid #fbbf24;
+}
+.tc-pivot tbody tr.tc-totals-row td.cell-total-foot {
+  text-align: right;
+  white-space: nowrap;
+}

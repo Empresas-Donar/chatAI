@@ -67,6 +67,8 @@ function fillSelect(id, items, defaultLabel) {
 }
 
 // ── Query & render ────────────────────────────────────────────────────
+let _lastData = null;
+
 async function queryData() {
   const from = document.getElementById('fil-from').value;
   const to   = document.getElementById('fil-to').value;
@@ -99,11 +101,13 @@ async function queryData() {
     const data = await res.json();
 
     if (!data.rows.length) {
+      _lastData = null;
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
       return;
     }
 
+    _lastData = data;
     document.getElementById('empty-state').style.display = 'none';
     renderPivot(data.columns, data.rows);
     document.getElementById('pivot-section').style.display = '';
@@ -119,6 +123,7 @@ async function queryData() {
 
 // ── Build & render the pivot table ────────────────────────────────────
 function renderPivot(columns, rows) {
+  const mergeLabores = document.getElementById('chk-merge-labores')?.checked ?? false;
   const workerCol = detectWorkerCol(columns);
   if (!workerCol) {
     console.warn('Worker column not found. Available:', columns);
@@ -132,7 +137,7 @@ function renderPivot(columns, rows) {
   });
   const dates = [...dateSet].sort();
 
-  // Build groups keyed by worker|labor|tipo_pago
+  // Build groups — key includes labor/tipo only when NOT merging
   const groups = new Map();
   let globalMax = 0;
 
@@ -140,7 +145,7 @@ function renderPivot(columns, rows) {
     const worker = workerCol ? (r[workerCol] ?? '(sin nombre)') : '(sin nombre)';
     const labor  = r.labor ?? '';
     const tipo   = r.tipo_pago ?? '';
-    const key    = `${worker}||${labor}||${tipo}`;
+    const key    = mergeLabores ? worker : `${worker}||${labor}||${tipo}`;
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
     const value  = Number(r.total_trabajado) || 0;
 
@@ -164,13 +169,16 @@ function renderPivot(columns, rows) {
   // Render thead
   const thead = document.getElementById('pivot-thead');
   let hdr = `<tr>
-    <th class="th-fixed">Trabajador</th>
-    <th class="th-fixed">Labor</th>
+    <th class="th-fixed">Trabajador</th>`;
+  if (!mergeLabores) {
+    hdr += `<th class="th-fixed">Labor</th>
     <th class="th-fixed">Tipo de pago</th>
     <th class="th-fixed" style="text-align:right">Valor por hr</th>`;
+  }
   dates.forEach(d => {
     hdr += `<th class="th-date">${formatShortDate(d)}</th>`;
   });
+  hdr += `<th class="th-fixed th-total">Total</th>`;
   hdr += '</tr>';
   thead.innerHTML = hdr;
 
@@ -179,6 +187,11 @@ function renderPivot(columns, rows) {
   let html = '';
   let prevWorker = null;
 
+  // Totals footer accumulators
+  const colTotals = {};
+  dates.forEach(d => { colTotals[d] = 0; });
+  let grandTotal = 0;
+
   sorted.forEach(g => {
     const isFirst = g.worker !== prevWorker;
     prevWorker = g.worker;
@@ -186,18 +199,24 @@ function renderPivot(columns, rows) {
     const rowClass = isFirst ? 'worker-first' : '';
     const workerCell = isFirst ? esc(g.worker) : '';
 
+    const rowTotal = dates.reduce((sum, d) => sum + (g.byDate[d] || 0), 0);
+    grandTotal += rowTotal;
+
     const tipoCls = g.tipo.toLowerCase() === 'trato' ? 'tc-tipo-trato'
       : (g.tipo.toLowerCase().includes('dia') || g.tipo.toLowerCase().includes('día'))
         ? 'tc-tipo-aldia' : '';
 
     html += `<tr class="${rowClass}">`;
     html += `<td class="cell-worker">${workerCell}</td>`;
-    html += `<td class="cell-labor" title="${esc(g.labor)}">${esc(g.labor)}</td>`;
-    html += `<td><span class="${tipoCls}">${esc(g.tipo)}</span></td>`;
-    html += `<td class="cell-rate">${fmtCLPDec.format(g.rate)}</td>`;
+    if (!mergeLabores) {
+      html += `<td class="cell-labor" title="${esc(g.labor)}">${esc(g.labor)}</td>`;
+      html += `<td><span class="${tipoCls}">${esc(g.tipo)}</span></td>`;
+      html += `<td class="cell-rate">${fmtCLPDec.format(g.rate)}</td>`;
+    }
 
     dates.forEach(d => {
       const val = g.byDate[d];
+      colTotals[d] += val || 0;
       if (val != null && val > 0) {
         const pct = globalMax > 0 ? Math.max(4, (val / globalMax) * 100) : 0;
         html += `<td class="cell-value">
@@ -211,8 +230,21 @@ function renderPivot(columns, rows) {
       }
     });
 
+    html += `<td class="cell-total">${fmtCLP.format(rowTotal)}</td>`;
     html += '</tr>';
   });
+
+  // Footer totals row
+  const extraCols = mergeLabores ? 0 : 3;
+  html += `<tr class="tc-totals-row">`;
+  html += `<td class="cell-worker"><strong>Total</strong></td>`;
+  for (let i = 0; i < extraCols; i++) html += `<td></td>`;
+  dates.forEach(d => {
+    const v = colTotals[d];
+    html += `<td class="cell-value cell-total-foot">${v > 0 ? fmtCLP.format(v) : '<span class="cell-dash">-</span>'}</td>`;
+  });
+  html += `<td class="cell-total cell-total-foot"><strong>${fmtCLP.format(grandTotal)}</strong></td>`;
+  html += '</tr>';
 
   tbody.innerHTML = html;
 }
@@ -259,6 +291,10 @@ function printWithHeader(title, filters) {
 
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-apply').addEventListener('click', queryData);
+
+document.getElementById('chk-merge-labores').addEventListener('change', () => {
+  if (_lastData) renderPivot(_lastData.columns, _lastData.rows);
+});
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/contratista/download-excel?' + currentParams();
 });

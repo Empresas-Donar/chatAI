@@ -86,8 +86,18 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 import time as _time
+import hashlib as _hashlib
+
+def _static_version():
+    """Hash of all static files — changes whenever any JS/CSS file is modified."""
+    h = _hashlib.md5()
+    for f in sorted(STATIC_DIR.rglob("*")):
+        if f.is_file() and f.suffix in (".js", ".css"):
+            h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-templates.env.globals["static_v"] = int(_time.time())
+templates.env.globals["static_v"] = _static_version()
 
 # Inject current_user and user_role into every template context automatically
 from auth import get_current_user as _get_current_user, get_user_role as _get_user_role

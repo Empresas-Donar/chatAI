@@ -130,6 +130,11 @@ async def purchase_order_legacy(request: Request):
     return RedirectResponse(url="/odoo/tarjas", status_code=301)
 
 
+@router.get("/odoo/facturacion", response_class=HTMLResponse)
+async def billing_order_page(request: Request):
+    return _templates.TemplateResponse(request, "billing_order.html")
+
+
 @router.get("/api/purchase-orders/filters")
 async def get_filters():
     """Return distinct contractors and companies for the filter dropdowns."""
