@@ -102,6 +102,7 @@ async function generate() {
     renderHeader(headerData.header, contratista, empresa, fecha_inicio, fecha_termino);
     renderPivot(pivotData.columns, pivotData.rows);
     document.getElementById('bo-document').style.display = 'block';
+    document.getElementById('btn-pdf').disabled = false;
 
   } catch (e) {
     showError('Error al generar la orden: ' + e.message);
@@ -222,6 +223,7 @@ function hideAll() {
   document.getElementById('bo-document').style.display = 'none';
   document.getElementById('error-box').classList.add('hidden');
   document.getElementById('empty-box').classList.add('hidden');
+  document.getElementById('btn-pdf').disabled = true;
 }
 
 function showError(msg) {
@@ -232,6 +234,16 @@ function showError(msg) {
 
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-generate').addEventListener('click', generate);
+
+document.getElementById('btn-pdf').addEventListener('click', () => {
+  const contratista  = document.getElementById('sel-contractor').value;
+  const empresa      = document.getElementById('sel-company').value;
+  const fecha_inicio = document.getElementById('inp-date-from').value;
+  const fecha_termino= document.getElementById('inp-date-to').value;
+  if (!contratista || !empresa || !fecha_inicio || !fecha_termino) return;
+  const params = new URLSearchParams({ contratista, empresa, fecha_inicio, fecha_termino });
+  window.open('/api/odoo/facturacion/pdf?' + params, '_blank');
+});
 
 // ── Init ──────────────────────────────────────────────────────────────
 initDates();

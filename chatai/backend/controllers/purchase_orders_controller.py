@@ -8,6 +8,8 @@ Routes:
   GET  /api/purchase-orders/filters       → Dropdown options (contractors, companies)
   GET  /api/purchase-orders               → Order data filtered by params
   GET  /api/purchase-orders/odoo-export   → CSV export for Odoo import
+  GET  /odoo/facturacion                  → Billing order UI page
+  GET  /api/odoo/facturacion/pdf          → PDF of billing order (opens in new tab)
 """
 
 import datetime
@@ -18,6 +20,7 @@ import os
 import re
 
 import openpyxl
+from xhtml2pdf import pisa
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -349,4 +352,264 @@ async def export_odoo_csv(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=response_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Billing order PDF
+# ---------------------------------------------------------------------------
+
+_PDF_CSS = """
+@page { size: A4 landscape; margin: 12mm 14mm; }
+body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; margin: 0; }
+
+/* ── Header block ── */
+.doc-header {
+  border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px 14px;
+  margin-bottom: 10px;
+  display: table; width: 100%; table-layout: fixed;
+}
+.doc-header-left  { display: table-cell; width: 120px; vertical-align: top; }
+.doc-header-mid   { display: table-cell; vertical-align: top; padding: 0 12px; }
+.doc-header-right { display: table-cell; width: 160px; vertical-align: top; text-align: right; }
+.doc-logo {
+  width: 60px; height: 60px; border: 2px solid #e2e8f0; border-radius: 50%;
+  display: table-cell; vertical-align: middle; text-align: center;
+  font-size: 7pt; font-weight: bold; color: #64748b; line-height: 1.3;
+  background: #f8fafc;
+}
+.doc-company-name { font-size: 13pt; font-weight: bold; margin-bottom: 2px; }
+.doc-company-sub  { font-size: 9pt; font-weight: 600; margin-bottom: 3px; }
+.doc-company-week { font-size: 8pt; color: #64748b; }
+.doc-date-row  { margin-bottom: 4px; font-size: 8pt; }
+.doc-date-label { font-weight: 600; display: inline-block; width: 90px; }
+.doc-date-val  {
+  background: #fef9c3; padding: 1px 6px; border-radius: 3px; font-weight: 600;
+}
+.doc-grand-total { font-size: 14pt; font-weight: 800; margin-top: 6px; }
+
+/* ── Glosa ── */
+.doc-glosa { border: 1px solid #cbd5e1; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+.doc-glosa-title {
+  background: #1e293b; color: white; text-align: center;
+  padding: 5px; font-weight: bold; font-size: 8pt; letter-spacing: .4px;
+}
+.doc-glosa-body {
+  background: #fef08a; text-align: center; padding: 7px;
+  font-size: 8.5pt; font-weight: bold; color: #1e293b;
+}
+.doc-totals { display: table; width: 100%; border-top: 2px solid #1e293b; }
+.doc-total-cell {
+  display: table-cell; text-align: center; padding: 7px 6px;
+  border-right: 1px solid #e2e8f0; width: 33%;
+}
+.doc-total-cell:last-child { border-right: none; }
+.doc-total-label { font-size: 7.5pt; font-weight: bold; color: #64748b; text-transform: uppercase; }
+.doc-total-value { font-size: 13pt; font-weight: 800; color: #1e293b; margin-top: 2px; }
+.doc-total-cell.hl { background: #fef08a; }
+
+/* ── Pivot table ── */
+.pivot-title { font-size: 9pt; font-weight: bold; margin: 10px 0 4px; color: #1e293b; }
+table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+thead tr { background: #1d4ed8; color: white; -pdf-keep-with-next: true; }
+thead th { padding: 6px 7px; text-align: left; font-weight: bold; white-space: nowrap; }
+thead th.num { text-align: right; }
+tbody tr:nth-child(even) { background: #f8fafc; }
+tbody td { padding: 4px 7px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+td.num  { text-align: right; }
+td.tot  { text-align: right; font-weight: bold; background: #fef9c3; }
+tr.foot td {
+  font-weight: bold; background: #1e293b; color: white;
+  text-align: right; border: none; padding: 5px 7px;
+}
+tr.foot td:first-child { text-align: left; }
+"""
+
+
+def _fmt_clp(v) -> str:
+    try:
+        return f"${int(float(v or 0)):,}".replace(",", ".")
+    except Exception:
+        return "-"
+
+
+def _fmt_date_display(iso: str) -> str:
+    try:
+        d = datetime.date.fromisoformat(iso)
+        months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
+        return f"{d.day} {months[d.month-1]} {d.year}"
+    except Exception:
+        return iso
+
+
+def _fmt_date_short(iso: str) -> str:
+    try:
+        d = datetime.date.fromisoformat(iso)
+        return f"{d.day}/{d.month}"
+    except Exception:
+        return iso
+
+
+@router.get("/api/odoo/facturacion/pdf")
+async def billing_order_pdf(
+    contratista: str,
+    empresa: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    try:
+        with conn.cursor() as cur:
+            # Header totals (same query as get_purchase_order)
+            cur.execute("""
+                SELECT tipo_pago, SUM(total_labor) AS total_labor
+                FROM appsheet.tarjas_reporte
+                WHERE contratista  = %s
+                  AND nombre_campo = %s
+                  AND fecha BETWEEN %s AND %s
+                GROUP BY tipo_pago
+            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            tipo_rows = cur.fetchall()
+
+            # Pivot data: worker × date
+            cur.execute("""
+                SELECT trabajador, fecha::date::text AS fecha,
+                       SUM(total_trabajado) AS total
+                FROM appsheet.tarjas_pagos
+                WHERE contratista  = %s
+                  AND nombre_campo = %s
+                  AND fecha::date BETWEEN %s AND %s
+                GROUP BY trabajador, fecha::date
+                ORDER BY trabajador, fecha::date
+            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            pivot_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    # Compute totals
+    total_trato  = sum(float(r[1] or 0) for r in tipo_rows if r[0] == "trato")
+    total_al_dia = sum(float(r[1] or 0) for r in tipo_rows if r[0] != "trato")
+    total_pagar  = total_trato + total_al_dia
+
+    # Build pivot structure
+    dates: list[str] = sorted({r[1] for r in pivot_rows if r[1]})
+    workers: dict[str, dict] = {}
+    for worker, fecha, total in pivot_rows:
+        w = worker or "(sin nombre)"
+        if w not in workers:
+            workers[w] = {}
+        workers[w][fecha] = float(total or 0)
+
+    sorted_workers = sorted(workers.items())
+
+    # Column totals
+    col_totals = {d: sum(wdata.get(d, 0) for _, wdata in sorted_workers) for d in dates}
+    grand_total = sum(col_totals.values())
+
+    # ── HTML ──
+    d1 = _fmt_date_display(fecha_inicio)
+    d2 = _fmt_date_display(fecha_termino)
+    glosa = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
+    semana = f"Semana desde {d1} al {d2}"
+
+    date_headers = "".join(f'<th class="num">{_fmt_date_short(d)}</th>' for d in dates)
+
+    rows_html = ""
+    for worker, wdata in sorted_workers:
+        row_total = sum(wdata.get(d, 0) for d in dates)
+        cells = ""
+        for d in dates:
+            v = wdata.get(d, 0)
+            cells += f'<td class="num">{_fmt_clp(v) if v else "-"}</td>'
+        rows_html += (
+            f'<tr><td>{worker}</td>{cells}'
+            f'<td class="tot">{_fmt_clp(row_total)}</td></tr>'
+        )
+
+    foot_cells = "".join(f'<td>{_fmt_clp(col_totals[d])}</td>' for d in dates)
+    foot_html = f'<tr class="foot"><td>Suma total</td>{foot_cells}<td>{_fmt_clp(grand_total)}</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Orden de Facturación — {contratista}</title>
+<style>{_PDF_CSS}</style>
+</head><body>
+
+<div class="doc-header">
+  <div class="doc-header-left">
+    <div class="doc-logo">EMPRESAS<br>DONAR</div>
+  </div>
+  <div class="doc-header-mid">
+    <div class="doc-company-name">{empresa}</div>
+    <div class="doc-company-sub">Contratista: {contratista}</div>
+    <div class="doc-company-week">{semana}</div>
+  </div>
+  <div class="doc-header-right">
+    <div class="doc-date-row">
+      <span class="doc-date-label">Fecha Inicio</span>
+      <span class="doc-date-val">{_fmt_date_display(fecha_inicio)}</span>
+    </div>
+    <div class="doc-date-row">
+      <span class="doc-date-label">Fecha Término</span>
+      <span class="doc-date-val">{_fmt_date_display(fecha_termino)}</span>
+    </div>
+    <div class="doc-grand-total">{_fmt_clp(total_pagar)}</div>
+  </div>
+</div>
+
+<div class="doc-glosa">
+  <div class="doc-glosa-title">GLOSA</div>
+  <div class="doc-glosa-body">{glosa}</div>
+  <div class="doc-totals">
+    <div class="doc-total-cell">
+      <div class="doc-total-label">Total a Trato</div>
+      <div class="doc-total-value">{_fmt_clp(total_trato)}</div>
+    </div>
+    <div class="doc-total-cell">
+      <div class="doc-total-label">Total Al Día</div>
+      <div class="doc-total-value">{_fmt_clp(total_al_dia)}</div>
+    </div>
+    <div class="doc-total-cell hl">
+      <div class="doc-total-label">Total a Pagar</div>
+      <div class="doc-total-value">{_fmt_clp(total_pagar)}</div>
+    </div>
+  </div>
+</div>
+
+<div class="pivot-title">ORDEN DE FACTURACIÓN</div>
+<table>
+  <thead>
+    <tr>
+      <th>Total Trabajador</th>
+      {date_headers}
+      <th class="num">Suma total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {rows_html}
+    {foot_html}
+  </tbody>
+</table>
+
+</body></html>"""
+
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=buf)
+    buf.seek(0)
+
+    filename = (
+        f"facturacion_{contratista.replace(' ', '_')}_{empresa.replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.pdf"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
