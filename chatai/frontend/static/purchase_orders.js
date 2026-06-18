@@ -173,8 +173,154 @@ function hideError() {
   document.getElementById('error-box').classList.add('hidden');
 }
 
+// ── CC Sync Modal ────────────────────────────────────────────────────────
+
+const ccModal = {
+  overlay:      () => document.getElementById('cc-sync-modal'),
+  loading:      () => document.getElementById('cc-modal-loading'),
+  content:      () => document.getElementById('cc-modal-content'),
+  error:        () => document.getElementById('cc-modal-error'),
+  lastSync:     () => document.getElementById('cc-last-sync'),
+  archivedAlert:() => document.getElementById('cc-archived-alert'),
+  archivedCount:() => document.getElementById('cc-archived-count'),
+  bqAlert:      () => document.getElementById('cc-bq-unavail-alert'),
+  tbody:        () => document.getElementById('cc-list-tbody'),
+  btnSync:      () => document.getElementById('btn-cc-do-sync'),
+  btnProceed:   () => document.getElementById('btn-cc-proceed'),
+};
+
+function formatSyncDate(isoStr) {
+  if (!isoStr) return 'Nunca';
+  try {
+    const d = new Date(isoStr + 'Z');
+    const diff = Math.floor((Date.now() - d) / 60000);
+    if (diff < 1)  return 'Hace un momento';
+    if (diff < 60) return `Hace ${diff} minutos`;
+    const h = Math.floor(diff / 60);
+    if (h < 24)   return `Hace ${h} hora${h > 1 ? 's' : ''}`;
+    const days = Math.floor(h / 24);
+    return `Hace ${days} día${days > 1 ? 's' : ''} — ${d.toLocaleDateString('es-CL', { day:'numeric', month:'short', year:'numeric' })}`;
+  } catch {
+    return isoStr;
+  }
+}
+
+function renderCCList(ccs) {
+  const STATUS_LABEL = {
+    ok:       '<span class="cc-badge cc-badge-ok">OK</span>',
+    archived: '<span class="cc-badge cc-badge-archived">Archivado</span>',
+    empty:    '<span class="cc-badge cc-badge-empty">Sin mapear</span>',
+    unknown:  '<span class="cc-badge cc-badge-unknown">Sin verificar</span>',
+  };
+  ccModal.tbody().innerHTML = ccs.map(cc => `
+    <tr>
+      <td>${STATUS_LABEL[cc.status] ?? cc.status}</td>
+      <td style="font-weight:700">${esc(cc.id_cc)}</td>
+      <td>${esc(cc.cultivo ?? '–')}</td>
+      <td class="cc-ids">${cc.stored_ids.length ? cc.stored_ids.join(', ') : '–'}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadCCStatus() {
+  ccModal.loading().style.display = 'flex';
+  ccModal.content().classList.add('hidden');
+  ccModal.error().classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/tarjas/cc-status');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    ccModal.lastSync().textContent = formatSyncDate(data.last_sync);
+    renderCCList(data.ccs);
+
+    if (!data.bq_available) {
+      ccModal.bqAlert().classList.remove('hidden');
+      ccModal.archivedAlert().classList.add('hidden');
+      ccModal.btnSync().disabled = true;
+    } else {
+      ccModal.bqAlert().classList.add('hidden');
+      if (data.archived_count > 0) {
+        ccModal.archivedCount().textContent = data.archived_count;
+        ccModal.archivedAlert().classList.remove('hidden');
+      } else {
+        ccModal.archivedAlert().classList.add('hidden');
+      }
+      ccModal.btnSync().disabled = false;
+    }
+
+    ccModal.loading().style.display = 'none';
+    ccModal.content().classList.remove('hidden');
+  } catch (e) {
+    ccModal.loading().style.display = 'none';
+    const el = ccModal.error();
+    el.textContent = '⚠️ Error al verificar los CCs: ' + e.message;
+    el.classList.remove('hidden');
+    ccModal.btnSync().disabled = false;
+  }
+}
+
+function openCCModal() {
+  ccModal.overlay().classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  loadCCStatus();
+}
+
+function closeCCModal() {
+  ccModal.overlay().classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+// Sync now button
+ccModal.btnSync().addEventListener('click', async () => {
+  const btn = ccModal.btnSync();
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  ccModal.error().classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/tarjas/sync-cc', { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || res.statusText);
+    }
+    const data = await res.json();
+    // Refresh status after sync
+    await loadCCStatus();
+    if (data.fixed > 0) {
+      const successEl = document.createElement('div');
+      successEl.className = 'cc-alert cc-alert-success';
+      successEl.innerHTML = `<span class="cc-alert-icon">✅</span><div>${data.message}</div>`;
+      ccModal.content().insertBefore(successEl, ccModal.content().firstChild);
+      setTimeout(() => successEl.remove(), 6000);
+    }
+  } catch (e) {
+    const el = ccModal.error();
+    el.textContent = '⚠️ Error en la sincronización: ' + e.message;
+    el.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sincronizar ahora';
+  }
+});
+
+// Proceed with export
+ccModal.btnProceed().addEventListener('click', async () => {
+  closeCCModal();
+  await doOdooExport();
+});
+
+// Close modal
+document.getElementById('btn-cc-cancel').addEventListener('click', closeCCModal);
+document.getElementById('btn-cc-modal-close').addEventListener('click', closeCCModal);
+ccModal.overlay().addEventListener('click', e => {
+  if (e.target === ccModal.overlay()) closeCCModal();
+});
+
 // ── Odoo export ──────────────────────────────────────────────────────────
-document.getElementById('btn-odoo-export').addEventListener('click', async () => {
+
+async function doOdooExport() {
   if (!_lastParams) return;
   const btn = document.getElementById('btn-odoo-export');
   const original = btn.textContent;
@@ -198,7 +344,7 @@ document.getElementById('btn-odoo-export').addEventListener('click', async () =>
     URL.revokeObjectURL(url);
     if (excludedAmount > 0) {
       const fmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
-      alert(`⚠️ Advertencia: ${fmt.format(excludedAmount)} fueron excluidos del archivo porque hay labores o centros de costo sin mapear en Odoo. Contacta al administrador para completar la configuración.`);
+      alert(`⚠️ Advertencia: ${fmt.format(excludedAmount)} fueron excluidos del archivo porque hay labores o centros de costo sin mapear en Odoo.`);
     }
   } catch (e) {
     alert('Error al exportar: ' + e.message);
@@ -206,6 +352,11 @@ document.getElementById('btn-odoo-export').addEventListener('click', async () =>
     btn.disabled = false;
     btn.textContent = original;
   }
+}
+
+document.getElementById('btn-odoo-export').addEventListener('click', () => {
+  if (!_lastParams) return;
+  openCCModal();
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────

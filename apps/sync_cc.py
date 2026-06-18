@@ -12,6 +12,7 @@ Run as cron (example, daily at 6am):
   0 6 * * * cd /path/to/project && python apps/sync_cc.py >> logs/sync_cc.log 2>&1
 """
 
+import datetime
 import json
 import logging
 import os
@@ -97,6 +98,8 @@ def fetch_odoo_cc(bq: bigquery.Client) -> dict[str, dict]:
 
 
 def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
+    active_ids = {str(info["id"]) for info in odoo.values()}
+
     with conn.cursor() as cur:
         cur.execute("SELECT id_cc::text, valor_odoo FROM appsheet.tarjas_cc")
         existing = {r[0]: r[1] for r in cur.fetchall()}
@@ -116,9 +119,18 @@ def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
             })
         else:
             current = existing[code] or {}
-            if isinstance(current, dict) and list(current.keys()) == [""]:
-                to_fix.append((new_json, code))
+            stored_keys = [k for k in current.keys() if k != ""] if isinstance(current, dict) else []
 
+            if not stored_keys or list(current.keys()) == [""]:
+                # Empty or blank-key mapping → fill with active ID
+                to_fix.append((new_json, code))
+            elif len(stored_keys) == 1 and stored_keys[0] not in active_ids:
+                # Simple stale mapping (single archived ID) → replace with current active ID
+                log.info(f"tarjas_cc [{code}]: ID {stored_keys[0]} archivado → actualizando a {odoo_id}")
+                to_fix.append((new_json, code))
+            # Multi-CC distributions are left as-is (require manual review)
+
+    now_iso = datetime.datetime.utcnow().isoformat()
     with conn.cursor() as cur:
         for r in to_insert:
             cur.execute(
@@ -134,6 +146,17 @@ def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
                 "UPDATE appsheet.tarjas_cc SET valor_odoo = %s::jsonb WHERE id_cc = %s",
                 (new_json, code),
             )
+        # Record sync timestamp so the UI can display it
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS appsheet.sync_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        cur.execute("""
+            INSERT INTO appsheet.sync_meta (key, value) VALUES ('last_cc_sync', %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """, (now_iso,))
 
     log.info(f"tarjas_cc → insertados: {len(to_insert)}, corregidos: {len(to_fix)}")
 

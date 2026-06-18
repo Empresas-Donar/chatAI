@@ -10,11 +10,14 @@ Routes:
   GET  /api/purchase-orders/odoo-export   → CSV export for Odoo import
   GET  /odoo/facturacion                  → Billing order UI page
   GET  /api/odoo/facturacion/pdf          → PDF of billing order (opens in new tab)
+  GET  /api/tarjas/cc-status              → CC sync status (archived IDs detection)
+  POST /api/tarjas/sync-cc                → Trigger CC sync on demand
 """
 
 import datetime
 import decimal
 import io
+import json as _json
 import logging
 import os
 import re
@@ -353,6 +356,209 @@ async def export_odoo_csv(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=response_headers,
     )
+
+
+# ---------------------------------------------------------------------------
+# CC sync status and on-demand sync
+# ---------------------------------------------------------------------------
+
+_BQ_CC_QUERY = """
+    SELECT
+      CAST(id AS STRING) AS id,
+      code,
+      COALESCE(
+        JSON_VALUE(name, '$.es_CL'),
+        JSON_VALUE(name, '$.en_US'),
+        CAST(id AS STRING)
+      ) AS nombre
+    FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
+    WHERE active = TRUE
+      AND code IS NOT NULL AND TRIM(code) != ''
+"""
+
+
+@router.get("/api/tarjas/cc-status")
+async def get_cc_status():
+    """
+    Compara los IDs almacenados en tarjas_cc.valor_odoo contra los CC activos en Odoo (BigQuery).
+    Devuelve por cada CC si está ok, archivado o vacío, y la fecha de último sync.
+    """
+    # 1. Active Odoo CC from BigQuery
+    active_ids: set[str] | None = None
+    bq_available = False
+    try:
+        bq = _get_bq_client()
+        bq_rows = list(bq.query(_BQ_CC_QUERY).result())
+        active_ids = {r["id"] for r in bq_rows}
+        bq_available = True
+    except Exception as exc:
+        logger.warning(f"BigQuery no disponible para cc-status: {exc}")
+
+    # 2. tarjas_cc and last sync time from PostgreSQL
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    cc_rows = []
+    last_sync = None
+    try:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    "SELECT id_cc::text, cultivo, valor_odoo FROM appsheet.tarjas_cc ORDER BY id_cc::int"
+                )
+                cc_rows = cur.fetchall()
+            except Exception as exc:
+                logger.warning(f"No se pudo leer tarjas_cc: {exc}")
+
+            try:
+                cur.execute("SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'")
+                meta = cur.fetchone()
+                last_sync = meta[0] if meta else None
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+    # 3. Classify each CC entry
+    result = []
+    ok_count = archived_count = empty_count = unknown_count = 0
+
+    for id_cc, cultivo, valor_odoo in cc_rows:
+        stored_ids: list[str] = []
+        if isinstance(valor_odoo, dict):
+            stored_ids = [k for k in valor_odoo.keys() if k != ""]
+        elif isinstance(valor_odoo, str):
+            try:
+                parsed = _json.loads(valor_odoo)
+                stored_ids = [k for k in parsed.keys() if k != ""]
+            except Exception:
+                pass
+
+        if not stored_ids:
+            status = "empty"
+            empty_count += 1
+        elif active_ids is None:
+            status = "unknown"
+            unknown_count += 1
+        else:
+            archived = [sid for sid in stored_ids if sid not in active_ids]
+            if archived:
+                status = "archived"
+                archived_count += 1
+            else:
+                status = "ok"
+                ok_count += 1
+
+        result.append({
+            "id_cc": id_cc,
+            "cultivo": cultivo,
+            "stored_ids": stored_ids,
+            "status": status,
+        })
+
+    return {
+        "ccs": result,
+        "last_sync": last_sync,
+        "bq_available": bq_available,
+        "ok_count": ok_count,
+        "archived_count": archived_count,
+        "empty_count": empty_count,
+        "unknown_count": unknown_count,
+        "total": len(result),
+    }
+
+
+@router.post("/api/tarjas/sync-cc")
+async def trigger_cc_sync():
+    """
+    Sincroniza tarjas_cc.valor_odoo contra los CC activos en Odoo.
+    Corrige mappings simples (ID único archivado) y registra el timestamp del sync.
+    Las distribuciones multi-CC se dejan para revisión manual.
+    """
+    # 1. Fetch active CC from BigQuery
+    try:
+        bq = _get_bq_client()
+        bq_rows = list(bq.query(_BQ_CC_QUERY).result())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"BigQuery no disponible: {exc}")
+
+    by_code: dict[str, dict] = {}
+    active_ids: set[str] = set()
+    for r in bq_rows:
+        code = str(r["code"]).strip()
+        active_ids.add(r["id"])
+        if code not in by_code:
+            by_code[code] = {"id": r["id"], "nombre": r["nombre"]}
+
+    # 2. Fetch current tarjas_cc
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    fixed = 0
+    now_iso = datetime.datetime.utcnow().isoformat()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id_cc::text, valor_odoo FROM appsheet.tarjas_cc")
+            existing = cur.fetchall()
+
+        to_fix: list[tuple[str, str]] = []
+        for id_cc, valor_odoo in existing:
+            stored = valor_odoo if isinstance(valor_odoo, dict) else {}
+            if isinstance(valor_odoo, str):
+                try:
+                    stored = _json.loads(valor_odoo)
+                except Exception:
+                    stored = {}
+
+            stored_keys = [k for k in stored.keys() if k != ""]
+
+            if not stored_keys or list(stored.keys()) == [""]:
+                # Empty → fill if code is known
+                code = str(id_cc).strip()
+                if code in by_code:
+                    to_fix.append((_json.dumps({by_code[code]["id"]: 100}), id_cc))
+            elif len(stored_keys) == 1 and stored_keys[0] not in active_ids:
+                # Single stale ID → replace
+                code = str(id_cc).strip()
+                if code in by_code:
+                    to_fix.append((_json.dumps({by_code[code]["id"]: 100}), id_cc))
+                # If code not in by_code, we can't auto-fix — leave for manual review
+
+        with conn.cursor() as cur:
+            for new_json, id_cc in to_fix:
+                cur.execute(
+                    "UPDATE appsheet.tarjas_cc SET valor_odoo = %s::jsonb WHERE id_cc = %s",
+                    (new_json, id_cc),
+                )
+                fixed += 1
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS appsheet.sync_meta (
+                    key TEXT PRIMARY KEY, value TEXT
+                )
+            """)
+            cur.execute("""
+                INSERT INTO appsheet.sync_meta (key, value) VALUES ('last_cc_sync', %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """, (now_iso,))
+
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error en sincronización: {exc}")
+    finally:
+        conn.close()
+
+    return {
+        "fixed": fixed,
+        "synced_at": now_iso,
+        "message": f"Sync completado: {fixed} CC actualizados.",
+    }
 
 
 # ---------------------------------------------------------------------------

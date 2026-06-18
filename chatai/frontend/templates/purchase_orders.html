@@ -128,6 +128,75 @@
 
   </div>
 </div>
+
+<!-- CC Sync Modal -->
+<div id="cc-sync-modal" class="cc-modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="cc-modal-box">
+    <div class="cc-modal-header">
+      <div>
+        <h2 class="cc-modal-title">Verificación de Centros de Costo</h2>
+        <p class="cc-modal-subtitle">Antes de exportar, verifica que los CCs estén sincronizados con Odoo.</p>
+      </div>
+      <button class="cc-modal-close" id="btn-cc-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div id="cc-modal-loading" class="cc-modal-loading">
+      <div class="cc-spinner"></div>
+      <p>Verificando centros de costo en Odoo…</p>
+    </div>
+
+    <div id="cc-modal-content" class="hidden">
+      <div class="cc-meta-row">
+        <span class="cc-meta-label">Última sincronización:</span>
+        <strong id="cc-last-sync">–</strong>
+      </div>
+
+      <div id="cc-archived-alert" class="cc-alert cc-alert-warning hidden">
+        <span class="cc-alert-icon">⚠️</span>
+        <div>
+          <strong><span id="cc-archived-count">0</span> centros de costo con IDs archivados en Odoo.</strong>
+          <br>Sincroniza antes de exportar para evitar errores en la importación.
+        </div>
+      </div>
+
+      <div id="cc-bq-unavail-alert" class="cc-alert cc-alert-info hidden">
+        <span class="cc-alert-icon">ℹ️</span>
+        <div>No se pudo conectar a Odoo (BigQuery). No es posible verificar el estado de los CCs.</div>
+      </div>
+
+      <div class="cc-list-wrap">
+        <table class="cc-list-table">
+          <thead>
+            <tr>
+              <th>Estado</th>
+              <th>CC</th>
+              <th>Cultivo / Nombre</th>
+              <th>IDs Odoo almacenados</th>
+            </tr>
+          </thead>
+          <tbody id="cc-list-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="cc-modal-error" class="cc-alert cc-alert-error hidden"></div>
+
+    <div class="cc-modal-footer">
+      <button class="btn btn-secondary" id="btn-cc-do-sync" disabled>
+        Sincronizar ahora
+      </button>
+      <div class="cc-modal-footer-right">
+        <button class="btn" id="btn-cc-cancel" style="background:var(--surface);border:1px solid var(--border)">
+          Cancelar
+        </button>
+        <button class="btn btn-primary" id="btn-cc-proceed">
+          Continuar exportación
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
