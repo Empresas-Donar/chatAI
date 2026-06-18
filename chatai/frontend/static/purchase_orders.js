@@ -182,9 +182,18 @@ const ccModal = {
   error:        () => document.getElementById('cc-modal-error'),
   lastSync:     () => document.getElementById('cc-last-sync'),
   archivedAlert:() => document.getElementById('cc-archived-alert'),
-  archivedCount:() => document.getElementById('cc-archived-count'),
+  exclCountMsg: () => document.getElementById('cc-excluded-count-msg'),
   bqAlert:      () => document.getElementById('cc-bq-unavail-alert'),
-  tbody:        () => document.getElementById('cc-list-tbody'),
+  rowsCount:    () => document.getElementById('cc-rows-count'),
+  exclCount:    () => document.getElementById('cc-excluded-count'),
+  exclChip:     () => document.getElementById('cc-excluded-chip'),
+  okWrap:       () => document.getElementById('cc-ok-wrap'),
+  okLabel:      () => document.getElementById('cc-label-ok'),
+  okTbody:      () => document.getElementById('cc-ok-tbody'),
+  okTfoot:      () => document.getElementById('cc-ok-tfoot'),
+  exclWrap:     () => document.getElementById('cc-excl-wrap'),
+  exclLabel:    () => document.getElementById('cc-label-excl'),
+  exclTbody:    () => document.getElementById('cc-excl-tbody'),
   btnSync:      () => document.getElementById('btn-cc-do-sync'),
   btnProceed:   () => document.getElementById('btn-cc-proceed'),
 };
@@ -205,49 +214,83 @@ function formatSyncDate(isoStr) {
   }
 }
 
-function renderCCList(ccs) {
-  const STATUS_LABEL = {
-    ok:       '<span class="cc-badge cc-badge-ok">OK</span>',
-    archived: '<span class="cc-badge cc-badge-archived">Archivado</span>',
-    empty:    '<span class="cc-badge cc-badge-empty">Sin mapear</span>',
-    unknown:  '<span class="cc-badge cc-badge-unknown">Sin verificar</span>',
-  };
-  ccModal.tbody().innerHTML = ccs.map(cc => `
-    <tr>
-      <td>${STATUS_LABEL[cc.status] ?? cc.status}</td>
-      <td style="font-weight:700">${esc(cc.id_cc)}</td>
-      <td>${esc(cc.cultivo ?? '–')}</td>
-      <td class="cc-ids">${cc.stored_ids.length ? cc.stored_ids.join(', ') : '–'}</td>
-    </tr>
-  `).join('');
-}
-
-async function loadCCStatus() {
+async function loadExportPreview() {
   ccModal.loading().style.display = 'flex';
   ccModal.content().classList.add('hidden');
   ccModal.error().classList.add('hidden');
 
   try {
-    const res = await fetch('/api/tarjas/cc-status');
+    const res = await fetch('/api/tarjas/export-preview?' + _lastParams);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
+    // Last sync
     ccModal.lastSync().textContent = formatSyncDate(data.last_sync);
-    renderCCList(data.ccs);
 
+    // Summary chips
+    ccModal.rowsCount().textContent = data.rows_count ?? 0;
+    ccModal.exclCount().textContent = data.excluded_count ?? 0;
+    ccModal.exclChip().style.display = (data.excluded_count > 0) ? '' : 'none';
+
+    // Alerts
     if (!data.bq_available) {
       ccModal.bqAlert().classList.remove('hidden');
       ccModal.archivedAlert().classList.add('hidden');
       ccModal.btnSync().disabled = true;
     } else {
       ccModal.bqAlert().classList.add('hidden');
-      if (data.archived_count > 0) {
-        ccModal.archivedCount().textContent = data.archived_count;
+      if (data.excluded_count > 0) {
+        ccModal.exclCountMsg().textContent = data.excluded_count;
         ccModal.archivedAlert().classList.remove('hidden');
+        ccModal.btnSync().disabled = false;
       } else {
         ccModal.archivedAlert().classList.add('hidden');
+        ccModal.btnSync().disabled = true;
       }
-      ccModal.btnSync().disabled = false;
+    }
+
+    // Ok rows table
+    const okRows = data.rows ?? [];
+    ccModal.okLabel().style.display = '';
+    ccModal.okWrap().style.display = '';
+    if (okRows.length) {
+      let totalQty = 0, totalAmt = 0;
+      ccModal.okTbody().innerHTML = okRows.map(r => {
+        totalQty += r.qty ?? 0;
+        totalAmt += r.total ?? 0;
+        return `<tr>
+          <td>${esc(r.product_id ?? '–')}</td>
+          <td>${esc(r.cc_display ?? '–')}</td>
+          <td class="num">${r.qty ?? 0}</td>
+          <td class="num">${fmtCLP.format(r.price_unit ?? 0)}</td>
+          <td class="num">${fmtCLP.format(r.total ?? 0)}</td>
+        </tr>`;
+      }).join('');
+      ccModal.okTfoot().innerHTML = `<tr>
+        <td colspan="2"><strong>Total</strong></td>
+        <td class="num">${totalQty}</td>
+        <td class="num">–</td>
+        <td class="num">${fmtCLP.format(totalAmt)}</td>
+      </tr>`;
+    } else {
+      ccModal.okTbody().innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">Sin líneas a exportar</td></tr>';
+      ccModal.okTfoot().innerHTML = '';
+    }
+
+    // Excluded rows table
+    const exclRows = data.excluded ?? [];
+    if (exclRows.length) {
+      ccModal.exclTbody().innerHTML = exclRows.map(r => `<tr class="cc-excl-row">
+        <td>${esc(r.product_id ?? '–')}</td>
+        <td>${esc(r.cc_display ?? '–')}</td>
+        <td class="cc-excl-reason">${esc(r.reason ?? '')}</td>
+        <td class="num">${fmtCLP.format(r.total ?? 0)}</td>
+      </tr>`).join('');
+      ccModal.exclLabel().style.display = '';
+      ccModal.exclWrap().style.display = '';
+    } else {
+      ccModal.exclLabel().style.display = 'none';
+      ccModal.exclWrap().style.display = 'none';
     }
 
     ccModal.loading().style.display = 'none';
@@ -255,16 +298,15 @@ async function loadCCStatus() {
   } catch (e) {
     ccModal.loading().style.display = 'none';
     const el = ccModal.error();
-    el.textContent = '⚠️ Error al verificar los CCs: ' + e.message;
+    el.innerHTML = '<span class="cc-alert-icon">⚠️</span> Error al verificar los CCs: ' + esc(e.message);
     el.classList.remove('hidden');
-    ccModal.btnSync().disabled = false;
   }
 }
 
 function openCCModal() {
   ccModal.overlay().classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  loadCCStatus();
+  loadExportPreview();
 }
 
 function closeCCModal() {
@@ -286,8 +328,8 @@ ccModal.btnSync().addEventListener('click', async () => {
       throw new Error(body.detail || res.statusText);
     }
     const data = await res.json();
-    // Refresh status after sync
-    await loadCCStatus();
+    // Refresh preview after sync
+    await loadExportPreview();
     if (data.fixed > 0) {
       const successEl = document.createElement('div');
       successEl.className = 'cc-alert cc-alert-success';

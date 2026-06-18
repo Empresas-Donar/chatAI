@@ -129,68 +129,98 @@
   </div>
 </div>
 
-<!-- CC Sync Modal -->
+<!-- Export Preview Modal -->
 <div id="cc-sync-modal" class="cc-modal-overlay hidden" role="dialog" aria-modal="true">
   <div class="cc-modal-box">
     <div class="cc-modal-header">
       <div>
-        <h2 class="cc-modal-title">Verificación de Centros de Costo</h2>
-        <p class="cc-modal-subtitle">Antes de exportar, verifica que los CCs estén sincronizados con Odoo.</p>
+        <h2 class="cc-modal-title">Vista previa — Exportación a Odoo</h2>
+        <p class="cc-modal-subtitle">Líneas que se incluirán en el archivo. Verifica los centros de costo antes de exportar.</p>
       </div>
       <button class="cc-modal-close" id="btn-cc-modal-close" aria-label="Cerrar">&times;</button>
     </div>
 
     <div id="cc-modal-loading" class="cc-modal-loading">
       <div class="cc-spinner"></div>
-      <p>Verificando centros de costo en Odoo…</p>
+      <p>Consultando Odoo y preparando vista previa…</p>
     </div>
 
     <div id="cc-modal-content" class="hidden">
-      <div class="cc-meta-row">
-        <span class="cc-meta-label">Última sincronización:</span>
-        <strong id="cc-last-sync">–</strong>
+
+      <!-- Summary chips -->
+      <div class="cc-summary-row">
+        <div class="cc-chip cc-chip-ok">
+          <span id="cc-rows-count">0</span> líneas a exportar
+        </div>
+        <div class="cc-chip cc-chip-warn" id="cc-excluded-chip" style="display:none">
+          <span id="cc-excluded-count">0</span> excluidas
+        </div>
+        <div class="cc-meta-sync">
+          Última sync: <strong id="cc-last-sync">–</strong>
+        </div>
       </div>
 
       <div id="cc-archived-alert" class="cc-alert cc-alert-warning hidden">
         <span class="cc-alert-icon">⚠️</span>
         <div>
-          <strong><span id="cc-archived-count">0</span> centros de costo con IDs archivados en Odoo.</strong>
-          <br>Sincroniza antes de exportar para evitar errores en la importación.
+          <strong><span id="cc-excluded-count-msg">0</span> líneas excluidas por CCs archivados o sin mapear.</strong>
+          <br>Sincroniza los CCs con Odoo y vuelve a cargar la vista previa.
         </div>
       </div>
 
       <div id="cc-bq-unavail-alert" class="cc-alert cc-alert-info hidden">
         <span class="cc-alert-icon">ℹ️</span>
-        <div>No se pudo conectar a Odoo (BigQuery). No es posible verificar el estado de los CCs.</div>
+        <div>BigQuery no disponible — no se pudo verificar el estado de los CCs. Puedes exportar igual, pero los CCs no fueron validados.</div>
       </div>
 
-      <div class="cc-list-wrap">
+      <!-- Preview table: rows to export -->
+      <p class="cc-table-label" id="cc-label-ok" style="display:none">Líneas que se exportarán</p>
+      <div class="cc-list-wrap" id="cc-ok-wrap" style="display:none">
         <table class="cc-list-table">
           <thead>
             <tr>
-              <th>Estado</th>
-              <th>CC</th>
-              <th>Cultivo / Nombre</th>
-              <th>IDs Odoo almacenados</th>
+              <th>Labor (Producto Odoo)</th>
+              <th>Centro de Costo</th>
+              <th class="num">Jornadas</th>
+              <th class="num">Precio unit.</th>
+              <th class="num">Total</th>
             </tr>
           </thead>
-          <tbody id="cc-list-tbody"></tbody>
+          <tbody id="cc-ok-tbody"></tbody>
+          <tfoot id="cc-ok-tfoot"></tfoot>
         </table>
       </div>
+
+      <!-- Excluded rows -->
+      <p class="cc-table-label cc-table-label-warn" id="cc-label-excl" style="display:none">Líneas excluidas (no se exportarán)</p>
+      <div class="cc-list-wrap" id="cc-excl-wrap" style="display:none">
+        <table class="cc-list-table">
+          <thead>
+            <tr>
+              <th>Labor (Producto Odoo)</th>
+              <th>Centro de Costo</th>
+              <th>Motivo de exclusión</th>
+              <th class="num">Total</th>
+            </tr>
+          </thead>
+          <tbody id="cc-excl-tbody"></tbody>
+        </table>
+      </div>
+
     </div>
 
     <div id="cc-modal-error" class="cc-alert cc-alert-error hidden"></div>
 
     <div class="cc-modal-footer">
       <button class="btn btn-secondary" id="btn-cc-do-sync" disabled>
-        Sincronizar ahora
+        Sincronizar CCs con Odoo
       </button>
       <div class="cc-modal-footer-right">
         <button class="btn" id="btn-cc-cancel" style="background:var(--surface);border:1px solid var(--border)">
           Cancelar
         </button>
         <button class="btn btn-primary" id="btn-cc-proceed">
-          Continuar exportación
+          Descargar Excel
         </button>
       </div>
     </div>

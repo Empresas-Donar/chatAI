@@ -198,3 +198,27 @@
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .cc-modal-footer-right { display: flex; gap: 10px; align-items: center; }
+
+.cc-summary-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.cc-chip {
+  padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+}
+.cc-chip-ok   { background: #dcfce7; color: #166534; }
+.cc-chip-warn { background: #fef9c3; color: #92400e; }
+.cc-meta-sync { margin-left: auto; font-size: 12px; color: #64748b; }
+
+.cc-table-label {
+  font-size: 12px; font-weight: 700; color: #475569;
+  text-transform: uppercase; letter-spacing: .5px; margin: 12px 0 6px;
+}
+.cc-table-label-warn { color: #92400e; }
+.cc-list-table .num { text-align: right; }
+.cc-list-table tfoot td {
+  font-weight: 700; background: #f1f5f9; padding: 7px 12px;
+  border-top: 2px solid #cbd5e1;
+}
+.cc-list-table tfoot td.num { text-align: right; }
+.cc-excl-row td { color: #6b7280; }
+.cc-excl-reason { font-size: 11px; color: #92400e; font-style: italic; }

@@ -376,6 +376,20 @@ _BQ_CC_QUERY = """
       AND code IS NOT NULL AND TRIM(code) != ''
 """
 
+_BQ_ALL_CC_QUERY = """
+    SELECT
+      CAST(id AS STRING) AS id,
+      code,
+      active,
+      COALESCE(
+        JSON_VALUE(name, '$.es_CL'),
+        JSON_VALUE(name, '$.en_US'),
+        CAST(id AS STRING)
+      ) AS nombre
+    FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
+    WHERE code IS NOT NULL AND TRIM(code) != ''
+"""
+
 
 @router.get("/api/tarjas/cc-status")
 async def get_cc_status():
@@ -383,13 +397,15 @@ async def get_cc_status():
     Compara los IDs almacenados en tarjas_cc.valor_odoo contra los CC activos en Odoo (BigQuery).
     Devuelve por cada CC si está ok, archivado o vacío, y la fecha de último sync.
     """
-    # 1. Active Odoo CC from BigQuery
+    # 1. Fetch ALL Odoo CC (active + archived) to detect stale IDs
     active_ids: set[str] | None = None
+    odoo_names: dict[str, str] = {}   # id → nombre legible
     bq_available = False
     try:
         bq = _get_bq_client()
-        bq_rows = list(bq.query(_BQ_CC_QUERY).result())
-        active_ids = {r["id"] for r in bq_rows}
+        bq_rows = list(bq.query(_BQ_ALL_CC_QUERY).result())
+        active_ids = {r["id"] for r in bq_rows if r["active"]}
+        odoo_names = {r["id"]: r["nombre"] for r in bq_rows}
         bq_available = True
     except Exception as exc:
         logger.warning(f"BigQuery no disponible para cc-status: {exc}")
@@ -404,13 +420,10 @@ async def get_cc_status():
     last_sync = None
     try:
         with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    "SELECT id_cc::text, cultivo, valor_odoo FROM appsheet.tarjas_cc ORDER BY id_cc::int"
-                )
-                cc_rows = cur.fetchall()
-            except Exception as exc:
-                logger.warning(f"No se pudo leer tarjas_cc: {exc}")
+            cur.execute(
+                "SELECT id_cc::text, cultivo, valor_odoo FROM appsheet.tarjas_cc ORDER BY id_cc"
+            )
+            cc_rows = cur.fetchall()
 
             try:
                 cur.execute("SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'")
@@ -436,6 +449,7 @@ async def get_cc_status():
             except Exception:
                 pass
 
+        archived_ids: list[str] = []
         if not stored_ids:
             status = "empty"
             empty_count += 1
@@ -443,18 +457,23 @@ async def get_cc_status():
             status = "unknown"
             unknown_count += 1
         else:
-            archived = [sid for sid in stored_ids if sid not in active_ids]
-            if archived:
+            archived_ids = [sid for sid in stored_ids if sid not in active_ids]
+            if archived_ids:
                 status = "archived"
                 archived_count += 1
             else:
                 status = "ok"
                 ok_count += 1
 
+        # Resolve human-readable names for stored IDs
+        stored_names = [odoo_names.get(sid, sid) for sid in stored_ids]
+
         result.append({
             "id_cc": id_cc,
             "cultivo": cultivo,
             "stored_ids": stored_ids,
+            "stored_names": stored_names,
+            "archived_ids": archived_ids,
             "status": status,
         })
 
@@ -470,27 +489,195 @@ async def get_cc_status():
     }
 
 
+@router.get("/api/tarjas/export-preview")
+async def get_export_preview(
+    contratista: str,
+    empresa: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+):
+    """
+    Vista previa de lo que se exportará a Odoo:
+    - Filas válidas (product_id mapeado + CC activo) → se incluyen en el xlsx
+    - Filas excluidas (sin labor o CC vacío/archivado) → se omiten con motivo
+    Para cada CC resuelve el nombre legible desde BigQuery.
+    """
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    # 1. Fetch active CC names from BigQuery (best-effort)
+    active_ids: set[str] = set()
+    odoo_names: dict[str, str] = {}
+    bq_available = False
+    try:
+        bq = _get_bq_client()
+        bq_rows = list(bq.query(_BQ_ALL_CC_QUERY).result())
+        active_ids = {r["id"] for r in bq_rows if r["active"]}
+        odoo_names = {r["id"]: r["nombre"] for r in bq_rows}
+        bq_available = True
+    except Exception as exc:
+        logger.warning(f"BigQuery no disponible en export-preview: {exc}")
+
+    # 2. Query export rows + excluded rows from PG
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    last_sync = None
+    try:
+        with conn.cursor() as cur:
+            # All rows for this contratista/empresa/period
+            cur.execute("""
+                SELECT
+                    "order_line/product_id"           AS product_id,
+                    "order_line/analytic_distribution" AS analytic,
+                    SUM("order_line/product_qty")     AS qty,
+                    CASE WHEN SUM("order_line/product_qty") > 0
+                         THEN ROUND(
+                             SUM("order_line/product_qty" * "order_line/price_unit")
+                             / SUM("order_line/product_qty"), 0)
+                         ELSE 0 END                   AS price_unit
+                FROM appsheet.tarjas_reporte_odoo
+                WHERE "Vendedor"    = %s
+                  AND nombre_campo  = %s
+                  AND fecha BETWEEN %s AND %s
+                GROUP BY "order_line/product_id", "order_line/analytic_distribution"
+                ORDER BY "order_line/product_id"
+            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            all_rows = cur.fetchall()
+
+            try:
+                cur.execute("SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'")
+                meta = cur.fetchone()
+                last_sync = meta[0] if meta else None
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+    # 3. Classify each row
+    preview_rows = []
+    excluded_rows = []
+    total_ok = 0.0
+    total_excluded = 0.0
+
+    for product_id, analytic, qty, price_unit in all_rows:
+        qty_f = float(qty or 0)
+        price_f = float(price_unit or 0)
+        total_line = qty_f * price_f
+
+        # Parse analytic distribution
+        cc_ids: list[str] = []
+        if isinstance(analytic, dict):
+            cc_ids = [k for k in analytic.keys() if k != ""]
+        elif isinstance(analytic, str):
+            try:
+                parsed = _json.loads(analytic)
+                cc_ids = [k for k in parsed.keys() if k != ""]
+            except Exception:
+                pass
+
+        # Determine CC display name and status
+        if not product_id:
+            excluded_rows.append({
+                "product_id": "–",
+                "cc_display": _cc_display(cc_ids, odoo_names),
+                "qty": qty_f,
+                "price_unit": price_f,
+                "total": total_line,
+                "reason": "Labor sin mapear en Odoo",
+                "cc_status": "empty",
+            })
+            total_excluded += total_line
+            continue
+
+        if not cc_ids or list(analytic.keys() if isinstance(analytic, dict) else {}) == [""]:
+            excluded_rows.append({
+                "product_id": product_id,
+                "cc_display": "Sin centro de costo",
+                "qty": qty_f,
+                "price_unit": price_f,
+                "total": total_line,
+                "reason": "CC vacío o sin mapear",
+                "cc_status": "empty",
+            })
+            total_excluded += total_line
+            continue
+
+        # Check if any CC IDs are archived
+        archived = [cid for cid in cc_ids if bq_available and cid not in active_ids]
+        cc_status = "archived" if archived else ("unknown" if not bq_available else "ok")
+        cc_display = _cc_display(cc_ids, odoo_names)
+
+        row = {
+            "product_id": product_id,
+            "cc_display": cc_display,
+            "cc_ids": cc_ids,
+            "qty": qty_f,
+            "price_unit": price_f,
+            "total": total_line,
+            "cc_status": cc_status,
+        }
+
+        if cc_status == "archived":
+            excluded_rows.append({**row, "reason": f"CC archivado en Odoo: {', '.join(archived)}"})
+            total_excluded += total_line
+        else:
+            preview_rows.append(row)
+            total_ok += total_line
+
+    return {
+        "rows": preview_rows,
+        "excluded": excluded_rows,
+        "total_ok": total_ok,
+        "total_excluded": total_excluded,
+        "rows_count": len(preview_rows),
+        "excluded_count": len(excluded_rows),
+        "bq_available": bq_available,
+        "last_sync": last_sync,
+    }
+
+
+def _cc_display(cc_ids: list[str], odoo_names: dict[str, str]) -> str:
+    if not cc_ids:
+        return "–"
+    parts = []
+    for cid in cc_ids:
+        name = odoo_names.get(cid)
+        parts.append(name if name else cid)
+    return " / ".join(parts)
+
+
 @router.post("/api/tarjas/sync-cc")
 async def trigger_cc_sync():
     """
-    Sincroniza tarjas_cc.valor_odoo contra los CC activos en Odoo.
-    Corrige mappings simples (ID único archivado) y registra el timestamp del sync.
-    Las distribuciones multi-CC se dejan para revisión manual.
+    Sincroniza tarjas_cc.valor_odoo contra los CC activos en Odoo (BigQuery).
+    Reemplaza IDs archivados por su equivalente activo (mismo código), preservando
+    los porcentajes en distribuciones multi-CC.
     """
-    # 1. Fetch active CC from BigQuery
+    # 1. Fetch ALL CC (active + archived) to build archived → active replacement map
     try:
         bq = _get_bq_client()
-        bq_rows = list(bq.query(_BQ_CC_QUERY).result())
+        bq_rows = list(bq.query(_BQ_ALL_CC_QUERY).result())
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"BigQuery no disponible: {exc}")
 
-    by_code: dict[str, dict] = {}
-    active_ids: set[str] = set()
+    by_code: dict[str, dict] = {}   # code → info (active only)
+    id_to_code: dict[str, str] = {} # id → code (all)
     for r in bq_rows:
         code = str(r["code"]).strip()
-        active_ids.add(r["id"])
-        if code not in by_code:
-            by_code[code] = {"id": r["id"], "nombre": r["nombre"]}
+        oid = str(r["id"])
+        id_to_code[oid] = code
+        if r["active"] and code not in by_code:
+            by_code[code] = {"id": oid, "nombre": r["nombre"]}
+
+    active_ids = {info["id"] for info in by_code.values()}
+    archived_to_active = {
+        oid: by_code[code]["id"]
+        for oid, code in id_to_code.items()
+        if oid not in active_ids and code in by_code
+    }
 
     # 2. Fetch current tarjas_cc
     try:
@@ -508,7 +695,7 @@ async def trigger_cc_sync():
 
         to_fix: list[tuple[str, str]] = []
         for id_cc, valor_odoo in existing:
-            stored = valor_odoo if isinstance(valor_odoo, dict) else {}
+            stored: dict = valor_odoo if isinstance(valor_odoo, dict) else {}
             if isinstance(valor_odoo, str):
                 try:
                     stored = _json.loads(valor_odoo)
@@ -516,18 +703,26 @@ async def trigger_cc_sync():
                     stored = {}
 
             stored_keys = [k for k in stored.keys() if k != ""]
+            code = str(id_cc).strip()
 
             if not stored_keys or list(stored.keys()) == [""]:
-                # Empty → fill if code is known
-                code = str(id_cc).strip()
+                # Empty → fill with active ID if code is known
                 if code in by_code:
                     to_fix.append((_json.dumps({by_code[code]["id"]: 100}), id_cc))
-            elif len(stored_keys) == 1 and stored_keys[0] not in active_ids:
-                # Single stale ID → replace
-                code = str(id_cc).strip()
-                if code in by_code:
-                    to_fix.append((_json.dumps({by_code[code]["id"]: 100}), id_cc))
-                # If code not in by_code, we can't auto-fix — leave for manual review
+            else:
+                # Replace any archived IDs preserving their percentages
+                updated = {}
+                changed = False
+                for kid, pct in stored.items():
+                    if kid == "":
+                        continue
+                    if kid not in active_ids and kid in archived_to_active:
+                        updated[archived_to_active[kid]] = pct
+                        changed = True
+                    else:
+                        updated[kid] = pct
+                if changed:
+                    to_fix.append((_json.dumps(updated), id_cc))
 
         with conn.cursor() as cur:
             for new_json, id_cc in to_fix:
@@ -557,7 +752,7 @@ async def trigger_cc_sync():
     return {
         "fixed": fixed,
         "synced_at": now_iso,
-        "message": f"Sync completado: {fixed} CC actualizados.",
+        "message": f"Sync completado: {fixed} CC actualizados con IDs vigentes.",
     }
 
 

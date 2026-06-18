@@ -66,39 +66,56 @@ def _pg_conn():
     return psycopg2.connect(host=host, port=int(os.environ.get("DB_PORT", 5432)), **kwargs)
 
 
-def fetch_odoo_cc(bq: bigquery.Client) -> dict[str, dict]:
-    """Return {code: {id, nombre, company_id}} for all active Odoo CC with a code."""
+def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, str]]:
+    """
+    Fetch ALL Odoo CCs (active + archived) and return:
+      by_code: {code → {id, nombre, company_id}} — active CCs only, used for insertions
+      archived_to_active: {archived_id → active_id} — replacement map for stale IDs
+    """
     rows = bq.query("""
         SELECT
-          id,
+          CAST(id AS STRING) AS id,
           COALESCE(
             JSON_EXTRACT_SCALAR(name, '$.es_CL'),
             JSON_EXTRACT_SCALAR(name, '$.en_US'),
             CAST(id AS STRING)
           ) AS nombre,
           code,
-          company_id
+          company_id,
+          active
         FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
-        WHERE active = TRUE
-          AND code IS NOT NULL
+        WHERE code IS NOT NULL
           AND TRIM(code) != ''
     """).result()
 
     by_code: dict[str, dict] = {}
+    id_to_code: dict[str, str] = {}
+
     for r in rows:
         code = str(r["code"]).strip()
-        if code not in by_code:
+        odoo_id = str(r["id"])
+        id_to_code[odoo_id] = code
+        if r["active"] and code not in by_code:
             by_code[code] = {
-                "id": r["id"],
+                "id": odoo_id,
                 "nombre": r["nombre"],
                 "company_id": r["company_id"],
             }
-    log.info(f"Odoo CC activos con código: {len(by_code)}")
-    return by_code
+
+    # Build map: archived_id → active_id (same code)
+    active_ids = {info["id"] for info in by_code.values()}
+    archived_to_active: dict[str, str] = {
+        oid: by_code[code]["id"]
+        for oid, code in id_to_code.items()
+        if oid not in active_ids and code in by_code
+    }
+
+    log.info(f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_active)}")
+    return by_code, archived_to_active
 
 
-def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
-    active_ids = {str(info["id"]) for info in odoo.values()}
+def sync_tarjas_cc(odoo: dict[str, dict], archived_to_active: dict[str, str], conn) -> None:
+    active_ids = {info["id"] for info in odoo.values()}
 
     with conn.cursor() as cur:
         cur.execute("SELECT id_cc::text, valor_odoo FROM appsheet.tarjas_cc")
@@ -107,7 +124,7 @@ def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
     to_insert, to_fix = [], []
 
     for code, info in odoo.items():
-        odoo_id = str(info["id"])
+        odoo_id = info["id"]
         new_json = json.dumps({odoo_id: 100})
 
         if code not in existing:
@@ -124,11 +141,22 @@ def sync_tarjas_cc(odoo: dict[str, dict], conn) -> None:
             if not stored_keys or list(current.keys()) == [""]:
                 # Empty or blank-key mapping → fill with active ID
                 to_fix.append((new_json, code))
-            elif len(stored_keys) == 1 and stored_keys[0] not in active_ids:
-                # Simple stale mapping (single archived ID) → replace with current active ID
-                log.info(f"tarjas_cc [{code}]: ID {stored_keys[0]} archivado → actualizando a {odoo_id}")
-                to_fix.append((new_json, code))
-            # Multi-CC distributions are left as-is (require manual review)
+            else:
+                # Replace any archived IDs preserving their percentages
+                updated = {}
+                changed = False
+                for kid, pct in current.items():
+                    if kid == "":
+                        continue
+                    if kid not in active_ids and kid in archived_to_active:
+                        replacement = archived_to_active[kid]
+                        updated[replacement] = pct
+                        changed = True
+                        log.info(f"tarjas_cc [{code}]: {kid} → {replacement} ({pct}%)")
+                    else:
+                        updated[kid] = pct
+                if changed:
+                    to_fix.append((json.dumps(updated), code))
 
     now_iso = datetime.datetime.utcnow().isoformat()
     with conn.cursor() as cur:
@@ -199,11 +227,11 @@ def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
 def run() -> None:
     log.info("=== sync_cc start ===")
     bq = _bq_client()
-    odoo = fetch_odoo_cc(bq)
+    odoo, archived_to_active = fetch_odoo_cc(bq)
 
     conn = _pg_conn()
     try:
-        sync_tarjas_cc(odoo, conn)
+        sync_tarjas_cc(odoo, archived_to_active, conn)
         sync_despacho_cc(odoo, conn)
         conn.commit()
     except Exception:
