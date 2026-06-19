@@ -518,7 +518,7 @@ async def get_export_preview(
     except Exception as exc:
         logger.warning(f"BigQuery no disponible en export-preview: {exc}")
 
-    # 2. Query export rows + excluded rows from PG
+    # 2. Query individual export rows from PG (no GROUP BY — one row per line)
     try:
         conn = get_connection()
     except Exception:
@@ -527,23 +527,17 @@ async def get_export_preview(
     last_sync = None
     try:
         with conn.cursor() as cur:
-            # All rows for this contratista/empresa/period
             cur.execute("""
                 SELECT
-                    "order_line/product_id"           AS product_id,
-                    "order_line/analytic_distribution" AS analytic,
-                    SUM("order_line/product_qty")     AS qty,
-                    CASE WHEN SUM("order_line/product_qty") > 0
-                         THEN ROUND(
-                             SUM("order_line/product_qty" * "order_line/price_unit")
-                             / SUM("order_line/product_qty"), 0)
-                         ELSE 0 END                   AS price_unit
+                    "order_line/product_id"            AS product_id,
+                    "order_line/analytic_distribution"  AS analytic,
+                    "order_line/product_qty"            AS qty,
+                    "order_line/price_unit"             AS price_unit
                 FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"    = %s
-                  AND nombre_campo  = %s
+                WHERE "Vendedor"   = %s
+                  AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
-                GROUP BY "order_line/product_id", "order_line/analytic_distribution"
-                ORDER BY "order_line/product_id"
+                ORDER BY "order_line/product_id", fecha
             """, (contratista, empresa, fecha_inicio, fecha_termino))
             all_rows = cur.fetchall()
 
@@ -565,66 +559,70 @@ async def get_export_preview(
     for product_id, analytic, qty, price_unit in all_rows:
         qty_f = float(qty or 0)
         price_f = float(price_unit or 0)
-        total_line = qty_f * price_f
+        total_line = round(qty_f * price_f, 0)
 
-        # Parse analytic distribution
-        cc_ids: list[str] = []
+        # Parse analytic distribution into dict
+        analytic_dict: dict = {}
         if isinstance(analytic, dict):
-            cc_ids = [k for k in analytic.keys() if k != ""]
+            analytic_dict = analytic
         elif isinstance(analytic, str):
             try:
-                parsed = _json.loads(analytic)
-                cc_ids = [k for k in parsed.keys() if k != ""]
+                analytic_dict = _json.loads(analytic)
             except Exception:
                 pass
 
-        # Determine CC display name and status
+        cc_ids = [k for k in analytic_dict.keys() if k != ""]
+        cc_display = _cc_display(analytic_dict, odoo_names)
+
         if not product_id:
             excluded_rows.append({
                 "product_id": "–",
-                "cc_display": _cc_display(cc_ids, odoo_names),
+                "cc_display": cc_display,
                 "qty": qty_f,
                 "price_unit": price_f,
                 "total": total_line,
                 "reason": "Labor sin mapear en Odoo",
-                "cc_status": "empty",
             })
             total_excluded += total_line
             continue
 
-        if not cc_ids or list(analytic.keys() if isinstance(analytic, dict) else {}) == [""]:
+        if not cc_ids:
             excluded_rows.append({
                 "product_id": product_id,
-                "cc_display": "Sin centro de costo",
+                "cc_display": "–",
                 "qty": qty_f,
                 "price_unit": price_f,
                 "total": total_line,
                 "reason": "CC vacío o sin mapear",
-                "cc_status": "empty",
             })
             total_excluded += total_line
             continue
 
-        # Check if any CC IDs are archived
         archived = [cid for cid in cc_ids if bq_available and cid not in active_ids]
-        cc_status = "archived" if archived else ("unknown" if not bq_available else "ok")
-        cc_display = _cc_display(cc_ids, odoo_names)
 
-        row = {
-            "product_id": product_id,
-            "cc_display": cc_display,
-            "cc_ids": cc_ids,
-            "qty": qty_f,
-            "price_unit": price_f,
-            "total": total_line,
-            "cc_status": cc_status,
-        }
+        analytic_str = _json.dumps(analytic_dict, ensure_ascii=False) if analytic_dict else "–"
 
-        if cc_status == "archived":
-            excluded_rows.append({**row, "reason": f"CC archivado en Odoo: {', '.join(archived)}"})
+        if archived:
+            excluded_rows.append({
+                "product_id": product_id,
+                "analytic_distribution": analytic_str,
+                "cc_display": cc_display,
+                "archived_ids": archived,
+                "qty": qty_f,
+                "price_unit": price_f,
+                "total": total_line,
+                "reason": f"CC archivado: {', '.join(odoo_names.get(a, a) for a in archived)}",
+            })
             total_excluded += total_line
         else:
-            preview_rows.append(row)
+            preview_rows.append({
+                "product_id": product_id,
+                "analytic_distribution": analytic_str,
+                "cc_display": cc_display,
+                "qty": qty_f,
+                "price_unit": price_f,
+                "total": total_line,
+            })
             total_ok += total_line
 
     return {
@@ -639,14 +637,18 @@ async def get_export_preview(
     }
 
 
-def _cc_display(cc_ids: list[str], odoo_names: dict[str, str]) -> str:
-    if not cc_ids:
+def _cc_display(analytic: dict | None, odoo_names: dict[str, str]) -> str:
+    """Return human-readable CC distribution string, e.g. 'CEREZOS LAPINS (50%) / CEREZOS SANTINA (50%)'."""
+    if not analytic:
         return "–"
     parts = []
-    for cid in cc_ids:
-        name = odoo_names.get(cid)
-        parts.append(name if name else cid)
-    return " / ".join(parts)
+    multi = len([k for k in analytic if k != ""]) > 1
+    for cid, pct in analytic.items():
+        if cid == "":
+            continue
+        name = odoo_names.get(cid, cid)
+        parts.append(f"{name} ({float(pct):.0f}%)" if multi else name)
+    return " / ".join(parts) if parts else "–"
 
 
 def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]:

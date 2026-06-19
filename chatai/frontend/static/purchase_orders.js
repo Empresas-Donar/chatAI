@@ -187,13 +187,8 @@ const ccModal = {
   rowsCount:    () => document.getElementById('cc-rows-count'),
   exclCount:    () => document.getElementById('cc-excluded-count'),
   exclChip:     () => document.getElementById('cc-excluded-chip'),
-  okWrap:       () => document.getElementById('cc-ok-wrap'),
-  okLabel:      () => document.getElementById('cc-label-ok'),
-  okTbody:      () => document.getElementById('cc-ok-tbody'),
-  okTfoot:      () => document.getElementById('cc-ok-tfoot'),
-  exclWrap:     () => document.getElementById('cc-excl-wrap'),
-  exclLabel:    () => document.getElementById('cc-label-excl'),
-  exclTbody:    () => document.getElementById('cc-excl-tbody'),
+  previewTbody: () => document.getElementById('cc-preview-tbody'),
+  previewTfoot: () => document.getElementById('cc-preview-tfoot'),
   btnSync:      () => document.getElementById('btn-cc-do-sync'),
   btnProceed:   () => document.getElementById('btn-cc-proceed'),
 };
@@ -224,13 +219,16 @@ async function loadExportPreview() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    // Last sync
     ccModal.lastSync().textContent = formatSyncDate(data.last_sync);
 
+    const okRows   = data.rows     ?? [];
+    const exclRows = data.excluded ?? [];
+    const totalRows = okRows.length + exclRows.length;
+
     // Summary chips
-    ccModal.rowsCount().textContent = data.rows_count ?? 0;
-    ccModal.exclCount().textContent = data.excluded_count ?? 0;
-    ccModal.exclChip().style.display = (data.excluded_count > 0) ? '' : 'none';
+    ccModal.rowsCount().textContent = okRows.length;
+    ccModal.exclCount().textContent = exclRows.length;
+    ccModal.exclChip().style.display = exclRows.length > 0 ? '' : 'none';
 
     // Alerts
     if (!data.bq_available) {
@@ -239,8 +237,8 @@ async function loadExportPreview() {
       ccModal.btnSync().disabled = true;
     } else {
       ccModal.bqAlert().classList.add('hidden');
-      if (data.excluded_count > 0) {
-        ccModal.exclCountMsg().textContent = data.excluded_count;
+      if (exclRows.length > 0) {
+        ccModal.exclCountMsg().textContent = exclRows.length;
         ccModal.archivedAlert().classList.remove('hidden');
         ccModal.btnSync().disabled = false;
       } else {
@@ -249,48 +247,56 @@ async function loadExportPreview() {
       }
     }
 
-    // Ok rows table
-    const okRows = data.rows ?? [];
-    ccModal.okLabel().style.display = '';
-    ccModal.okWrap().style.display = '';
-    if (okRows.length) {
-      let totalQty = 0, totalAmt = 0;
-      ccModal.okTbody().innerHTML = okRows.map(r => {
-        totalQty += r.qty ?? 0;
-        totalAmt += r.total ?? 0;
-        return `<tr>
-          <td>${esc(r.product_id ?? '–')}</td>
-          <td>${esc(r.cc_display ?? '–')}</td>
-          <td class="num">${r.qty ?? 0}</td>
-          <td class="num">${fmtCLP.format(r.price_unit ?? 0)}</td>
-          <td class="num">${fmtCLP.format(r.total ?? 0)}</td>
-        </tr>`;
-      }).join('');
-      ccModal.okTfoot().innerHTML = `<tr>
-        <td colspan="2"><strong>Total</strong></td>
-        <td class="num">${totalQty}</td>
-        <td class="num">–</td>
-        <td class="num">${fmtCLP.format(totalAmt)}</td>
-      </tr>`;
-    } else {
-      ccModal.okTbody().innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">Sin líneas a exportar</td></tr>';
-      ccModal.okTfoot().innerHTML = '';
+    // Render analytic_distribution highlighting archived IDs in red
+    function renderAnalytic(raw, archivedIds) {
+      if (!raw || raw === '–') return '–';
+      const archived = new Set(archivedIds ?? []);
+      try {
+        const obj = JSON.parse(raw);
+        return Object.entries(obj).map(([id, pct]) => {
+          const val = `"${id}": ${Number(pct).toFixed(2)}`;
+          return archived.has(id)
+            ? `<span class="cc-id-error" title="CC archivado">${esc(val)}</span>`
+            : esc(val);
+        }).join(', ');
+      } catch {
+        return esc(raw);
+      }
     }
 
-    // Excluded rows table
-    const exclRows = data.excluded ?? [];
-    if (exclRows.length) {
-      ccModal.exclTbody().innerHTML = exclRows.map(r => `<tr class="cc-excl-row">
+    // Unified table: ok rows then excluded rows
+    let totalQty = 0, totalAmt = 0;
+
+    const okHtml = okRows.map(r => {
+      totalQty += r.qty ?? 0;
+      totalAmt += r.total ?? 0;
+      return `<tr>
         <td>${esc(r.product_id ?? '–')}</td>
-        <td>${esc(r.cc_display ?? '–')}</td>
-        <td class="cc-excl-reason">${esc(r.reason ?? '')}</td>
-        <td class="num">${fmtCLP.format(r.total ?? 0)}</td>
-      </tr>`).join('');
-      ccModal.exclLabel().style.display = '';
-      ccModal.exclWrap().style.display = '';
+        <td class="num">${r.qty ?? 0}</td>
+        <td class="cc-analytic">{${renderAnalytic(r.analytic_distribution, [])}}</td>
+        <td class="num">${Number(r.price_unit ?? 0).toLocaleString('es-CL')}</td>
+        <td><span class="cc-badge cc-badge-ok">OK</span></td>
+      </tr>`;
+    }).join('');
+
+    const exclHtml = exclRows.map(r => `<tr class="cc-row-error">
+      <td>${esc(r.product_id ?? '–')}</td>
+      <td class="num">${r.qty ?? 0}</td>
+      <td class="cc-analytic">{${renderAnalytic(r.analytic_distribution, r.archived_ids ?? [])}}</td>
+      <td class="num">${Number(r.price_unit ?? 0).toLocaleString('es-CL')}</td>
+      <td><span class="cc-badge cc-badge-archived" title="${esc(r.reason ?? '')}">⚠ Incompleta</span></td>
+    </tr>`).join('');
+
+    if (totalRows === 0) {
+      ccModal.previewTbody().innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px">Sin líneas para este período</td></tr>';
+      ccModal.previewTfoot().innerHTML = '';
     } else {
-      ccModal.exclLabel().style.display = 'none';
-      ccModal.exclWrap().style.display = 'none';
+      ccModal.previewTbody().innerHTML = okHtml + exclHtml;
+      ccModal.previewTfoot().innerHTML = `<tr>
+        <td><strong>Total exportable</strong></td>
+        <td class="num">${totalQty}</td>
+        <td></td><td></td><td></td>
+      </tr>`;
     }
 
     ccModal.loading().style.display = 'none';
@@ -298,7 +304,7 @@ async function loadExportPreview() {
   } catch (e) {
     ccModal.loading().style.display = 'none';
     const el = ccModal.error();
-    el.innerHTML = '<span class="cc-alert-icon">⚠️</span> Error al verificar los CCs: ' + esc(e.message);
+    el.innerHTML = '<span class="cc-alert-icon">⚠️</span> Error al cargar vista previa: ' + esc(e.message);
     el.classList.remove('hidden');
   }
 }

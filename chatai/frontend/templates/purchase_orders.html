@@ -147,63 +147,50 @@
 
     <div id="cc-modal-content" class="hidden">
 
-      <!-- Summary chips -->
+      <!-- Summary bar -->
       <div class="cc-summary-row">
-        <div class="cc-chip cc-chip-ok">
-          <span id="cc-rows-count">0</span> líneas a exportar
-        </div>
-        <div class="cc-chip cc-chip-warn" id="cc-excluded-chip" style="display:none">
-          <span id="cc-excluded-count">0</span> excluidas
-        </div>
-        <div class="cc-meta-sync">
-          Última sync: <strong id="cc-last-sync">–</strong>
-        </div>
+        <div class="cc-chip cc-chip-ok"><span id="cc-rows-count">0</span> completas</div>
+        <div class="cc-chip cc-chip-warn" id="cc-excluded-chip" style="display:none">⚠ <span id="cc-excluded-count">0</span> incompletas</div>
+        <div class="cc-meta-sync">Última sync: <strong id="cc-last-sync">–</strong></div>
       </div>
 
+      <!-- Incomplete warning -->
       <div id="cc-archived-alert" class="cc-alert cc-alert-warning hidden">
         <span class="cc-alert-icon">⚠️</span>
         <div>
-          <strong><span id="cc-excluded-count-msg">0</span> líneas excluidas por CCs archivados o sin mapear.</strong>
-          <br>Sincroniza los CCs con Odoo y vuelve a cargar la vista previa.
+          <strong>Hay <span id="cc-excluded-count-msg">0</span> filas incompletas (marcadas en rojo).</strong>
+          El archivo se descargará sin ellas. Sincroniza los CCs con Odoo para corregirlas.
         </div>
       </div>
-
       <div id="cc-bq-unavail-alert" class="cc-alert cc-alert-info hidden">
         <span class="cc-alert-icon">ℹ️</span>
-        <div>BigQuery no disponible — no se pudo verificar el estado de los CCs. Puedes exportar igual, pero los CCs no fueron validados.</div>
+        <div>BigQuery no disponible — CCs no validados. Puedes exportar, pero verifica manualmente.</div>
       </div>
 
-      <!-- Preview table: rows to export -->
-      <p class="cc-table-label" id="cc-label-ok" style="display:none">Líneas que se exportarán</p>
-      <div class="cc-list-wrap" id="cc-ok-wrap" style="display:none">
+      <!-- Column legend -->
+      <div class="cc-legend">
+        <span><strong>product_id</strong> → Código de labor en Odoo</span>
+        <span><strong>product_qty</strong> → Jornadas del período</span>
+        <span><strong>analytic_distribution</strong> → JSON: {ID_centro_costo: % distribución}. IDs en <span class="cc-id-error">rojo</span> = archivados en Odoo.</span>
+        <span><strong>price_unit</strong> → Precio por jornada (CLP)</span>
+        <span class="cc-legend-badge"><span class="cc-badge cc-badge-ok">OK</span> = se exporta</span>
+        <span class="cc-legend-badge"><span class="cc-badge cc-badge-archived">⚠ Incompleta</span> = NO se exporta — sincroniza CCs</span>
+      </div>
+
+      <!-- Unified preview table — same columns as the Excel export -->
+      <div class="cc-list-wrap">
         <table class="cc-list-table">
           <thead>
             <tr>
-              <th>Labor (Producto Odoo)</th>
-              <th>Centro de Costo</th>
-              <th class="num">Jornadas</th>
-              <th class="num">Precio unit.</th>
-              <th class="num">Total</th>
+              <th>order_line/product_id</th>
+              <th class="num">order_line/product_qty</th>
+              <th>order_line/analytic_distribution</th>
+              <th class="num">order_line/price_unit</th>
+              <th>Estado</th>
             </tr>
           </thead>
-          <tbody id="cc-ok-tbody"></tbody>
-          <tfoot id="cc-ok-tfoot"></tfoot>
-        </table>
-      </div>
-
-      <!-- Excluded rows -->
-      <p class="cc-table-label cc-table-label-warn" id="cc-label-excl" style="display:none">Líneas excluidas (no se exportarán)</p>
-      <div class="cc-list-wrap" id="cc-excl-wrap" style="display:none">
-        <table class="cc-list-table">
-          <thead>
-            <tr>
-              <th>Labor (Producto Odoo)</th>
-              <th>Centro de Costo</th>
-              <th>Motivo de exclusión</th>
-              <th class="num">Total</th>
-            </tr>
-          </thead>
-          <tbody id="cc-excl-tbody"></tbody>
+          <tbody id="cc-preview-tbody"></tbody>
+          <tfoot id="cc-preview-tfoot"></tfoot>
         </table>
       </div>
 
