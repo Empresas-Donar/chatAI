@@ -1,9 +1,9 @@
-name: Sync CC from Odoo (daily)
+name: Sync CC from Odoo (every 5h)
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # 9:00 UTC = 6:00 AM Chile (UTC-3)
-  workflow_dispatch:        # Allow manual trigger from GitHub UI
+    - cron: '0 */5 * * *'   # Every 5 hours — detects archived CCs within hours of change in Odoo
+  workflow_dispatch:          # Allow manual trigger from GitHub UI
 
 jobs:
   sync:

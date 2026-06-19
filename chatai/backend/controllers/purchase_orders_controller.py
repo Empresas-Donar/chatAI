@@ -680,6 +680,31 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
                 "nombre": r["nombre"] or "", "root_plan_id": plan,
             })
 
+    _dir_suffix = re.compile(r'[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$', re.IGNORECASE)
+
+    def _stem(name: str) -> str:
+        return _dir_suffix.sub('', name).strip()
+
+    def _lev(a: str, b: str) -> int:
+        a, b = a.lower(), b.lower()
+        if len(a) > len(b):
+            a, b = b, a
+        curr = list(range(len(a) + 1))
+        for cb in b:
+            prev = curr[:]
+            curr[0] = prev[0] + 1
+            for i, ca in enumerate(a):
+                curr[i + 1] = prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+        return curr[len(a)]
+
+    def _matches(base: str, stem: str) -> bool:
+        b, s = base.lower(), stem.lower()
+        if s.startswith(b):
+            return True
+        if _lev(b, s) <= 1:
+            return re.findall(r'\d+', b) == re.findall(r'\d+', s)
+        return False
+
     replacements: dict[str, list[tuple[str, float]]] = {}
     for r in bq_rows:
         oid = str(r["id"])
@@ -693,7 +718,7 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
             replacements[oid] = [(by_code[code], 1.0)]
             continue
 
-        # Strategy 2: name-prefix siblings in same plan
+        # Strategy 2: fuzzy name siblings in same plan (handles splits + typos in Odoo)
         nombre = r["nombre"] or ""
         base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
         plan = str(r.get("root_plan_id") or "")
@@ -701,7 +726,7 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
         if base and plan:
             siblings = [
                 s for s in by_plan.get(plan, [])
-                if s["active"] and s["nombre"].lower().startswith(base.lower())
+                if s["active"] and _matches(base, _stem(s["nombre"]))
             ]
             if siblings:
                 fraction = 1.0 / len(siblings)

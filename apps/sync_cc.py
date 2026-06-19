@@ -113,6 +113,44 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
                 "nombre": r["nombre"] or "", "root_plan_id": plan,
             })
 
+    _DIR_SUFFIX = re.compile(
+        r'[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$', re.IGNORECASE
+    )
+
+    def _stem(name: str) -> str:
+        """Strip direction suffixes so CEREZOS X-NORTE and CEREZOS X-SUR both yield CEREZOS X."""
+        return _DIR_SUFFIX.sub('', name).strip()
+
+    def _lev(a: str, b: str) -> int:
+        a, b = a.lower(), b.lower()
+        if len(a) > len(b):
+            a, b = b, a
+        curr = list(range(len(a) + 1))
+        for cb in b:
+            prev = curr[:]
+            curr[0] = prev[0] + 1
+            for i, ca in enumerate(a):
+                curr[i + 1] = prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+        return curr[len(a)]
+
+    def _matches(base: str, stem: str) -> bool:
+        """
+        Returns True if `stem` (active CC name, direction-stripped) is a valid
+        replacement candidate for `base` (archived CC name, CC-NNN-stripped).
+
+        Two allowed patterns:
+          1. startswith: year was added to the name in Odoo (e.g. "CEREZOS RED PACIFIC"
+             → "CEREZOS RED PACIFIC 2023"). Numbers in stem must extend base.
+          2. Levenshtein ≤ 1: single-char typo (e.g. "CREZOS" vs "CEREZOS").
+             Numbers must match exactly to avoid cross-year false positives.
+        """
+        b, s = base.lower(), stem.lower()
+        if s.startswith(b):
+            return True
+        if _lev(b, s) <= 1:
+            return re.findall(r'\d+', b) == re.findall(r'\d+', s)
+        return False
+
     # Build archived → replacements map
     archived_to_replacements: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
@@ -126,7 +164,7 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
             archived_to_replacements[oid] = [(by_code[code]["id"], 1.0)]
             continue
 
-        # Strategy 2: name-prefix siblings in same plan (handles splits)
+        # Strategy 2: fuzzy name-prefix siblings in same plan (handles splits + typos)
         nombre = r["nombre"] or ""
         base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
         plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
@@ -134,12 +172,14 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
         if base and plan:
             siblings = [
                 s for s in by_plan.get(plan, [])
-                if s["active"] and s["nombre"].lower().startswith(base.lower())
+                if s["active"] and _matches(base, _stem(s["nombre"]))
             ]
             if siblings:
                 fraction = 1.0 / len(siblings)
                 archived_to_replacements[oid] = [(s["id"], fraction) for s in siblings]
-                log.info(f"CC {oid} ({nombre}) → split {len(siblings)} hermanos: {[s['id'] for s in siblings]}")
+                log.info(f"CC {oid} ({nombre!r}) → split {len(siblings)} hermanos: {[s['id'] for s in siblings]}")
+            else:
+                log.warning(f"CC {oid} ({nombre!r}) archivado sin reemplazo detectado")
 
     log.info(f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_replacements)}")
     return by_code, archived_to_replacements
@@ -187,6 +227,27 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, li
                         updated[kid] = pct
                 if changed:
                     to_fix.append((json.dumps(updated), code))
+
+    # Second pass: fix AppSheet-native rows (id_cc not matching any Odoo code)
+    # e.g. multi-CC distributions entered manually in AppSheet with their own IDs
+    already_processed = set(odoo.keys())
+    for id_cc, current in existing.items():
+        if id_cc in already_processed or not isinstance(current, dict):
+            continue
+        updated: dict[str, float] = {}
+        changed = False
+        for kid, pct in current.items():
+            if kid == "":
+                continue
+            if kid not in active_ids and kid in archived_to_replacements:
+                for repl_id, fraction in archived_to_replacements[kid]:
+                    updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
+                changed = True
+                log.info(f"tarjas_cc [{id_cc}]: {kid} ({pct}%) → {archived_to_replacements[kid]}")
+            else:
+                updated[kid] = pct
+        if changed:
+            to_fix.append((json.dumps(updated), id_cc))
 
     now_iso = datetime.datetime.utcnow().isoformat()
     with conn.cursor() as cur:
