@@ -66,13 +66,15 @@ def _pg_conn():
     return psycopg2.connect(host=host, port=int(os.environ.get("DB_PORT", 5432)), **kwargs)
 
 
-def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, str]]:
+def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[tuple[str, float]]]]:
     """
     Fetch ALL Odoo CCs (active + archived) and return:
-      by_code: {code → {id, nombre, company_id}} — active CCs only, used for insertions
-      archived_to_active: {archived_id → active_id} — replacement map for stale IDs
+      by_code: {code → {id, nombre, company_id}} — active CCs only, for insertions
+      archived_to_replacements: {archived_id → [(active_id, fraction), ...]}
+        - 1:1 when same code exists in active CCs
+        - 1:N when CC was split (e.g. CC-421 → ORIENTE + PONIENTE), fraction = 1/N
     """
-    rows = bq.query("""
+    rows = list(bq.query("""
         SELECT
           CAST(id AS STRING) AS id,
           COALESCE(
@@ -82,39 +84,68 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, str]]
           ) AS nombre,
           code,
           company_id,
-          active
+          active,
+          CAST(root_plan_id AS STRING) AS root_plan_id
         FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
-        WHERE code IS NOT NULL
-          AND TRIM(code) != ''
-    """).result()
+    """).result())
 
     by_code: dict[str, dict] = {}
-    id_to_code: dict[str, str] = {}
+    by_plan: dict[str, list[dict]] = {}
+    active_ids: set[str] = set()
 
     for r in rows:
-        code = str(r["code"]).strip()
         odoo_id = str(r["id"])
-        id_to_code[odoo_id] = code
-        if r["active"] and code not in by_code:
-            by_code[code] = {
-                "id": odoo_id,
-                "nombre": r["nombre"],
-                "company_id": r["company_id"],
-            }
+        code = str(r["code"]).strip() if r["code"] else None
+        plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
 
-    # Build map: archived_id → active_id (same code)
-    active_ids = {info["id"] for info in by_code.values()}
-    archived_to_active: dict[str, str] = {
-        oid: by_code[code]["id"]
-        for oid, code in id_to_code.items()
-        if oid not in active_ids and code in by_code
-    }
+        if r["active"]:
+            active_ids.add(odoo_id)
+            if code and code not in by_code:
+                by_code[code] = {
+                    "id": odoo_id,
+                    "nombre": r["nombre"],
+                    "company_id": r["company_id"],
+                }
 
-    log.info(f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_active)}")
-    return by_code, archived_to_active
+        if plan:
+            by_plan.setdefault(plan, []).append({
+                "id": odoo_id, "code": code, "active": r["active"],
+                "nombre": r["nombre"] or "", "root_plan_id": plan,
+            })
+
+    # Build archived → replacements map
+    archived_to_replacements: dict[str, list[tuple[str, float]]] = {}
+    for r in rows:
+        oid = str(r["id"])
+        if r["active"]:
+            continue
+        code = str(r["code"]).strip() if r["code"] else None
+
+        # Strategy 1: direct code match
+        if code and code in by_code:
+            archived_to_replacements[oid] = [(by_code[code]["id"], 1.0)]
+            continue
+
+        # Strategy 2: name-prefix siblings in same plan (handles splits)
+        nombre = r["nombre"] or ""
+        base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
+        plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
+
+        if base and plan:
+            siblings = [
+                s for s in by_plan.get(plan, [])
+                if s["active"] and s["nombre"].lower().startswith(base.lower())
+            ]
+            if siblings:
+                fraction = 1.0 / len(siblings)
+                archived_to_replacements[oid] = [(s["id"], fraction) for s in siblings]
+                log.info(f"CC {oid} ({nombre}) → split {len(siblings)} hermanos: {[s['id'] for s in siblings]}")
+
+    log.info(f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_replacements)}")
+    return by_code, archived_to_replacements
 
 
-def sync_tarjas_cc(odoo: dict[str, dict], archived_to_active: dict[str, str], conn) -> None:
+def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, list[tuple[str, float]]], conn) -> None:
     active_ids = {info["id"] for info in odoo.values()}
 
     with conn.cursor() as cur:
@@ -139,20 +170,19 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_active: dict[str, str], co
             stored_keys = [k for k in current.keys() if k != ""] if isinstance(current, dict) else []
 
             if not stored_keys or list(current.keys()) == [""]:
-                # Empty or blank-key mapping → fill with active ID
                 to_fix.append((new_json, code))
             else:
-                # Replace any archived IDs preserving their percentages
-                updated = {}
+                # Replace archived IDs; support 1:N splits (pct divided evenly)
+                updated: dict[str, float] = {}
                 changed = False
                 for kid, pct in current.items():
                     if kid == "":
                         continue
-                    if kid not in active_ids and kid in archived_to_active:
-                        replacement = archived_to_active[kid]
-                        updated[replacement] = pct
+                    if kid not in active_ids and kid in archived_to_replacements:
+                        for repl_id, fraction in archived_to_replacements[kid]:
+                            updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
                         changed = True
-                        log.info(f"tarjas_cc [{code}]: {kid} → {replacement} ({pct}%)")
+                        log.info(f"tarjas_cc [{code}]: {kid} ({pct}%) → {archived_to_replacements[kid]}")
                     else:
                         updated[kid] = pct
                 if changed:

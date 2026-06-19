@@ -381,13 +381,13 @@ _BQ_ALL_CC_QUERY = """
       CAST(id AS STRING) AS id,
       code,
       active,
+      CAST(root_plan_id AS STRING) AS root_plan_id,
       COALESCE(
         JSON_VALUE(name, '$.es_CL'),
         JSON_VALUE(name, '$.en_US'),
         CAST(id AS STRING)
       ) AS nombre
     FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
-    WHERE code IS NOT NULL AND TRIM(code) != ''
 """
 
 
@@ -649,35 +649,88 @@ def _cc_display(cc_ids: list[str], odoo_names: dict[str, str]) -> str:
     return " / ".join(parts)
 
 
+def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]:
+    """
+    Build archived_id → [(replacement_id, fraction), ...] map.
+
+    Strategy (in order):
+    1. Direct code match: archived CC has same code as an active CC → 1:1 replacement
+    2. Name-prefix siblings in same root_plan: archived name stripped of ' CC-NNN' suffix
+       matches the start of N active CCs in the same plan → split evenly (1/N each)
+    """
+    by_code: dict[str, str] = {}          # code → active_id
+    by_plan: dict[str, list[dict]] = {}   # root_plan_id → list of all rows
+    active_ids: set[str] = set()
+
+    for r in bq_rows:
+        oid = str(r["id"])
+        code = str(r["code"]).strip() if r["code"] else None
+        plan = str(r["root_plan_id"]) if r.get("root_plan_id") else None
+
+        if r["active"]:
+            active_ids.add(oid)
+            if code and code not in by_code:
+                by_code[code] = oid
+
+        if plan:
+            by_plan.setdefault(plan, []).append({
+                "id": oid, "code": code, "active": r["active"],
+                "nombre": r["nombre"] or "", "root_plan_id": plan,
+            })
+
+    replacements: dict[str, list[tuple[str, float]]] = {}
+    for r in bq_rows:
+        oid = str(r["id"])
+        if r["active"]:
+            continue
+
+        code = str(r["code"]).strip() if r["code"] else None
+
+        # Strategy 1: direct code replacement
+        if code and code in by_code:
+            replacements[oid] = [(by_code[code], 1.0)]
+            continue
+
+        # Strategy 2: name-prefix siblings in same plan
+        nombre = r["nombre"] or ""
+        base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
+        plan = str(r.get("root_plan_id") or "")
+
+        if base and plan:
+            siblings = [
+                s for s in by_plan.get(plan, [])
+                if s["active"] and s["nombre"].lower().startswith(base.lower())
+            ]
+            if siblings:
+                fraction = 1.0 / len(siblings)
+                replacements[oid] = [(s["id"], fraction) for s in siblings]
+
+    return replacements
+
+
 @router.post("/api/tarjas/sync-cc")
 async def trigger_cc_sync():
     """
     Sincroniza tarjas_cc.valor_odoo contra los CC activos en Odoo (BigQuery).
-    Reemplaza IDs archivados por su equivalente activo (mismo código), preservando
-    los porcentajes en distribuciones multi-CC.
+    Detecta IDs archivados y los reemplaza por sus equivalentes activos:
+    - 1:1 si tienen mismo código en Odoo
+    - 1:N si el CC fue dividido (ej. CC-421 → ORIENTE + PONIENTE), repartiendo el % equitativamente
     """
-    # 1. Fetch ALL CC (active + archived) to build archived → active replacement map
+    # 1. Fetch ALL CC (active + archived) from BigQuery
     try:
         bq = _get_bq_client()
         bq_rows = list(bq.query(_BQ_ALL_CC_QUERY).result())
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"BigQuery no disponible: {exc}")
 
-    by_code: dict[str, dict] = {}   # code → info (active only)
-    id_to_code: dict[str, str] = {} # id → code (all)
-    for r in bq_rows:
-        code = str(r["code"]).strip()
-        oid = str(r["id"])
-        id_to_code[oid] = code
-        if r["active"] and code not in by_code:
-            by_code[code] = {"id": oid, "nombre": r["nombre"]}
+    active_ids = {str(r["id"]) for r in bq_rows if r["active"]}
+    archived_to_replacements = _build_replacements_map(bq_rows)
 
-    active_ids = {info["id"] for info in by_code.values()}
-    archived_to_active = {
-        oid: by_code[code]["id"]
-        for oid, code in id_to_code.items()
-        if oid not in active_ids and code in by_code
-    }
+    # For filling empty mappings (by code)
+    by_code: dict[str, str] = {}
+    for r in bq_rows:
+        if r["active"] and r["code"] and str(r["code"]).strip() not in by_code:
+            by_code[str(r["code"]).strip()] = str(r["id"])
 
     # 2. Fetch current tarjas_cc
     try:
@@ -708,16 +761,17 @@ async def trigger_cc_sync():
             if not stored_keys or list(stored.keys()) == [""]:
                 # Empty → fill with active ID if code is known
                 if code in by_code:
-                    to_fix.append((_json.dumps({by_code[code]["id"]: 100}), id_cc))
+                    to_fix.append((_json.dumps({by_code[code]: 100}), id_cc))
             else:
-                # Replace any archived IDs preserving their percentages
-                updated = {}
+                # Replace archived IDs; support 1:N splits (pct divided evenly)
+                updated: dict[str, float] = {}
                 changed = False
                 for kid, pct in stored.items():
                     if kid == "":
                         continue
-                    if kid not in active_ids and kid in archived_to_active:
-                        updated[archived_to_active[kid]] = pct
+                    if kid not in active_ids and kid in archived_to_replacements:
+                        for repl_id, fraction in archived_to_replacements[kid]:
+                            updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
                         changed = True
                     else:
                         updated[kid] = pct
