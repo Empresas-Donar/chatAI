@@ -47,6 +47,12 @@ SELECT DISTINCT
     SUM(p.total_pagar) OVER (
         PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
     )                                                                       AS total_labor,
+    COALESCE(SUM(
+        CASE WHEN p.horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
+             THEN p.horas_trabajadas::NUMERIC ELSE 0 END
+    ) OVER (
+        PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
+    ), 0)                                                                   AS horas_trabajadas,
     ROUND(
         SUM(p.total_pagar) OVER (
             PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor

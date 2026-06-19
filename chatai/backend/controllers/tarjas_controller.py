@@ -29,10 +29,12 @@ Routes:
   GET  /api/tarjas/notas                → Report data
 """
 
+import base64
 import csv
 import datetime
 import decimal
 import io
+from pathlib import Path
 import logging
 import re
 
@@ -57,6 +59,20 @@ _templates: Jinja2Templates = None
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
+
+def _fmt_clp(v) -> str:
+    try:
+        return f"${int(float(v or 0)):,}".replace(",", ".")
+    except Exception:
+        return "-"
+
+def _fmt_date_display(iso: str) -> str:
+    try:
+        d = datetime.date.fromisoformat(iso)
+        months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
+        return f"{d.day} {months[d.month-1]} {d.year}"
+    except Exception:
+        return iso
 
 def _empresa_to_campo(empresa: str | None) -> str | None:
     return empresa or None
@@ -110,6 +126,14 @@ def _rows_to_dicts(cur):
 # PDF helpers
 # ===========================================================================
 
+def _logo_b64() -> str:
+    path = Path(__file__).parent.parent.parent / "frontend" / "static" / "img" / "donar_logo.png"
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except OSError:
+        return ""
+
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 10mm; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111111; margin: 0; }
@@ -136,11 +160,23 @@ def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, filters: dict
     for k, v in filters.items():
         if v:
             chips += f'<span class="chip"><b>{k}:</b> {v}</span> '
+    logo = _logo_b64()
+    logo_cell = (
+        f'<td style="border:none;width:90px;padding:4px 8px;background:#1e293b;vertical-align:middle">'
+        f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" /></td>'
+    ) if logo else ""
     return f"""
-    <div class="ph">
-      <h1>{title}</h1>
-      <p class="ph-sub">Generado el {now}</p>
-    </div>
+    <table style="width:100%;border:none;margin-bottom:6px">
+      <tr>
+        {logo_cell}
+        <td style="border:none;padding:0 0 0 10px;vertical-align:middle">
+          <div class="ph">
+            <h1>{title}</h1>
+            <p class="ph-sub">Generado el {now}</p>
+          </div>
+        </td>
+      </tr>
+    </table>
     <div class="ph-chips">
       <span class="chip"><b>Desde:</b> {fecha_inicio}</span>
       <span class="chip"><b>Hasta:</b> {fecha_termino}</span>
@@ -264,12 +300,22 @@ async def get_tarjas_general(
 
     try:
         with conn.cursor() as cur:
+            _horas_expr = """
+                NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
+                               THEN horas_trabajadas::numeric ELSE 0 END), 0)
+            """
+            _horas_sum = """
+                COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
+                               THEN horas_trabajadas::numeric ELSE 0 END), 0)
+            """
             # 1) Average earnings per labor
             cur.execute(f"""
                 SELECT
                     labor,
-                    ROUND(AVG(total_trabajado)::numeric, 2) AS avg_rate,
-                    COALESCE(SUM(total_trabajado), 0)       AS total
+                    ROUND(AVG(total_trabajado)::numeric, 0)                        AS promedio_diario,
+                    ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0)        AS ganancia_hora,
+                    ROUND(({_horas_sum})::numeric, 1)                              AS total_horas,
+                    COALESCE(SUM(total_trabajado), 0)                              AS total
                 FROM appsheet.tarjas_pagos
                 {where}
                 GROUP BY labor
@@ -282,8 +328,10 @@ async def get_tarjas_general(
                 SELECT
                     trabajador,
                     contratista,
-                    ROUND(AVG(total_trabajado)::numeric, 2) AS avg_rate,
-                    COALESCE(SUM(total_trabajado), 0)       AS total
+                    ROUND(AVG(total_trabajado)::numeric, 0)                        AS promedio_diario,
+                    ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0)        AS ganancia_hora,
+                    ROUND(({_horas_sum})::numeric, 1)                              AS total_horas,
+                    COALESCE(SUM(total_trabajado), 0)                              AS total
                 FROM appsheet.tarjas_pagos
                 {where}
                 GROUP BY trabajador, contratista
@@ -395,12 +443,13 @@ def _query_detalle_rows(cur, where, params):
             "Nombre Labor"                                            AS labor,
             "CC"                                                      AS centro_costo,
             SUM(jornadas)                                             AS jornadas,
+            SUM(horas_trabajadas)                                     AS horas_trabajadas,
             CASE WHEN SUM(jornadas) > 0
                  THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
                  ELSE NULL END                                        AS total_unitario,
             SUM(total_labor)                                          AS costo_total,
-            CASE WHEN SUM(jornadas) > 0
-                 THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 0)
+            CASE WHEN SUM(horas_trabajadas) > 0
+                 THEN ROUND((SUM(total_labor) / SUM(horas_trabajadas))::numeric, 0)
                  ELSE NULL END                                        AS costo_hora,
             ROUND(
                 SUM(total_labor)::numeric
@@ -1097,9 +1146,10 @@ async def get_tarjas_resumen_horas_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT trabajador, COALESCE(SUM(horas_trabajadas::numeric), 0)::int AS total "
+                "SELECT trabajador, COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
+                "THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS total "
                 "FROM appsheet.tarjas_pagos "
-                "WHERE trabajador IS NOT NULL AND horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
+                "WHERE trabajador IS NOT NULL "
                 "GROUP BY trabajador ORDER BY total DESC"
             )
             trabajadores = _rows_to_dicts(cur)
@@ -1167,8 +1217,8 @@ async def get_tarjas_resumen_horas(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_trabajadas::numeric ELSE 0 END), 0)::int AS horas_trabajadas "
+                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS horas_trabajadas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
@@ -1533,10 +1583,16 @@ async def download_tarjas_general_excel(
         contratista=contratista, nombre_campo=_empresa_to_campo(empresa),
     )
     try:
+        _horas_expr = """
+            NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
+                           THEN horas_trabajadas::numeric ELSE 0 END), 0)
+        """
         with conn.cursor() as cur:
             cur.execute(f"""
                 SELECT trabajador, contratista, labor, tipo_pago,
-                       ROUND(AVG(total_trabajado)::numeric,2) AS promedio,
+                       ROUND(AVG(total_trabajado)::numeric, 0)                  AS promedio_diario,
+                       ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0)  AS ganancia_hora,
+                       ROUND(SUM(total_pagar)::numeric    / {_horas_expr}, 0)   AS costo_hora,
                        COALESCE(SUM(total_trabajado),0) AS total
                 FROM appsheet.tarjas_pagos {where}
                 GROUP BY trabajador, contratista, labor, tipo_pago
@@ -1546,14 +1602,17 @@ async def download_tarjas_general_excel(
     finally:
         conn.close()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "General"
-    _apply_header(ws, ["Trabajador", "Contratista", "Labor", "Tipo de pago", "Promedio", "Total"])
-    money = '#,##0'; money2 = '#,##0.00'
+    _apply_header(ws, ["Trabajador", "Contratista", "Labor", "Tipo de pago",
+                       "Promedio diario", "Ganancia por hora", "Costo por hora", "Total"])
+    money = '#,##0'
     for i, r in enumerate(rows, 2):
         ws.cell(i, 1, r["trabajador"]); ws.cell(i, 2, r["contratista"])
         ws.cell(i, 3, r["labor"]); ws.cell(i, 4, r["tipo_pago"])
-        c5 = ws.cell(i, 5, float(r["promedio"] or 0)); c5.number_format = money2
-        c6 = ws.cell(i, 6, float(r["total"] or 0)); c6.number_format = money
-    for col, w in zip("ABCDEF", [28, 24, 28, 16, 14, 14]):
+        c5 = ws.cell(i, 5, float(r["promedio_diario"] or 0)); c5.number_format = money
+        c6 = ws.cell(i, 6, float(r["ganancia_hora"] or 0) if r["ganancia_hora"] is not None else None); c6.number_format = money
+        c7 = ws.cell(i, 7, float(r["costo_hora"] or 0) if r["costo_hora"] is not None else None); c7.number_format = money
+        c8 = ws.cell(i, 8, float(r["total"] or 0)); c8.number_format = money
+    for col, w in zip("ABCDEFGH", [28, 24, 28, 16, 14, 14, 14, 14]):
         ws.column_dimensions[col].width = w
     return _excel_response(wb, f"tarjas_general_{fecha_inicio}_{fecha_termino}.xlsx")
 
@@ -1777,8 +1836,8 @@ async def download_tarjas_resumen_horas_excel(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_trabajadas::numeric ELSE 0 END),0)::int AS horas "
+                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_extras::numeric ELSE 0 END),0)::numeric AS horas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date", params)
@@ -1965,33 +2024,68 @@ async def download_tarjas_general_pdf(
         fecha_inicio, fecha_termino, centro_costo, tipo_pago, labor,
         contratista=contratista, nombre_campo=_empresa_to_campo(empresa),
     )
+    _horas_expr = "NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$' THEN horas_trabajadas::numeric ELSE 0 END), 0)"
+    _horas_sum  = "COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$' THEN horas_trabajadas::numeric ELSE 0 END), 0)"
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT trabajador, contratista, ROUND(AVG(total_trabajado)::numeric,0) AS promedio,
-                       COALESCE(SUM(total_trabajado),0) AS total
+                SELECT labor,
+                       ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
+                       ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
+                       ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
+                       COALESCE(SUM(total_trabajado), 0)                 AS total
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY labor ORDER BY total DESC
+            """, params)
+            labor_rows = _rows_to_dicts(cur)
+            cur.execute(f"""
+                SELECT trabajador, contratista,
+                       ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
+                       ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
+                       ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
+                       COALESCE(SUM(total_trabajado), 0)                 AS total
                 FROM appsheet.tarjas_pagos {where}
                 GROUP BY trabajador, contratista ORDER BY total DESC
             """, params)
-            rows = _rows_to_dicts(cur)
+            ranking_rows = _rows_to_dicts(cur)
     finally:
         conn.close()
 
-    fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".")
-    rows_html = "".join(
+    fmtCLP  = lambda v: f"${float(v):,.0f}".replace(",", ".") if v is not None else "—"
+    fmtHrs  = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
+
+    labor_html = "".join(
+        f'<tr><td>{r["labor"]}</td>'
+        f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
+        f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
+        f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
+        f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
+        for r in labor_rows
+    )
+    ranking_html = "".join(
         f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td>'
-        f'<td class="num">{fmtCLP(r["promedio"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
-        for r in rows
+        f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
+        f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
+        f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
+        f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
+        for r in ranking_rows
     )
     header = _pdf_header("General — Tarjas", fecha_inicio, fecha_termino,
-                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo, "Tipo de pago": tipo_pago, "Labor": labor})
+                         {"Empresa": empresa, "Contratista": contratista, "CC": centro_costo,
+                          "Tipo de pago": tipo_pago, "Labor": labor})
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
+    <p class="section-title">Ganancia promedio por labor</p>
+    <table><thead>
+      <tr><th>Labor</th><th class="num">Promedio diario</th>
+      <th class="num">Ganancia por hora</th><th class="num">Horas</th><th class="num">Total</th></tr>
+    </thead><tbody>{labor_html}</tbody></table>
     <p class="section-title">Ranking por persona</p>
     <table><thead>
-      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Promedio</th><th class="num">Total</th></tr>
-    </thead><tbody>{rows_html}</tbody></table>
+      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Promedio diario</th>
+      <th class="num">Ganancia por hora</th><th class="num">Horas</th><th class="num">Total</th></tr>
+    </thead><tbody>{ranking_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"general_{fecha_inicio}_{fecha_termino}.pdf")
 
@@ -2020,10 +2114,12 @@ async def download_tarjas_detalle_pdf(
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
+    fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
     rows_html = "".join(
         f'<tr><td>{r["tipo_pago"]}</td><td>{r["labor"]}</td><td>{r["centro_costo"]}</td>'
         f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
         f'<td class="num">{r["jornadas"]}</td>'
+        f'<td class="num">{fmtHrs(r["horas_trabajadas"])}</td>'
         f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
         f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
         f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
@@ -2037,7 +2133,8 @@ async def download_tarjas_detalle_pdf(
     <table><thead>
       <tr><th>Tipo pago</th><th>Labor</th><th>CC</th>
       <th class="num">Costo/hora</th><th class="num">Jornadas</th>
-      <th class="num">Unitario</th><th class="num">Total</th><th class="num">% pago</th></tr>
+      <th class="num">Horas</th><th class="num">Unitario</th>
+      <th class="num">Total</th><th class="num">% pago</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
@@ -2117,8 +2214,8 @@ async def download_tarjas_resumen_horas_pdf(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_trabajadas::numeric ELSE 0 END),0)::int AS horas "
+                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
+                f"THEN horas_extras::numeric ELSE 0 END),0)::numeric AS horas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
@@ -2296,55 +2393,322 @@ async def export_tarjas_notas_odoo(
     campo: str = Query(...),
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
+    nc_total: int = Query(None, description="Monto total NC para redistribución proporcional"),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
 
     try:
         conn = get_connection()
-    except Exception as exc:
+    except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
 
+    # Auto-sync unmapped labores (same as purchase orders export)
+    from .purchase_orders_controller import _sync_labores
+    try:
+        _sync_labores(conn, fecha_inicio, fecha_termino, contratista, campo)
+    except Exception as exc:
+        logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
+
+    excluded_amount = 0.0
     try:
         with conn.cursor() as cur:
+            # Sum excluded rows (no product_id or unmapped CC)
             cur.execute("""
-                SELECT
-                    "Vendedor",
-                    "Lineas del pedido/Producto/Nombre",
-                    "Lineas del pedido/Cantidad",
-                    "Lineas del pedido/Código de Distribución Analítica/Código",
-                    "Lineas del pedido/Precio un.",
-                    "partner_id",
-                    "order_line/product_id",
-                    "order_line/product_qty",
-                    "order_line/analytic_distribution",
-                    "order_line/price_unit"
+                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
                 FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor"     = %s
-                  AND "nombre_campo" = %s
-                  AND "fecha" BETWEEN %s AND %s
-                ORDER BY "fecha",
-                         "Lineas del pedido/Código de Distribución Analítica/Código",
-                         "Lineas del pedido/Producto/Nombre"
+                  AND nombre_campo   = %s
+                  AND fecha BETWEEN %s AND %s
+                  AND (
+                      "order_line/product_id" IS NULL
+                      OR "order_line/analytic_distribution" LIKE '%%"": %%'
+                  )
             """, (contratista, campo, fecha_inicio, fecha_termino))
-            columns = [d[0] for d in cur.description]
+            excluded_amount = float(cur.fetchone()[0] or 0)
+
+            # Group and aggregate valid rows — same structure as purchase orders
+            cur.execute("""
+                SELECT
+                    "partner_id",
+                    "order_line/product_id",
+                    SUM("order_line/product_qty")               AS qty,
+                    "order_line/analytic_distribution",
+                    CASE WHEN SUM("order_line/product_qty") > 0
+                         THEN ROUND(
+                             SUM("order_line/product_qty" * "order_line/price_unit")
+                             / SUM("order_line/product_qty"), 2)
+                         ELSE NULL END                          AS price_unit
+                FROM appsheet.tarjas_reporte_odoo
+                WHERE "Vendedor"      = %s
+                  AND "nombre_campo"  = %s
+                  AND "fecha" BETWEEN %s AND %s
+                  AND "order_line/product_id" IS NOT NULL
+                  AND "order_line/analytic_distribution" NOT LIKE '%%"": %%'
+                GROUP BY
+                    "partner_id",
+                    "order_line/product_id",
+                    "order_line/analytic_distribution"
+                ORDER BY "order_line/product_id"
+            """, (contratista, campo, fecha_inicio, fecha_termino))
             rows = cur.fetchall()
     finally:
         conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=",", quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(columns)
-    for row in rows:
-        writer.writerow([str(v) if v is not None else "" for v in row])
+    # If nc_total provided, scale price_unit proportionally
+    if nc_total and nc_total > 0 and rows:
+        original_total = sum(
+            float(qty or 0) * float(price or 0)
+            for _, _, qty, _, price in rows
+        )
+        scale = nc_total / original_total if original_total else 1.0
+        rows = [
+            (partner, product, qty, analytic,
+             round(float(price) * scale, 2) if price is not None else None)
+            for partner, product, qty, analytic, price in rows
+        ]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hoja1"
+
+    headers = [
+        "partner_id",
+        "order_line/product_id",
+        "order_line/product_qty",
+        "order_line/analytic_distribution",
+        "order_line/price_unit",
+    ]
+    ws.append(headers)
+
+    for i, (partner_id, product_id, qty, analytic, price) in enumerate(rows):
+        ws.append([
+            partner_id if i == 0 else None,
+            product_id,
+            float(qty) if qty is not None else None,
+            analytic,
+            float(price) if price is not None else None,
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
 
     filename = (
         f"odoo_nota_{contratista.replace(' ', '_')}_{campo.replace(' ', '_')}"
-        f"_{fecha_inicio}_{fecha_termino}.csv"
+        f"_{fecha_inicio}_{fecha_termino}.xlsx"
     )
-    output.seek(0)
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Access-Control-Expose-Headers": "X-Excluded-Amount",
+    }
+    if excluded_amount > 0:
+        response_headers["X-Excluded-Amount"] = str(int(excluded_amount))
+
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=response_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Nota de crédito print-PDF  (opens in new tab, same layout as the web page)
+# ---------------------------------------------------------------------------
+
+_NOTA_PDF_CSS = """
+@page { size: A4 landscape; margin: 12mm 14mm; }
+body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; margin: 0; }
+.hdr-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1; margin-bottom: 10px; }
+.hdr-logo  { width: 120px; padding: 8px 12px; vertical-align: middle; text-align: center;
+             border-right: 1px solid #e2e8f0; background: #1e293b; }
+.hdr-logo-img { width: 100px; height: auto; }
+.hdr-mid   { padding: 10px 14px; vertical-align: top; }
+.hdr-right { width: 190px; padding: 10px 14px; vertical-align: top; text-align: right;
+             border-left: 1px solid #e2e8f0; }
+.co-name   { font-size: 14pt; font-weight: 800; margin: 0 0 3px; }
+.co-sub    { font-size: 9pt; font-weight: 600; margin: 0 0 2px; }
+.co-week   { font-size: 7.5pt; color: #64748b; margin: 0; }
+.dt-row    { margin-bottom: 5px; font-size: 8pt; }
+.dt-label  { font-weight: 600; }
+.dt-val    { background: #fef9c3; padding: 1px 7px; font-weight: 700; }
+.grand-tot { font-size: 15pt; font-weight: 800; margin-top: 8px; }
+.glosa-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1; margin-bottom: 10px; }
+.glosa-title { background: #1e293b; color: white; text-align: center;
+               padding: 6px; font-weight: 700; font-size: 8pt; letter-spacing: .5px; }
+.glosa-body  { background: #fef08a; text-align: center; padding: 8px 12px;
+               font-size: 8.5pt; font-weight: 700; color: #1e293b; }
+.totals-row  { border-top: 2px solid #1e293b; }
+.tot-cell    { text-align: center; padding: 8px 6px; width: 33%;
+               border-right: 1px solid #e2e8f0; }
+.tot-cell-hl { background: #fef08a; }
+.tot-label   { font-size: 7pt; font-weight: 700; color: #64748b; text-transform: uppercase; }
+.tot-value   { font-size: 13pt; font-weight: 800; color: #1e293b; margin-top: 2px; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; margin-top: 8px; }
+.detail-table thead tr { background: #1d4ed8; color: white; }
+.detail-table thead th { padding: 6px 8px; text-align: left; font-weight: bold; }
+.detail-table thead th.num { text-align: right; }
+.detail-table tbody tr.even { background: #f8fafc; }
+.detail-table tbody td { padding: 4px 8px; border-bottom: 1px solid #f1f5f9; }
+.detail-table td.num { text-align: right; }
+.badge-trato { color: #1d4ed8; font-weight: 700; }
+.badge-aldia { color: #15803d; font-weight: 700; }
+"""
+
+
+@router.get("/api/tarjas/notas/print-pdf")
+async def notas_print_pdf(
+    contratista: str = Query(...),
+    campo: str = Query(None),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    nc_total: int = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    filters = ["fecha::date BETWEEN %s AND %s", "contratista = %s", "estado = 'Aprobado'"]
+    params: list = [fecha_inicio, fecha_termino, contratista]
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT tipo_pago, cuartel_cc AS cc, labor,
+                       COUNT(*) AS jornadas,
+                       ROUND(CASE
+                         WHEN LOWER(TRIM(tipo_pago)) IN ('a trato','trato')
+                           THEN AVG(NULLIF(total_trato, 0))
+                         ELSE AVG(NULLIF(total_jornada, 0))
+                       END::numeric, 0) AS total_unitario,
+                       COALESCE(SUM(total_pagar), 0) AS total_pagar
+                FROM appsheet.tarjas_pagos
+                {where}
+                GROUP BY tipo_pago, cuartel_cc, labor
+                ORDER BY
+                    CASE WHEN LOWER(TRIM(tipo_pago)) IN ('a trato','trato') THEN 0 ELSE 1 END,
+                    cuartel_cc, labor
+            """, params)
+            rows = cur.fetchall()
+
+            cur.execute(f"SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos {where} LIMIT 1", params)
+            r = cur.fetchone()
+            nombre_campo = r[0] if r else (campo or "")
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sin datos para los filtros indicados")
+
+    total_general = sum(float(r[5] or 0) for r in rows)
+
+    # Apply NC redistribution if requested (largest-remainder method)
+    if nc_total and nc_total > 0 and total_general > 0:
+        scale = nc_total / total_general
+        exact = [float(r[5] or 0) * scale for r in rows]
+        floored = [int(v) for v in exact]
+        remainder = nc_total - sum(floored)
+        fracs = sorted(range(len(exact)), key=lambda i: -(exact[i] - floored[i]))
+        for i in range(remainder):
+            floored[fracs[i]] += 1
+        rows = [(*r[:5], floored[i]) for i, r in enumerate(rows)]
+        total_general = nc_total
+
+    total_trato = sum(float(r[5] or 0) for r in rows
+                      if (r[0] or "").lower().strip() in ("a trato", "trato"))
+    total_aldia = total_general - total_trato
+
+    d1 = _fmt_date_display(fecha_inicio)
+    d2 = _fmt_date_display(fecha_termino)
+    glosa  = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
+    semana = f"Semana desde {d1} al {d2}"
+    empresa_display = f"AGRÍCOLA DONAR — {nombre_campo.upper()}" if nombre_campo else "AGRÍCOLA DONAR"
+
+    rows_html = ""
+    for i, (tipo, cc, labor, jornadas, unitario, total) in enumerate(rows):
+        is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
+        tipo_label = "Trato" if is_trato else "Al día"
+        tipo_cls   = "badge-trato" if is_trato else "badge-aldia"
+        even_cls   = "even" if i % 2 == 0 else ""
+        rows_html += f"""<tr class="{even_cls}">
+          <td><span class="{tipo_cls}">{tipo_label}</span></td>
+          <td>{cc or ""}</td>
+          <td>{labor or ""}</td>
+          <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
+          <td class="num">{_fmt_clp(unitario)}</td>
+          <td class="num">{_fmt_clp(total)}</td>
+        </tr>"""
+
+    logo = _logo_b64()
+    logo_html = f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />' if logo else "EMPRESAS DONAR"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Nota de Crédito — {contratista}</title>
+<style>{_NOTA_PDF_CSS}</style>
+</head><body>
+
+<table class="hdr-table">
+  <tr>
+    <td class="hdr-logo">{logo_html}</td>
+    <td class="hdr-mid">
+      <p class="co-name">{empresa_display}</p>
+      <p class="co-sub">Contratista: {contratista}</p>
+      <p class="co-week">{semana}</p>
+    </td>
+    <td class="hdr-right">
+      <p class="dt-row"><span class="dt-label">Fecha Inicio&nbsp;&nbsp;</span>
+        <span class="dt-val">{d1}</span></p>
+      <p class="dt-row"><span class="dt-label">Fecha Término&nbsp;&nbsp;</span>
+        <span class="dt-val">{d2}</span></p>
+      <p class="grand-tot">{_fmt_clp(total_general)}</p>
+    </td>
+  </tr>
+</table>
+
+<table class="glosa-table">
+  <tr><td colspan="3" class="glosa-title">GLOSA</td></tr>
+  <tr><td colspan="3" class="glosa-body">{glosa}</td></tr>
+  <tr class="totals-row">
+    <td class="tot-cell"><div class="tot-label">Total a Trato</div>
+      <div class="tot-value">{_fmt_clp(total_trato)}</div></td>
+    <td class="tot-cell"><div class="tot-label">Total Al Día</div>
+      <div class="tot-value">{_fmt_clp(total_aldia)}</div></td>
+    <td class="tot-cell tot-cell-hl"><div class="tot-label">Total a Pagar</div>
+      <div class="tot-value">{_fmt_clp(total_general)}</div></td>
+  </tr>
+</table>
+
+<table class="detail-table">
+  <thead>
+    <tr>
+      <th>Tipo de Pago</th><th>CC</th><th>Nombre Labor</th>
+      <th class="num">Jornadas</th><th class="num">Precio Unitario</th>
+      <th class="num">Total a Pagar</th>
+    </tr>
+  </thead>
+  <tbody>{rows_html}</tbody>
+</table>
+
+</body></html>"""
+
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=buf)
+    buf.seek(0)
+    filename = (
+        f"nota_{contratista.replace(' ', '_')}_{(campo or 'all').replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.pdf"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

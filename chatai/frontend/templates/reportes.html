@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Descarga de Reportes{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/reportes.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Descarga de Reportes</h1>
+      <p>Selecciona los reportes que deseas descargar y aplica los filtros de fecha</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar rep-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Empresa / Campo</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div class="rep-filter-actions">
+      <button class="btn btn-primary" id="btn-download" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Descargar PDF
+      </button>
+      <span class="rep-count" id="rep-count">0 reportes seleccionados</span>
+    </div>
+  </div>
+
+  <!-- Selection controls -->
+  <div class="rep-controls">
+    <button class="btn btn-secondary btn-sm" id="btn-select-all">Seleccionar todos</button>
+    <button class="btn btn-secondary btn-sm" id="btn-clear-all">Quitar todos</button>
+  </div>
+
+  <!-- Report cards grouped by category -->
+  {% set categories = [] %}
+  {% for r in reports %}
+    {% if r.category not in categories %}
+      {% set _ = categories.append(r.category) %}
+    {% endif %}
+  {% endfor %}
+
+  {% for cat in categories %}
+  <div class="rep-category">
+    <div class="rep-category-header">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        {% if "Contratistas" in cat %}
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        {% else %}
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
+        {% endif %}
+      </svg>
+      {{ cat }}
+    </div>
+    <div class="rep-cards-grid">
+      {% for r in reports if r.category == cat %}
+      <label class="rep-card" data-id="{{ r.id }}">
+        <input type="checkbox" class="rep-checkbox" value="{{ r.id }}" />
+        <div class="rep-card-check">
+          <svg class="rep-check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <div class="rep-card-body">
+          <div class="rep-card-title">{{ r.label }}</div>
+          <div class="rep-card-desc">{{ r.description }}</div>
+        </div>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Loading overlay -->
+  <div class="rep-loading" id="rep-loading" style="display:none">
+    <div class="rep-loading-inner">
+      <div class="rep-spinner"></div>
+      <p>Generando PDF…</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/reportes.js?v={{ static_v }}"></script>
+{% endblock %}

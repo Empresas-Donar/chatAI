@@ -42,6 +42,7 @@ import controllers.despacho_controller as despacho
 import controllers.chat_controller as chat
 import controllers.looker_controller as looker
 import controllers.roles_controller as roles
+import controllers.reports_controller as reports
 
 logging.basicConfig(
     level=logging.INFO,
@@ -134,6 +135,7 @@ despacho.init(templates=templates)
 chat.init(templates=templates)
 looker.init(templates=templates)
 roles.init(templates=templates)
+reports.init(templates=templates)
 
 _auth = [Depends(require_auth)]
 
@@ -148,6 +150,7 @@ app.include_router(despacho.router,        dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
 app.include_router(looker.router,          dependencies=_auth)
 app.include_router(roles.router,           dependencies=_auth)
+app.include_router(reports.router,         dependencies=_auth)
 
 
 @app.get("/", dependencies=_auth)

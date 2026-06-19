@@ -14,6 +14,7 @@ Routes:
   POST /api/tarjas/sync-cc                → Trigger CC sync on demand
 """
 
+import base64
 import datetime
 import decimal
 import io
@@ -21,6 +22,7 @@ import json as _json
 import logging
 import os
 import re
+from pathlib import Path
 
 import openpyxl
 from xhtml2pdf import pisa
@@ -841,6 +843,14 @@ async def trigger_cc_sync():
 # Billing order PDF
 # ---------------------------------------------------------------------------
 
+def _logo_b64() -> str:
+    path = Path(__file__).parent.parent.parent / "frontend" / "static" / "img" / "donar_logo.png"
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except OSError:
+        return ""
+
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 14mm; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; margin: 0; }
@@ -848,13 +858,9 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 /* ── Header uses real <table> for xhtml2pdf compat ── */
 .hdr-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1;
              margin-bottom: 10px; }
-.hdr-logo  { width: 80px; padding: 10px 12px; vertical-align: middle; text-align: center;
-             border-right: 1px solid #e2e8f0; }
-.hdr-logo-box {
-  width: 58px; height: 58px; border: 2px solid #e2e8f0;
-  font-size: 7pt; font-weight: bold; color: #64748b; line-height: 1.4;
-  background: #f8fafc; text-align: center; padding-top: 14px;
-}
+.hdr-logo  { width: 120px; padding: 8px 12px; vertical-align: middle; text-align: center;
+             border-right: 1px solid #e2e8f0; background: #1e293b; }
+.hdr-logo-img { width: 100px; height: auto; }
 .hdr-mid   { padding: 10px 14px; vertical-align: top; }
 .hdr-right { width: 190px; padding: 10px 14px; vertical-align: top; text-align: right;
              border-left: 1px solid #e2e8f0; }
@@ -895,6 +901,17 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
   text-align: right; border: none; padding: 6px 8px;
 }
 .pivot-table tr.foot td:first-child { text-align: left; }
+
+/* ── Detail table (OC / notas print) ── */
+.detail-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; margin-top: 8px; }
+.detail-table thead tr { background: #1d4ed8; color: white; }
+.detail-table thead th { padding: 6px 8px; text-align: left; font-weight: bold; }
+.detail-table thead th.num { text-align: right; }
+.detail-table tbody tr.even { background: #f8fafc; }
+.detail-table tbody td { padding: 4px 8px; border-bottom: 1px solid #f1f5f9; }
+.detail-table td.num { text-align: right; }
+.badge-trato { color: #1d4ed8; font-weight: 700; }
+.badge-aldia { color: #15803d; font-weight: 700; }
 """
 
 
@@ -1009,6 +1026,9 @@ async def billing_order_pdf(
     foot_cells = "".join(f'<td>{_fmt_clp(col_totals[d])}</td>' for d in dates)
     foot_html = f'<tr class="foot"><td>Suma total</td>{foot_cells}<td>{_fmt_clp(grand_total)}</td></tr>'
 
+    logo = _logo_b64()
+    logo_html = f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />' if logo else "EMPRESAS DONAR"
+
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <title>Orden de Facturación — {contratista}</title>
@@ -1019,7 +1039,7 @@ async def billing_order_pdf(
 <table class="hdr-table">
   <tr>
     <td class="hdr-logo">
-      <div class="hdr-logo-box">EMPRESAS<br>DONAR</div>
+      {logo_html}
     </td>
     <td class="hdr-mid">
       <p class="co-name">{empresa}</p>
@@ -1087,6 +1107,139 @@ async def billing_order_pdf(
 
     filename = (
         f"facturacion_{contratista.replace(' ', '_')}_{empresa.replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.pdf"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# OC document print-PDF  (opens in new tab, same layout as the web page)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/purchase-orders/print-pdf")
+async def purchase_order_print_pdf(
+    contratista: str,
+    empresa: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT tipo_pago, "CC", "Nombre Labor",
+                       SUM(jornadas)                                              AS jornadas,
+                       CASE WHEN SUM(jornadas) > 0
+                            THEN ROUND(SUM(total_labor)::numeric / SUM(jornadas), 2)
+                            ELSE NULL END                                         AS total_unitario,
+                       SUM(total_labor)                                           AS total_labor
+                FROM appsheet.tarjas_reporte
+                WHERE contratista  = %s
+                  AND nombre_campo = %s
+                  AND fecha BETWEEN %s AND %s
+                GROUP BY tipo_pago, "CC", "Nombre Labor"
+                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
+            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sin datos para los filtros indicados")
+
+    total_trato  = sum(float(r[5] or 0) for r in rows if r[0] == _PAYMENT_TYPE_TRATO)
+    total_al_dia = sum(float(r[5] or 0) for r in rows if r[0] != _PAYMENT_TYPE_TRATO)
+    total_pagar  = total_trato + total_al_dia
+
+    d1 = _fmt_date_display(fecha_inicio)
+    d2 = _fmt_date_display(fecha_termino)
+    glosa  = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
+    semana = f"Semana desde {d1} al {d2}"
+
+    rows_html = ""
+    for i, (tipo, cc, labor, jornadas, unitario, total) in enumerate(rows):
+        is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
+        tipo_label = "Trato" if is_trato else "Al día"
+        tipo_cls   = "badge-trato" if is_trato else "badge-aldia"
+        even_cls   = "even" if i % 2 == 0 else ""
+        rows_html += f"""<tr class="{even_cls}">
+          <td><span class="{tipo_cls}">{tipo_label}</span></td>
+          <td>{cc or ""}</td>
+          <td>{labor or ""}</td>
+          <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
+          <td class="num">{_fmt_clp(unitario)}</td>
+          <td class="num">{_fmt_clp(total)}</td>
+        </tr>"""
+
+    logo = _logo_b64()
+    logo_html = f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />' if logo else "EMPRESAS DONAR"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Orden de Compra — {contratista}</title>
+<style>{_PDF_CSS}</style>
+</head><body>
+
+<table class="hdr-table">
+  <tr>
+    <td class="hdr-logo">{logo_html}</td>
+    <td class="hdr-mid">
+      <p class="co-name">AGRÍCOLA DONAR — {empresa.upper()}</p>
+      <p class="co-sub">Contratista: {contratista}</p>
+      <p class="co-week">{semana}</p>
+    </td>
+    <td class="hdr-right">
+      <p class="dt-row"><span class="dt-label">Fecha Inicio&nbsp;&nbsp;</span>
+        <span class="dt-val">{d1}</span></p>
+      <p class="dt-row"><span class="dt-label">Fecha Término&nbsp;&nbsp;</span>
+        <span class="dt-val">{d2}</span></p>
+      <p class="grand-tot">{_fmt_clp(total_pagar)}</p>
+    </td>
+  </tr>
+</table>
+
+<table class="glosa-table">
+  <tr><td colspan="3" class="glosa-title">GLOSA</td></tr>
+  <tr><td colspan="3" class="glosa-body">{glosa}</td></tr>
+  <tr class="totals-row">
+    <td class="tot-cell"><div class="tot-label">Total a Trato</div>
+      <div class="tot-value">{_fmt_clp(total_trato)}</div></td>
+    <td class="tot-cell"><div class="tot-label">Total Al Día</div>
+      <div class="tot-value">{_fmt_clp(total_al_dia)}</div></td>
+    <td class="tot-cell tot-cell-hl"><div class="tot-label">Total a Pagar</div>
+      <div class="tot-value">{_fmt_clp(total_pagar)}</div></td>
+  </tr>
+</table>
+
+<table class="detail-table">
+  <thead>
+    <tr>
+      <th>Tipo de Pago</th><th>CC</th><th>Nombre Labor</th>
+      <th class="num">Jornadas</th><th class="num">Precio Unitario</th>
+      <th class="num">Total a Pagar</th>
+    </tr>
+  </thead>
+  <tbody>{rows_html}</tbody>
+</table>
+
+</body></html>"""
+
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=buf)
+    buf.seek(0)
+    filename = (
+        f"oc_{contratista.replace(' ', '_')}_{empresa.replace(' ', '_')}"
         f"_{fecha_inicio}_{fecha_termino}.pdf"
     )
     return StreamingResponse(

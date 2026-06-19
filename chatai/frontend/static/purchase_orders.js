@@ -407,5 +407,10 @@ document.getElementById('btn-odoo-export').addEventListener('click', () => {
   openCCModal();
 });
 
+document.getElementById('btn-print-pdf').addEventListener('click', () => {
+  if (!_lastParams) return;
+  window.open('/api/purchase-orders/print-pdf?' + _lastParams, '_blank');
+});
+
 // ── Init ─────────────────────────────────────────────────────────────────
 loadFilters();

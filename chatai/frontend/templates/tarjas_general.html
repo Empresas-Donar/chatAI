@@ -6,6 +6,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="/static/tarjas_general.css?v={{ static_v }}" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
+<style>
+  .tg-tables-row { display: flex !important; flex-direction: column !important; gap: 20px; }
+  .tg-card { overflow-x: auto !important; }
+</style>
 {% endblock %}
 
 {% block body %}
@@ -71,7 +75,9 @@
         <thead>
           <tr>
             <th>Labor</th>
+            <th class="num">Promedio diario</th>
             <th class="num">Ganancia promedio por hora</th>
+            <th class="num">Horas</th>
             <th class="num">Total</th>
           </tr>
         </thead>
@@ -85,9 +91,11 @@
       <table class="tg-table">
         <thead>
           <tr>
-            <th>trabajador</th>
-            <th>contratista</th>
+            <th>Trabajador</th>
+            <th>Contratista</th>
+            <th class="num">Promedio diario</th>
             <th class="num">Ganancia por hora</th>
+            <th class="num">Horas</th>
             <th class="num">Total</th>
           </tr>
         </thead>

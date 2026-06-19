@@ -107,12 +107,16 @@ async function queryData() {
 function show(id) { document.getElementById(id).style.display = ''; }
 function hide(id) { document.getElementById(id).style.display = 'none'; }
 
+const fmtHoras = v => v != null ? `${Number(v).toLocaleString('es-CL', {maximumFractionDigits:1})} h` : '-';
+
 // ── Labor summary table ───────────────────────────────────────────────
 function renderLaborTable(rows) {
   const tbody = document.getElementById('labor-tbody');
   tbody.innerHTML = rows.map(r => `<tr>
     <td class="cell-labor" title="${esc(r.labor)}">${esc(r.labor)}</td>
-    <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
+    <td class="num">${r.promedio_diario != null ? fmtCLP.format(r.promedio_diario) : '-'}</td>
+    <td class="num">${r.ganancia_hora != null ? fmtCLP.format(r.ganancia_hora) : '-'}</td>
+    <td class="num">${fmtHoras(r.total_horas)}</td>
     <td class="num">${fmtCLP.format(r.total)}</td>
   </tr>`).join('');
 }
@@ -123,7 +127,9 @@ function renderRanking(rows) {
   tbody.innerHTML = rows.map(r => `<tr>
     <td class="cell-worker" title="${esc(r.trabajador)}">${esc(r.trabajador)}</td>
     <td class="cell-contractor" title="${esc(r.contratista)}">${esc(r.contratista)}</td>
-    <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
+    <td class="num">${r.promedio_diario != null ? fmtCLP.format(r.promedio_diario) : '-'}</td>
+    <td class="num">${r.ganancia_hora != null ? fmtCLP.format(r.ganancia_hora) : '-'}</td>
+    <td class="num">${fmtHoras(r.total_horas)}</td>
     <td class="num">${fmtCLP.format(r.total)}</td>
   </tr>`).join('');
 }

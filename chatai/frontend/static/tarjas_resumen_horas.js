@@ -115,7 +115,7 @@ function renderPivot(rows) {
     const tipos = workers.get(w);
     if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0 });
     const entry = tipos.get(r.tipo_pago);
-    const hrs = Number(r.horas_trabajadas) || 0;
+    const hrs = Number(r.horas_trabajadas) || 0;  // API alias → horas_extras
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + hrs;
     entry.total += hrs;
   });
@@ -132,7 +132,7 @@ function renderPivot(rows) {
   const thead = document.getElementById('pivot-thead');
   let superHdr = '<tr class="trp-superheader">';
   superHdr += '<th class="th-empty" colspan="2"></th>';
-  superHdr += `<th colspan="${dates.length}">fecha (Fecha) / horas_trabajadas</th>`;
+  superHdr += `<th colspan="${dates.length}">Fecha / Horas extra</th>`;
   superHdr += '<th class="th-empty"></th>';
   superHdr += '</tr>';
 
