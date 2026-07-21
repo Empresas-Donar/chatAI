@@ -147,6 +147,13 @@ def _rows_to_dicts(cur):
 
 
 def _logo_b64() -> str:
+    """Return the Donar logo as a base64-encoded PNG, resized to max 200 px wide.
+
+    The original PNG is 1288×539 px (~680 KB, ~907 KB base64). Embedding that
+    full size into the HTML string fed to xhtml2pdf causes text-layout corruption
+    in table cells (issue #12). Resizing to ≤200 px wide brings the base64 to
+    ~29 KB, which xhtml2pdf handles correctly.
+    """
     path = (
         Path(__file__).parent.parent.parent
         / "frontend"
@@ -155,9 +162,17 @@ def _logo_b64() -> str:
         / "donar_logo.png"
     )
     try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except OSError:
+        from PIL import Image
+
+        img = Image.open(path)
+        max_w = 200
+        w, h = img.size
+        if w > max_w:
+            img = img.resize((max_w, int(h * max_w / w)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
         return ""
 
 
@@ -2439,40 +2454,55 @@ async def download_tarjas_resumen_persona_pdf(
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
     fmtCLP = lambda v: f"${v:,.0f}".replace(",", ".")
-    date_headers = "".join(
-        f'<th class="num">{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
-        for d in dates
-    )
+
+    # Flat list layout — xhtml2pdf cannot reliably render wide pivot tables.
+    # Rows: Trabajador | Tipo de pago | Fecha | Monto
     rows_html = ""
     prev = None
     for (trab, tipo), entry in sorted_workers:
-        is_first = prev != trab
-        prev = trab
-        cls = "worker-first" if is_first else ""
-        rows_html += f'<tr class="{cls}"><td>{"<b>" + trab + "</b>" if is_first else ""}</td><td>{tipo}</td>'
-        for d in dates:
-            v = entry["by_date"].get(d, 0)
-            rows_html += f'<td class="num">{"" if not v else fmtCLP(v)}</td>'
-        rows_html += f'<td class="total">{fmtCLP(entry["total"])}</td></tr>'
+        day_rows = sorted(
+            ((d, v) for d, v in entry["by_date"].items() if v), key=lambda x: x[0]
+        )
+        for i, (d, v) in enumerate(day_rows):
+            is_first_row = i == 0
+            is_new_worker = prev != trab and is_first_row
+            if is_new_worker:
+                prev = trab
+            cls = "worker-first" if is_new_worker else ""
+            fecha_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
+            rows_html += (
+                f'<tr class="{cls}">'
+                f'<td>{"<b>" + trab + "</b>" if is_first_row else ""}</td>'
+                f"<td>{tipo if is_first_row else ''}</td>"
+                f"<td>{fecha_fmt}</td>"
+                f'<td class="num">{fmtCLP(v)}</td>'
+                f"</tr>"
+            )
+        # subtotal row per worker+tipo
+        rows_html += (
+            f'<tr style="background:#e8e8e8">'
+            f"<td></td><td></td>"
+            f'<td style="font-weight:bold;text-align:right">Subtotal</td>'
+            f'<td class="total">{fmtCLP(entry["total"])}</td>'
+            f"</tr>"
+        )
 
-    header = _pdf_header(
-        "Detalle trabajador — Tarjas",
-        fecha_inicio,
-        fecha_termino,
-        {
-            "Empresa": empresa,
-            "Contratista": contratista,
-            "Trabajador": trabajador,
-            "Tipo de pago": tipo_pago,
-        },
-    )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
-    {header}
-    <p class="section-title">Resumen por trabajador</p>
-    <table><thead>
-      <tr><th>Trabajador</th><th>Tipo de pago</th>{date_headers}<th class="num">Total</th></tr>
-    </thead><tbody>{rows_html}</tbody></table>
+    logo = _logo_b64()
+    logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e293b;margin-bottom:12px">
+      <tr>
+        <td style="padding:10px 16px">{logo_html}</td>
+        <td style="padding:10px 16px;color:#ffffff">
+          <b style="font-size:14pt">Resumen por trabajador</b><br/>
+          <span style="font-size:9pt">Desde: {fecha_inicio} &nbsp; Hasta: {fecha_termino}</span>
+        </td>
+      </tr>
+    </table>
+    <table border="1" cellpadding="4" cellspacing="0">
+      <thead><tr><th>Trabajador</th><th>Tipo de pago</th><th>Fecha</th><th>Monto</th></tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
     </body></html>"""
     return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
 
