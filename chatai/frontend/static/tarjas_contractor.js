@@ -150,11 +150,15 @@ function renderPivot(columns, rows) {
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
     const value  = Number(r.total_trabajado) || 0;
 
+    const horas = parseFloat(r.horas_trabajadas) || 0;
+
     if (!groups.has(key)) {
-      groups.set(key, { worker, labor, tipo, rate: value, byDate: {} });
+      groups.set(key, { worker, labor, tipo, totalGanado: 0, totalHoras: 0, byDate: {} });
     }
 
     const g = groups.get(key);
+    g.totalGanado += value;
+    g.totalHoras  += horas;
     if (fecha) {
       g.byDate[fecha] = (g.byDate[fecha] || 0) + value;
       if (g.byDate[fecha] > globalMax) globalMax = g.byDate[fecha];
@@ -174,7 +178,7 @@ function renderPivot(columns, rows) {
   if (!mergeLabores) {
     hdr += `<th class="th-fixed">Labor</th>
     <th class="th-fixed">Tipo de pago</th>
-    <th class="th-fixed" style="text-align:right">Valor por hr</th>`;
+    <th class="th-fixed" style="text-align:right">Costo/hr</th>`;
   }
   dates.forEach(d => {
     hdr += `<th class="th-date">${formatShortDate(d)}</th>`;
@@ -212,20 +216,15 @@ function renderPivot(columns, rows) {
     if (!mergeLabores) {
       html += `<td class="cell-labor" title="${esc(g.labor)}">${esc(g.labor)}</td>`;
       html += `<td><span class="${tipoCls}">${esc(g.tipo)}</span></td>`;
-      html += `<td class="cell-rate">${fmtCLPDec.format(g.rate)}</td>`;
+      const costoHora = g.totalHoras > 0 ? Math.round(g.totalGanado / g.totalHoras) : null;
+      html += `<td class="cell-rate">${costoHora != null ? fmtCLPDec.format(costoHora) : '-'}</td>`;
     }
 
     dates.forEach(d => {
       const val = g.byDate[d];
       colTotals[d] += val || 0;
       if (val != null && val > 0) {
-        const pct = globalMax > 0 ? Math.max(4, (val / globalMax) * 100) : 0;
-        html += `<td class="cell-value">
-          <div class="bar-wrap">
-            <div class="bar" style="width:${pct.toFixed(1)}%"></div>
-            <span class="bar-text">${fmtCLPDec.format(val)}</span>
-          </div>
-        </td>`;
+        html += `<td class="cell-value">${fmtCLPDec.format(val)}</td>`;
       } else {
         html += `<td class="cell-value"><span class="cell-dash">-</span></td>`;
       }
