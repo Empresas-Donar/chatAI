@@ -52,7 +52,23 @@
   <div id="print-actions" class="print-actions no-print" style="display:none">
     <span id="trip-count" class="dg-trip-count"></span>
     <button class="btn btn-secondary" id="btn-download">Descargar CSV</button>
+    <button class="btn btn-secondary" id="btn-export-odoo">Exportar para Odoo</button>
     <button class="btn btn-secondary" onclick="window.print()">Imprimir / PDF</button>
+  </div>
+
+  <!-- Odoo export modal -->
+  <div id="odoo-modal" class="sync-modal-backdrop" style="display:none" onclick="closeOdooModal(event)">
+    <div class="sync-modal-box">
+      <div class="sync-modal-header">
+        <span class="sync-modal-title">Exportar para Odoo</span>
+        <button class="sync-modal-close" onclick="closeOdooModal()">✕</button>
+      </div>
+      <div id="odoo-modal-content" class="sync-modal-body"></div>
+      <div class="sync-modal-footer">
+        <button class="btn btn-secondary" onclick="closeOdooModal()">Cancelar</button>
+        <button class="btn btn-primary" id="btn-modal-download" style="display:none">Descargar CSV</button>
+      </div>
+    </div>
   </div>
 
   <!-- Guías container -->
