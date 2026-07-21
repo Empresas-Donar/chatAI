@@ -289,8 +289,20 @@ function printWithHeader(title, filters) {
   });
 }
 
+// ── URL filter sync ───────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-tipo', 'fil-labor'];
+
+async function loadFiltersAndRestore() {
+  initDates();
+  await loadFilters();
+  loadFiltersFromURL(FILTER_IDS);
+  queryData();
+}
+
 // ── Events ────────────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-apply').addEventListener('click', () => {
+  queryData().then(() => syncFiltersToURL(FILTER_IDS));
+});
 
 document.getElementById('chk-merge-labores').addEventListener('change', () => {
   if (_lastData) renderPivot(_lastData.columns, _lastData.rows);
@@ -303,10 +315,10 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
-  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData().then(() => syncFiltersToURL(FILTER_IDS)); });
 });
 
+bindPopstate(FILTER_IDS, queryData);
+
 // ── Init ──────────────────────────────────────────────────────────────
-initDates();
-loadFilters();
-queryData();
+loadFiltersAndRestore();

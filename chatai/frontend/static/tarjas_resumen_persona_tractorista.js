@@ -232,7 +232,19 @@ function printWithHeader(title, filters) {
   });
 }
 
-document.getElementById('btn-apply').addEventListener('click', queryData);
+// ── URL filter sync ───────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-trabajador', 'fil-tipo', 'fil-contratista', 'fil-empresa', 'fil-maquina'];
+
+async function loadFiltersAndRestore() {
+  initDates();
+  await loadFilters();
+  loadFiltersFromURL(FILTER_IDS);
+  queryData();
+}
+
+document.getElementById('btn-apply').addEventListener('click', () => {
+  queryData().then(() => syncFiltersToURL(FILTER_IDS));
+});
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/resumen-persona-tractorista/download-excel?' + currentParams();
 });
@@ -241,9 +253,9 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
-  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData().then(() => syncFiltersToURL(FILTER_IDS)); });
 });
 
-initDates();
-loadFilters();
-queryData();
+bindPopstate(FILTER_IDS, queryData);
+
+loadFiltersAndRestore();

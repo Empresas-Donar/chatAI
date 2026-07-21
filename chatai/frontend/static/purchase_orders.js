@@ -412,5 +412,16 @@ document.getElementById('btn-print-pdf').addEventListener('click', () => {
   window.open('/api/purchase-orders/print-pdf?' + _lastParams, '_blank');
 });
 
+// ── URL filter sync ───────────────────────────────────────────────────────
+const FILTER_IDS = ['inp-date-from', 'inp-date-to', 'sel-contractor', 'sel-company'];
+
+// Sync URL when user generates a document (secondary listener on btn-generate)
+document.getElementById('btn-generate').addEventListener('click', () => {
+  if (document.getElementById('sel-contractor').value && document.getElementById('sel-company').value) {
+    syncFiltersToURL(FILTER_IDS);
+  }
+});
+
 // ── Init ─────────────────────────────────────────────────────────────────
-loadFilters();
+// Populate selects, then restore URL params; no auto-trigger (document requires deliberate action)
+loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

@@ -232,8 +232,20 @@ function printWithHeader(title, filters) {
   });
 }
 
+// ── URL filter sync ───────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cc', 'fil-tipo', 'fil-labor', 'fil-contratista', 'fil-empresa'];
+
+async function loadFiltersAndRestore() {
+  initDates();
+  await loadFilters();
+  loadFiltersFromURL(FILTER_IDS);
+  queryData();
+}
+
 // ── Events ────────────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-apply').addEventListener('click', () => {
+  queryData().then(() => syncFiltersToURL(FILTER_IDS));
+});
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/general/download-excel?' + currentParams();
 });
@@ -242,10 +254,10 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
-  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData().then(() => syncFiltersToURL(FILTER_IDS)); });
 });
 
+bindPopstate(FILTER_IDS, queryData);
+
 // ── Init ──────────────────────────────────────────────────────────────
-initDates();
-loadFilters();
-queryData();
+loadFiltersAndRestore();

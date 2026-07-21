@@ -232,8 +232,17 @@ function showError(msg) {
   el.classList.remove('hidden');
 }
 
+// ── URL filter sync ───────────────────────────────────────────────────
+const FILTER_IDS = ['inp-date-from', 'inp-date-to', 'sel-contractor', 'sel-company'];
+
 // ── Events ────────────────────────────────────────────────────────────
-document.getElementById('btn-generate').addEventListener('click', generate);
+document.getElementById('btn-generate').addEventListener('click', () => {
+  generate().then(() => {
+    if (document.getElementById('sel-contractor').value && document.getElementById('sel-company').value) {
+      syncFiltersToURL(FILTER_IDS);
+    }
+  });
+});
 
 document.getElementById('btn-pdf').addEventListener('click', () => {
   const contratista  = document.getElementById('sel-contractor').value;
@@ -247,4 +256,5 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 
 // ── Init ──────────────────────────────────────────────────────────────
 initDates();
-loadFilters();
+// Populate selects, then restore URL params; no auto-trigger (document requires deliberate action)
+loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

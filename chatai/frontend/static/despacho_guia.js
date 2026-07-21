@@ -69,8 +69,15 @@ document.getElementById('fil-cliente').addEventListener('change', function () {
   loadFilters({ cliente: this.value });
 });
 
+// ── URL filter sync ───────────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cliente'];
+
 // ── Generate ─────────────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', fetchGuias);
+document.getElementById('btn-apply').addEventListener('click', () => {
+  fetchGuias().then(() => syncFiltersToURL(FILTER_IDS));
+});
+
+bindPopstate(FILTER_IDS, fetchGuias);
 
 async function fetchGuias() {
   const from    = document.getElementById('fil-from').value;
@@ -266,4 +273,5 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
-loadFilters();
+// Restore URL params after options are loaded so the select value is valid
+loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

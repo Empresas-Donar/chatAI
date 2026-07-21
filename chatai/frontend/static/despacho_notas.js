@@ -560,6 +560,18 @@ document.getElementById('btn-print-pdf').addEventListener('click', () => {
   window.open('/api/tarjas/notas/print-pdf?' + params, '_blank');
 });
 
+// ── URL filter sync ───────────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-campo'];
+
+// Sync URL when user clicks "Generar nota" (secondary listener stacks on the primary above)
+document.getElementById('btn-apply').addEventListener('click', () => {
+  // Sync only if minimum required field is filled (avoid polluting URL on empty-click)
+  if (document.getElementById('fil-contratista').value) {
+    syncFiltersToURL(FILTER_IDS);
+  }
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
-loadFilters();
+// Restore URL params after selects are populated; no auto-trigger (document requires deliberate action)
+loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

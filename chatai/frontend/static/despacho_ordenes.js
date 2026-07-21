@@ -29,7 +29,14 @@ async function loadFilters() {
   }
 }
 
-document.getElementById('btn-apply').addEventListener('click', fetchOrdenes);
+// ── URL filter sync ───────────────────────────────────────────────────────
+const FILTER_IDS = ['fil-cliente', 'fil-producto'];
+
+document.getElementById('btn-apply').addEventListener('click', () => {
+  fetchOrdenes().then(() => syncFiltersToURL(FILTER_IDS));
+});
+
+bindPopstate(FILTER_IDS, fetchOrdenes);
 
 document.getElementById('btn-download').addEventListener('click', () => {
   const cliente  = document.getElementById('fil-cliente').value;
@@ -105,5 +112,8 @@ function render({ ordenes, kpi }) {
 function showError(msg) { const el = document.getElementById('error-box'); el.textContent = msg; el.classList.remove('hidden'); }
 function hideError()    { document.getElementById('error-box').classList.add('hidden'); }
 
-loadFilters();
-document.addEventListener('DOMContentLoaded', () => fetchOrdenes());
+// Populate selects, restore URL params, then auto-run (replaces the DOMContentLoaded trigger)
+loadFilters().then(() => {
+  loadFiltersFromURL(FILTER_IDS);
+  fetchOrdenes();
+});
