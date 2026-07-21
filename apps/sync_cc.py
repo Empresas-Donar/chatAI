@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -63,18 +64,26 @@ def _pg_conn():
     )
     if host.startswith("/"):
         return psycopg2.connect(host=host, **kwargs)
-    return psycopg2.connect(host=host, port=int(os.environ.get("DB_PORT", 5432)), **kwargs)
+    return psycopg2.connect(
+        host=host, port=int(os.environ.get("DB_PORT", 5432)), **kwargs
+    )
 
 
-def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[tuple[str, float]]]]:
+def fetch_odoo_cc(
+    bq: bigquery.Client,
+) -> tuple[dict[str, dict], dict[str, list[tuple[str, float]]]]:
     """
     Fetch ALL Odoo CCs (active + archived) and return:
-      by_code: {code → {id, nombre, company_id}} — active CCs only, for insertions
+      by_code: {id_cc → {id, nombre, company_id}} — active CCs only, for insertions.
+        id_cc is normally the bare Odoo code.  When two active CCs from different companies
+        share the same code, the one with the lower (company_id, id) keeps the bare code and
+        the rest get "<code>-c<company_id>" to remain unique in appsheet.tarjas_cc.
       archived_to_replacements: {archived_id → [(active_id, fraction), ...]}
         - 1:1 when same code exists in active CCs
         - 1:N when CC was split (e.g. CC-421 → ORIENTE + PONIENTE), fraction = 1/N
     """
-    rows = list(bq.query("""
+    rows = list(
+        bq.query("""
         SELECT
           CAST(id AS STRING) AS id,
           COALESCE(
@@ -87,9 +96,11 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
           active,
           CAST(root_plan_id AS STRING) AS root_plan_id
         FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
-    """).result())
+    """).result()
+    )
 
-    by_code: dict[str, dict] = {}
+    # Collect ALL active CCs keyed by (code, company_id) — no silent drops.
+    active_by_composite: dict[tuple[str, int], dict] = {}
     by_plan: dict[str, list[dict]] = {}
     active_ids: set[str] = set()
 
@@ -100,26 +111,46 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
 
         if r["active"]:
             active_ids.add(odoo_id)
-            if code and code not in by_code:
-                by_code[code] = {
-                    "id": odoo_id,
-                    "nombre": r["nombre"],
-                    "company_id": r["company_id"],
-                }
+            if code:
+                composite_key = (code, int(r["company_id"]))
+                if composite_key not in active_by_composite:
+                    active_by_composite[composite_key] = {
+                        "id": odoo_id,
+                        "nombre": r["nombre"],
+                        "company_id": int(r["company_id"]),
+                    }
 
         if plan:
-            by_plan.setdefault(plan, []).append({
-                "id": odoo_id, "code": code, "active": r["active"],
-                "nombre": r["nombre"] or "", "root_plan_id": plan,
-            })
+            by_plan.setdefault(plan, []).append(
+                {
+                    "id": odoo_id,
+                    "code": code,
+                    "active": r["active"],
+                    "nombre": r["nombre"] or "",
+                    "root_plan_id": plan,
+                }
+            )
 
-    _DIR_SUFFIX = re.compile(
-        r'[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$', re.IGNORECASE
-    )
+    # Resolve id_cc for each active CC.
+    # CCs with a unique code keep id_cc = code.
+    # When multiple companies share the same code, sort by (company_id, id) ascending:
+    # the first keeps bare code; the rest get "<code>-c<company_id>" to stay unique.
+    by_code: dict[str, dict] = {}
+    per_code: dict[str, list[tuple[int, int, str, dict]]] = defaultdict(list)
+    for (code, company_id), info in active_by_composite.items():
+        per_code[code].append((company_id, int(info["id"]), code, info))
+
+    for code, candidates in per_code.items():
+        candidates.sort(key=lambda t: (t[0], t[1]))  # sort by (company_id, odoo_id)
+        for rank, (company_id, _odoo_id_int, _code, info) in enumerate(candidates):
+            id_cc = code if rank == 0 else f"{code}-c{company_id}"
+            by_code[id_cc] = info
+
+    _DIR_SUFFIX = re.compile(r"[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$", re.IGNORECASE)
 
     def _stem(name: str) -> str:
         """Strip direction suffixes so CEREZOS X-NORTE and CEREZOS X-SUR both yield CEREZOS X."""
-        return _DIR_SUFFIX.sub('', name).strip()
+        return _DIR_SUFFIX.sub("", name).strip()
 
     def _lev(a: str, b: str) -> int:
         a, b = a.lower(), b.lower()
@@ -130,7 +161,9 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
             prev = curr[:]
             curr[0] = prev[0] + 1
             for i, ca in enumerate(a):
-                curr[i + 1] = prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+                curr[i + 1] = (
+                    prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+                )
         return curr[len(a)]
 
     def _matches(base: str, stem: str) -> bool:
@@ -148,7 +181,7 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
         if s.startswith(b):
             return True
         if _lev(b, s) <= 1:
-            return re.findall(r'\d+', b) == re.findall(r'\d+', s)
+            return re.findall(r"\d+", b) == re.findall(r"\d+", s)
         return False
 
     # Build archived → replacements map
@@ -166,26 +199,35 @@ def fetch_odoo_cc(bq: bigquery.Client) -> tuple[dict[str, dict], dict[str, list[
 
         # Strategy 2: fuzzy name-prefix siblings in same plan (handles splits + typos)
         nombre = r["nombre"] or ""
-        base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
+        base = re.sub(r"\s+CC-\d+\s*$", "", nombre, flags=re.IGNORECASE).strip()
         plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
 
         if base and plan:
             siblings = [
-                s for s in by_plan.get(plan, [])
+                s
+                for s in by_plan.get(plan, [])
                 if s["active"] and _matches(base, _stem(s["nombre"]))
             ]
             if siblings:
                 fraction = 1.0 / len(siblings)
                 archived_to_replacements[oid] = [(s["id"], fraction) for s in siblings]
-                log.info(f"CC {oid} ({nombre!r}) → split {len(siblings)} hermanos: {[s['id'] for s in siblings]}")
+                log.info(
+                    f"CC {oid} ({nombre!r}) → split {len(siblings)} hermanos: {[s['id'] for s in siblings]}"
+                )
             else:
                 log.warning(f"CC {oid} ({nombre!r}) archivado sin reemplazo detectado")
 
-    log.info(f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_replacements)}")
+    log.info(
+        f"CC activos: {len(by_code)}, archivados con reemplazo: {len(archived_to_replacements)}"
+    )
     return by_code, archived_to_replacements
 
 
-def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, list[tuple[str, float]]], conn) -> None:
+def sync_tarjas_cc(
+    odoo: dict[str, dict],
+    archived_to_replacements: dict[str, list[tuple[str, float]]],
+    conn,
+) -> None:
     active_ids = {info["id"] for info in odoo.values()}
 
     with conn.cursor() as cur:
@@ -199,15 +241,21 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, li
         new_json = json.dumps({odoo_id: 100})
 
         if code not in existing:
-            to_insert.append({
-                "id_cc": code,
-                "cultivo": info["nombre"],
-                "id_campo": COMPANY_TO_CAMPO.get(info["company_id"], DEFAULT_CAMPO),
-                "valor_odoo": new_json,
-            })
+            to_insert.append(
+                {
+                    "id_cc": code,
+                    "cultivo": info["nombre"],
+                    "id_campo": COMPANY_TO_CAMPO.get(info["company_id"], DEFAULT_CAMPO),
+                    "valor_odoo": new_json,
+                }
+            )
         else:
             current = existing[code] or {}
-            stored_keys = [k for k in current.keys() if k != ""] if isinstance(current, dict) else []
+            stored_keys = (
+                [k for k in current.keys() if k != ""]
+                if isinstance(current, dict)
+                else []
+            )
 
             if not stored_keys or list(current.keys()) == [""]:
                 to_fix.append((new_json, code))
@@ -220,9 +268,13 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, li
                         continue
                     if kid not in active_ids and kid in archived_to_replacements:
                         for repl_id, fraction in archived_to_replacements[kid]:
-                            updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
+                            updated[repl_id] = round(
+                                updated.get(repl_id, 0) + pct * fraction, 4
+                            )
                         changed = True
-                        log.info(f"tarjas_cc [{code}]: {kid} ({pct}%) → {archived_to_replacements[kid]}")
+                        log.info(
+                            f"tarjas_cc [{code}]: {kid} ({pct}%) → {archived_to_replacements[kid]}"
+                        )
                     else:
                         updated[kid] = pct
                 if changed:
@@ -241,9 +293,13 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, li
                 continue
             if kid not in active_ids and kid in archived_to_replacements:
                 for repl_id, fraction in archived_to_replacements[kid]:
-                    updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
+                    updated[repl_id] = round(
+                        updated.get(repl_id, 0) + pct * fraction, 4
+                    )
                 changed = True
-                log.info(f"tarjas_cc [{id_cc}]: {kid} ({pct}%) → {archived_to_replacements[kid]}")
+                log.info(
+                    f"tarjas_cc [{id_cc}]: {kid} ({pct}%) → {archived_to_replacements[kid]}"
+                )
             else:
                 updated[kid] = pct
         if changed:
@@ -272,10 +328,13 @@ def sync_tarjas_cc(odoo: dict[str, dict], archived_to_replacements: dict[str, li
                 value TEXT
             )
         """)
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO appsheet.sync_meta (key, value) VALUES ('last_cc_sync', %s)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-        """, (now_iso,))
+        """,
+            (now_iso,),
+        )
 
     log.info(f"tarjas_cc → insertados: {len(to_insert)}, corregidos: {len(to_fix)}")
 
@@ -287,7 +346,7 @@ def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
 
     to_fix = []
     for id_producto, producto, id_odoo_raw in rows:
-        match = re.match(r'^(\S+?)-', producto or "")
+        match = re.match(r"^(\S+?)-", producto or "")
         if not match:
             continue
         code = match.group(1).strip()
