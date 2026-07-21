@@ -27,9 +27,9 @@ import json
 import logging
 import os
 import re
-from typing import Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from google.cloud import bigquery
@@ -371,6 +371,56 @@ async def download_despacho_guia(
 
     output.seek(0)
     filename = f"guia_despacho_{fecha_inicio}_{fecha_termino}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/api/despacho/guia/export-odoo")
+async def export_guia_odoo(payload: dict = Body(...)):
+    """Build Odoo import CSV from selected viajes passed directly from the frontend."""
+    viajes: List[Any] = payload.get("viajes", [])
+    if not viajes:
+        raise HTTPException(status_code=400, detail="No viajes provided")
+
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(_ODOO_HEADERS)
+
+    prev_partner: str = ""
+    for v in viajes:
+        partner = v.get("nombre_odoo") or v.get("cliente") or ""
+        for linea in v.get("lineas", []):
+            product_id = linea.get("product_id") or ""
+            analytic = linea.get("analytic") or ""
+            qty = linea.get("total_unidades")
+            qty_val = int(qty) if qty is not None else ""
+
+            vendedor_cell = partner if partner != prev_partner else ""
+            partner_cell = partner if partner != prev_partner else ""
+            prev_partner = partner
+
+            writer.writerow(
+                [
+                    vendedor_cell,
+                    linea.get("producto") or "",
+                    qty_val,
+                    product_id,
+                    "",
+                    "",
+                    partner_cell,
+                    product_id,
+                    qty_val,
+                    analytic,
+                    "",
+                ]
+            )
+
+    output.seek(0)
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    filename = f"odoo_guia_export_{today}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv; charset=utf-8-sig",

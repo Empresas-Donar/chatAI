@@ -120,7 +120,7 @@ async function fetchGuias() {
 function renderAll(viajes) {
   const container = document.getElementById('guias-container');
   container.innerHTML = '';
-  viajes.forEach((v, i) => container.appendChild(buildGuia(v, i + 1)));
+  viajes.forEach((v, i) => container.appendChild(buildGuia(v, i)));
 
   document.getElementById('trip-count').textContent = `${viajes.length} guía${viajes.length !== 1 ? 's' : ''} generada${viajes.length !== 1 ? 's' : ''}`;
   document.getElementById('print-actions').style.display = '';
@@ -130,15 +130,25 @@ function renderAll(viajes) {
 function buildGuia(v, idx) {
   const el = document.createElement('div');
   el.className = 'guia-doc';
+  el.dataset.idx = idx;
 
   const totalLineas = v.lineas.length;
   const hasOdoo = v.lineas.some(l => l.product_id);
+  const displayNum = idx + 1;
 
   el.innerHTML = `
+    <!-- Per-card controls (no-print) -->
+    <div class="guia-card-controls no-print">
+      <label class="guia-card-select-label">
+        <input type="checkbox" class="guia-card-checkbox" />
+        Seleccionar
+      </label>
+      <button class="guia-card-print-btn" onclick="printSingle(this)">Imprimir / PDF</button>
+    </div>
     <!-- Header -->
     <div class="guia-header">
       <div class="guia-logo-block">
-        <div class="guia-logo">EMPRESAS<br>DONAR</div>
+        <div class="guia-logo"><img src="/static/img/donar_logo.png" alt="Donar" /></div>
         <div class="guia-logo-label">Agrícola Donar</div>
       </div>
       <div class="guia-company">
@@ -149,7 +159,7 @@ function buildGuia(v, idx) {
         </div>
       </div>
       <div class="guia-meta">
-        <div class="guia-doc-title">GUÍA DE DESPACHO N° ${String(idx).padStart(4, '0')}</div>
+        <div class="guia-doc-title">GUÍA DE DESPACHO N° ${String(displayNum).padStart(4, '0')}</div>
         <div class="guia-meta-row">
           <span class="guia-meta-label">Fecha</span>
           <span class="guia-meta-val">${fmtDate(v.fecha)}</span>
@@ -267,6 +277,126 @@ function downloadCSV() {
 }
 
 document.getElementById('btn-download').addEventListener('click', downloadCSV);
+
+// ── Per-card print ────────────────────────────────────────────────────────
+function printSingle(btn) {
+  const card = btn.closest('.guia-doc');
+  card.setAttribute('data-solo-print', '1');
+  document.body.classList.add('solo-print');
+  window.print();
+  document.body.classList.remove('solo-print');
+  card.removeAttribute('data-solo-print');
+}
+
+// ── Odoo export modal ─────────────────────────────────────────────────────
+let _selectedViajes = [];
+
+function openOdooModal() {
+  const cards = document.querySelectorAll('.guia-doc');
+  _selectedViajes = [];
+  cards.forEach((card, i) => {
+    const cb = card.querySelector('.guia-card-checkbox');
+    if (cb && cb.checked) _selectedViajes.push(_guiasData[i]);
+  });
+
+  if (!_selectedViajes.length) {
+    showError('Selecciona al menos una guía antes de exportar a Odoo.');
+    return;
+  }
+  hideError();
+
+  let withId = 0, withoutId = 0;
+  _selectedViajes.forEach(v => {
+    v.lineas.forEach(l => { if (l.product_id) withId++; else withoutId++; });
+  });
+  const total = withId + withoutId;
+  const pct   = total > 0 ? Math.round((withId / total) * 100) : 0;
+  const allOk = withoutId === 0;
+
+  const previewRows = _selectedViajes.flatMap(v =>
+    v.lineas.map(l => ({ cliente: v.nombre_odoo || v.cliente, fecha: v.fecha, ...l }))
+  );
+
+  const rowsHtml = previewRows.map(r => `
+    <tr class="${r.product_id ? '' : 'odoo-row-missing'}">
+      <td>${esc(r.cliente)}</td>
+      <td>${fmtDate(r.fecha)}</td>
+      <td>${esc(r.producto)}</td>
+      <td class="num">${fmtN(r.total_unidades)}</td>
+      <td class="num mono">${r.product_id ? esc(r.product_id) : '<span class="missing-badge">sin código</span>'}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('odoo-modal-content').innerHTML = `
+    <div class="sync-stats" style="margin-bottom:12px">
+      <div class="sync-stat">
+        <div class="sync-dot sync-dot-ok"></div>
+        <span>${withId} línea${withId !== 1 ? 's' : ''} listas (${pct}%)</span>
+      </div>
+      ${withoutId > 0 ? `
+      <div class="sync-stat">
+        <div class="sync-dot sync-dot-missing"></div>
+        <span>${withoutId} sin Cód. Odoo — serán omitidas</span>
+      </div>` : ''}
+    </div>
+    <div class="odoo-preview-wrap">
+      <table class="odoo-preview-table">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Fecha</th>
+            <th>Producto</th>
+            <th class="num">Unidades</th>
+            <th class="num">Cód. Odoo</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="sync-note ${allOk ? 'sync-note-ok' : ''}" style="margin-top:10px">
+      ${allOk
+        ? '✓ Todo listo para exportar.'
+        : `Las filas en rojo no se incluirán en el CSV.`}
+    </div>
+  `;
+
+  const dlBtn = document.getElementById('btn-modal-download');
+  dlBtn.style.display = withId > 0 ? '' : 'none';
+  document.getElementById('odoo-modal').style.display = '';
+}
+
+function closeOdooModal(e) {
+  if (e && e.target !== document.getElementById('odoo-modal')) return;
+  document.getElementById('odoo-modal').style.display = 'none';
+}
+
+async function downloadOdooCSV() {
+  const btn = document.getElementById('btn-modal-download');
+  btn.disabled = true; btn.textContent = 'Descargando…';
+  try {
+    const res = await fetch('/api/despacho/guia/export-odoo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ viajes: _selectedViajes }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || res.statusText); }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `odoo_guia_export_${document.getElementById('fil-from').value}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    document.getElementById('odoo-modal').style.display = 'none';
+  } catch (e) {
+    showError('Error al exportar: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Descargar CSV';
+  }
+}
+
+document.getElementById('btn-export-odoo').addEventListener('click', openOdooModal);
+document.getElementById('btn-modal-download').addEventListener('click', downloadOdooCSV);
 
 function showError(msg) { const el = document.getElementById('error-box'); el.textContent = msg; el.classList.remove('hidden'); }
 function hideError()    { document.getElementById('error-box').classList.add('hidden'); }
