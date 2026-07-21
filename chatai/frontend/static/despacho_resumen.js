@@ -2,7 +2,7 @@
 'use strict';
 
 const fmtN   = n => n == null ? '—' : Number(n).toLocaleString('es-CL');
-const fmtDate = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${d}-${m}-${y}`; };
+const fmtDate = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`; };
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }

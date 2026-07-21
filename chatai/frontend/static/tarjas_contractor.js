@@ -15,8 +15,9 @@ function esc(s) {
 function toISO(d) { return d.toISOString().slice(0, 10); }
 
 function formatShortDate(isoStr) {
-  const d = new Date(isoStr + 'T12:00:00');
-  return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (!isoStr) return '—';
+  const [y, m, d] = isoStr.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
 }
 
 // Candidate column names for the worker field (AppSheet names vary)

@@ -120,10 +120,10 @@ def _fmt_clp(v) -> str:
 
 
 def _fmt_date_display(iso: str) -> str:
+    """Format an ISO date string (YYYY-MM-DD) as DD/MM/YYYY for user-facing display."""
     try:
         d = datetime.date.fromisoformat(iso)
-        months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
-        return f"{d.day} {months[d.month-1]} {d.year}"
+        return f"{d.day:02d}/{d.month:02d}/{d.year}"
     except Exception:
         return iso
 
@@ -335,7 +335,7 @@ def _html_contratista(cur, fecha_inicio: str, fecha_termino: str, empresa: str |
     fmtCLP = _fmt_clp
     rows_html = "".join(
         f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td><td>{r["labor"]}</td>'
-        f'<td>{r["tipo_pago"]}</td><td>{r["fecha"]}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
+        f'<td>{r["tipo_pago"]}</td><td>{_fmt_date_display(r["fecha"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
         for r in rows
     )
     header = _pdf_header("Por persona operacional — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)

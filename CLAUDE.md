@@ -32,11 +32,34 @@ No mezclar responsabilidades entre capas. La lógica reutilizable siempre va en 
 
 ---
 
+## Date Format Convention
+
+All dates visible to the user must be displayed as **`DD/MM/YYYY`** — no exceptions.
+
+This applies to:
+- UI components: tables, forms, modals, date pickers, tooltips
+- Exported files: PDFs and Excel/CSV reports
+- Any user-facing text (error messages, labels, summaries)
+
+This does NOT apply to:
+- Internal API JSON responses (use ISO 8601: `YYYY-MM-DD`)
+- Database storage (always store as native `DATE`/`TIMESTAMP`)
+- Git commit messages or code
+
+When generating or reviewing frontend code, always verify date formatting functions output `DD/MM/YYYY`.
+
+---
+
 ## Language Convention
 
 All code must be written in English:
 - File names, variable names, function names, class names
 - Comments, docstrings, log messages, git commit messages
+
+Documentation must be written in Spanish:
+- spec files (specs/**/*.md)
+- README files
+- Any other markdown documentation files
 
 Exception: table names, column names, and CSV field names stay in Spanish
 as defined by the client (e.g. `id_trabajador`, `contratista`, `fecha_inicio_trato`).

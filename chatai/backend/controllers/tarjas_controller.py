@@ -1084,7 +1084,7 @@ async def download_tarjas_resumen_persona_excel(
 
     # Header row
     headers = ["Trabajador", "Contratista", "Tipo de pago"] + [
-        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+        datetime.date.fromisoformat(d).strftime("%d/%m/%Y") for d in dates
     ] + ["Total"]
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
@@ -1856,7 +1856,7 @@ async def download_tarjas_resumen_horas_excel(
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Horas extra"
     headers = ["Trabajador","Contratista","Tipo de pago"] + [
-        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+        datetime.date.fromisoformat(d).strftime("%d/%m/%Y") for d in dates
     ] + ["Total"]
     _apply_header(ws, headers)
     from openpyxl.styles import PatternFill, Font
@@ -1916,7 +1916,7 @@ async def download_tarjas_resumen_persona_tractorista_excel(
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Tractorista"
     headers = ["Trabajador","Contratista","Tipo de pago"] + [
-        datetime.date.fromisoformat(d).strftime("%-d %b %Y") for d in dates
+        datetime.date.fromisoformat(d).strftime("%d/%m/%Y") for d in dates
     ] + ["Total"]
     _apply_header(ws, headers)
     from openpyxl.styles import PatternFill, Font
@@ -1982,7 +1982,7 @@ async def download_tarjas_resumen_persona_pdf(
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
     fmtCLP = lambda v: f"${v:,.0f}".replace(",", ".")
-    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%-d %b")}</th>' for d in dates)
+    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>' for d in dates)
     rows_html = ""
     prev = None
     for (trab, tipo), entry in sorted_workers:
@@ -2234,7 +2234,7 @@ async def download_tarjas_resumen_horas_pdf(
         workers[k]["total"] += (r["horas"] or 0)
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
-    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%-d %b")}</th>' for d in dates)
+    date_headers = "".join(f'<th class="num">{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>' for d in dates)
     rows_html = ""
     prev = None
     for (trab, tipo), entry in sorted_workers:
