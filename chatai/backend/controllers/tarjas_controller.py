@@ -377,7 +377,7 @@ async def get_tarjas_general(
             )
             labor_summary = _rows_to_dicts(cur)
 
-            # 2) Person ranking (top earners)
+            # 2) Person ranking (top 6 earners)
             cur.execute(
                 f"""
                 SELECT
@@ -391,6 +391,7 @@ async def get_tarjas_general(
                 {where}
                 GROUP BY trabajador, contratista
                 ORDER BY total DESC
+                LIMIT 6
             """,
                 params,
             )
