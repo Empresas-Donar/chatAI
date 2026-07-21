@@ -16,6 +16,16 @@ function parseFecha(s) {
   return s;
 }
 
+// ── Default dates: last 90 days ───────────────────────────────────────────
+function setDefaultDates() {
+  const to   = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - 90);
+  const fmt = d => d.toISOString().slice(0, 10);
+  document.getElementById('fil-from').value = fmt(from);
+  document.getElementById('fil-to').value   = fmt(to);
+}
+
 async function loadFilters() {
   try {
     const res = await fetch('/api/despacho/ordenes/filters');
@@ -33,7 +43,7 @@ async function loadFilters() {
 }
 
 // ── URL filter sync ───────────────────────────────────────────────────────
-const FILTER_IDS = ['fil-cliente', 'fil-producto'];
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cliente', 'fil-producto'];
 
 document.getElementById('btn-apply').addEventListener('click', () => {
   fetchOrdenes().then(() => syncFiltersToURL(FILTER_IDS));
@@ -42,15 +52,21 @@ document.getElementById('btn-apply').addEventListener('click', () => {
 bindPopstate(FILTER_IDS, fetchOrdenes);
 
 document.getElementById('btn-download').addEventListener('click', () => {
+  const from     = document.getElementById('fil-from').value;
+  const to       = document.getElementById('fil-to').value;
   const cliente  = document.getElementById('fil-cliente').value;
   const producto = document.getElementById('fil-producto').value;
   const params = new URLSearchParams();
+  if (from)     params.set('fecha_inicio', from);
+  if (to)       params.set('fecha_termino', to);
   if (cliente)  params.set('cliente', cliente);
   if (producto) params.set('producto', producto);
   window.location.href = '/api/despacho/ordenes/download?' + params;
 });
 
 async function fetchOrdenes() {
+  const from     = document.getElementById('fil-from').value;
+  const to       = document.getElementById('fil-to').value;
   const cliente  = document.getElementById('fil-cliente').value;
   const producto = document.getElementById('fil-producto').value;
 
@@ -60,11 +76,13 @@ async function fetchOrdenes() {
   document.getElementById('empty-box').classList.add('hidden');
   document.getElementById('btn-download').disabled = true;
 
+  if (!from || !to) { showError('Selecciona un rango de fechas.'); return; }
+
   const btn = document.getElementById('btn-apply');
   btn.disabled = true; btn.textContent = 'Cargando…';
 
   try {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to });
     if (cliente)  params.set('cliente', cliente);
     if (producto) params.set('producto', producto);
 
@@ -115,7 +133,8 @@ function render({ ordenes, kpi }) {
 function showError(msg) { const el = document.getElementById('error-box'); el.textContent = msg; el.classList.remove('hidden'); }
 function hideError()    { document.getElementById('error-box').classList.add('hidden'); }
 
-// Populate selects, restore URL params, then auto-run (replaces the DOMContentLoaded trigger)
+// Set default dates, populate selects, restore URL params, then auto-run
+setDefaultDates();
 loadFilters().then(() => {
   autoTriggerFromURL(FILTER_IDS, fetchOrdenes);
 });

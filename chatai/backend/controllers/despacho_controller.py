@@ -63,6 +63,7 @@ def _rows_to_dicts(cur):
 # Notas de crédito — moved to /tarjas/notas (redirects kept for old bookmarks)
 # ===========================================================================
 
+
 @router.get("/despacho/notas")
 async def despacho_notas_redirect():
     return RedirectResponse(url="/tarjas/notas", status_code=301)
@@ -75,7 +76,9 @@ async def redirect_despacho_notas_filters():
 
 @router.get("/api/despacho/notas")
 async def redirect_despacho_notas(request: Request):
-    return RedirectResponse(url=f"/api/tarjas/notas?{request.url.query}", status_code=301)
+    return RedirectResponse(
+        url=f"/api/tarjas/notas?{request.url.query}", status_code=301
+    )
 
 
 # ===========================================================================
@@ -85,6 +88,7 @@ async def redirect_despacho_notas(request: Request):
 # ===========================================================================
 # Guía de despacho — document view
 # ===========================================================================
+
 
 @router.get("/despacho/guia", response_class=HTMLResponse)
 async def despacho_guia_page(request: Request):
@@ -98,8 +102,10 @@ async def get_despacho_guia_filters(
 ):
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
     try:
         with conn.cursor() as cur:
             # Clientes — filtered by chofer if selected
@@ -107,7 +113,7 @@ async def get_despacho_guia_filters(
                 cur.execute(
                     "SELECT DISTINCT cliente FROM appsheet.despacho_ingreso "
                     "WHERE cliente IS NOT NULL AND nombre_chofer = %s ORDER BY cliente",
-                    (chofer,)
+                    (chofer,),
                 )
             else:
                 cur.execute(
@@ -121,7 +127,7 @@ async def get_despacho_guia_filters(
                 cur.execute(
                     "SELECT DISTINCT nombre_chofer FROM appsheet.despacho_ingreso "
                     "WHERE nombre_chofer IS NOT NULL AND cliente = %s ORDER BY nombre_chofer",
-                    (cliente,)
+                    (cliente,),
                 )
             else:
                 cur.execute(
@@ -146,8 +152,10 @@ async def get_despacho_guia(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
     params: list = [fecha_inicio, fecha_termino]
@@ -161,7 +169,8 @@ async def get_despacho_guia(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     i.fecha_limpia::date::text          AS fecha,
                     COALESCE(i.cliente, '—')            AS cliente,
@@ -184,42 +193,47 @@ async def get_despacho_guia(
                     ON TRIM(cc.producto) = TRIM(i.producto)
                 {where}
                 ORDER BY i.fecha_limpia DESC, i.cliente, i.producto
-            """, params)
+            """,
+                params,
+            )
             rows = _rows_to_dicts(cur)
     finally:
         conn.close()
 
     # Group rows into trips: key = (fecha, cliente, chofer, patente)
     from collections import OrderedDict
+
     trips: dict = OrderedDict()
     for r in rows:
         key = (r["fecha"], r["cliente"], r["chofer"], r["patente"])
         if key not in trips:
             trips[key] = {
-                "fecha":      r["fecha"],
-                "cliente":    r["cliente"],
+                "fecha": r["fecha"],
+                "cliente": r["cliente"],
                 "nombre_odoo": r["nombre_odoo"],
-                "chofer":     r["chofer"],
-                "patente":    r["patente"],
-                "destino":    r["destino"],
-                "lineas":     [],
+                "chofer": r["chofer"],
+                "patente": r["patente"],
+                "destino": r["destino"],
+                "lineas": [],
                 "total_unidades": 0,
-                "total_pallets":  0,
+                "total_pallets": 0,
             }
         product_id, analytic = _parse_odoo_id(r["id_odoo"])
-        trips[key]["lineas"].append({
-            "producto":       r["producto"] or "—",
-            "calidad":        r["calidad"],
-            "total_unidades": r["total_unidades"],
-            "cajas":          r["cajas"],
-            "unidades_caja":  r["unidades_caja"],
-            "pallets":        r["pallets"],
-            "mallas":         r["mallas"],
-            "product_id":     product_id,
-            "analytic":       analytic,
-        })
+        trips[key]["lineas"].append(
+            {
+                "producto": r["producto"] or "—",
+                "calidad": r["calidad"],
+                "total_unidades": r["total_unidades"],
+                "cajas": r["cajas"],
+                "unidades_caja": r["unidades_caja"],
+                "pallets": r["pallets"],
+                "mallas": r["mallas"],
+                "product_id": product_id,
+                "analytic": analytic,
+            }
+        )
         trips[key]["total_unidades"] += r["total_unidades"]
-        trips[key]["total_pallets"]  += r["pallets"]
+        trips[key]["total_pallets"] += r["pallets"]
 
     return {"viajes": list(trips.values())}
 
@@ -236,8 +250,10 @@ async def download_despacho_guia(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s", "i.total_unidades > 0"]
     params: list = [fecha_inicio, fecha_termino]
@@ -251,7 +267,8 @@ async def download_despacho_guia(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     i.fecha_limpia::date::text          AS fecha,
                     COALESCE(i.cliente, '')             AS cliente,
@@ -274,27 +291,53 @@ async def download_despacho_guia(
                     ON TRIM(cc.producto) = TRIM(i.producto)
                 {where}
                 ORDER BY i.fecha_limpia DESC, i.cliente, i.producto
-            """, params)
+            """,
+                params,
+            )
             rows = _rows_to_dicts(cur)
     finally:
         conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([
-        "Fecha", "Cliente", "Cliente Odoo", "Chofer", "Patente", "Destino",
-        "Producto", "Cod. Odoo", "Calidad",
-        "Total Unidades", "Cajas", "Und./Caja", "Pallets", "Mallas",
-    ])
+    writer.writerow(
+        [
+            "Fecha",
+            "Cliente",
+            "Cliente Odoo",
+            "Chofer",
+            "Patente",
+            "Destino",
+            "Producto",
+            "Cod. Odoo",
+            "Calidad",
+            "Total Unidades",
+            "Cajas",
+            "Und./Caja",
+            "Pallets",
+            "Mallas",
+        ]
+    )
     for r in rows:
         product_id, _ = _parse_odoo_id(r["id_odoo"])
-        writer.writerow([
-            r["fecha"], r["cliente"], r["nombre_odoo"],
-            r["chofer"], r["patente"], r["destino"],
-            r["producto"], product_id, r["calidad"],
-            r["total_unidades"], r["cajas"], r["unidades_caja"],
-            r["pallets"], r["mallas"],
-        ])
+        writer.writerow(
+            [
+                r["fecha"],
+                r["cliente"],
+                r["nombre_odoo"],
+                r["chofer"],
+                r["patente"],
+                r["destino"],
+                r["producto"],
+                product_id,
+                r["calidad"],
+                r["total_unidades"],
+                r["cajas"],
+                r["unidades_caja"],
+                r["pallets"],
+                r["mallas"],
+            ]
+        )
 
     output.seek(0)
     filename = f"guia_despacho_{fecha_inicio}_{fecha_termino}.csv"
@@ -309,6 +352,7 @@ async def download_despacho_guia(
 # Órdenes de venta — despacho_resumen table
 # ===========================================================================
 
+
 @router.get("/despacho/ordenes", response_class=HTMLResponse)
 async def despacho_ordenes_page(request: Request):
     return _templates.TemplateResponse(request, "despacho_ordenes.html")
@@ -318,8 +362,10 @@ async def despacho_ordenes_page(request: Request):
 async def get_despacho_ordenes_filters():
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -340,16 +386,30 @@ async def get_despacho_ordenes_filters():
 
 @router.get("/api/despacho/ordenes")
 async def get_despacho_ordenes(
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
     cliente: str = Query(None),
     producto: str = Query(None),
 ):
+    if fecha_inicio and not _DATE_RE.match(fecha_inicio):
+        raise HTTPException(status_code=400, detail="fecha_inicio must be YYYY-MM-DD")
+    if fecha_termino and not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="fecha_termino must be YYYY-MM-DD")
+
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     filters = []
     params: list = []
+    if fecha_inicio and fecha_termino:
+        filters.append(
+            "TO_DATE(SPLIT_PART(fecha, ' ', 1), 'MM/DD/YYYY') BETWEEN %s AND %s"
+        )
+        params.extend([fecha_inicio, fecha_termino])
     if cliente:
         filters.append("cliente = %s")
         params.append(cliente)
@@ -361,7 +421,8 @@ async def get_despacho_ordenes(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COALESCE(cliente, '—')          AS cliente,
                     COALESCE(producto, '—')         AS producto,
@@ -372,10 +433,13 @@ async def get_despacho_ordenes(
                 FROM appsheet.despacho_venta
                 {where}
                 ORDER BY fecha DESC, cliente, producto
-            """, params)
+            """,
+                params,
+            )
             ordenes = _rows_to_dicts(cur)
 
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COUNT(*)                                        AS total_ordenes,
                     COALESCE(SUM(NULLIF(cantidad, '')::numeric), 0) AS total_cantidad,
@@ -383,7 +447,9 @@ async def get_despacho_ordenes(
                     COUNT(DISTINCT centro_costo)                    AS total_ccs
                 FROM appsheet.despacho_venta
                 {where}
-            """, params)
+            """,
+                params,
+            )
             kpi = _rows_to_dicts(cur)[0]
     finally:
         conn.close()
@@ -393,17 +459,31 @@ async def get_despacho_ordenes(
 
 @router.get("/api/despacho/ordenes/download")
 async def download_despacho_ordenes(
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
     cliente: str = Query(None),
     producto: str = Query(None),
 ):
     """CSV de órdenes de venta listo para importar en Odoo."""
+    if fecha_inicio and not _DATE_RE.match(fecha_inicio):
+        raise HTTPException(status_code=400, detail="fecha_inicio must be YYYY-MM-DD")
+    if fecha_termino and not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="fecha_termino must be YYYY-MM-DD")
+
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     filters = []
     params: list = []
+    if fecha_inicio and fecha_termino:
+        filters.append(
+            "TO_DATE(SPLIT_PART(fecha, ' ', 1), 'MM/DD/YYYY') BETWEEN %s AND %s"
+        )
+        params.extend([fecha_inicio, fecha_termino])
     if cliente:
         filters.append("cliente = %s")
         params.append(cliente)
@@ -415,7 +495,8 @@ async def download_despacho_ordenes(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COALESCE(cliente, '')     AS cliente,
                     COALESCE(producto, '')    AS producto,
@@ -426,14 +507,18 @@ async def download_despacho_ordenes(
                 FROM appsheet.despacho_venta
                 {where}
                 ORDER BY fecha DESC, cliente, producto
-            """, params)
+            """,
+                params,
+            )
             rows = cur.fetchall()
     finally:
         conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(["Fecha", "Cliente", "Producto", "Descripción", "Centro de Costo", "Cantidad"])
+    writer.writerow(
+        ["Fecha", "Cliente", "Producto", "Descripción", "Centro de Costo", "Cantidad"]
+    )
     for r in rows:
         writer.writerow([r[5], r[0], r[1], r[2], r[4], r[3]])
 
@@ -451,6 +536,7 @@ async def download_despacho_ordenes(
 # Resumen de despacho — dashboard view
 # ===========================================================================
 
+
 @router.get("/despacho/resumen", response_class=HTMLResponse)
 async def despacho_resumen_page(request: Request):
     return _templates.TemplateResponse(request, "despacho_resumen.html")
@@ -460,8 +546,10 @@ async def despacho_resumen_page(request: Request):
 async def get_despacho_resumen_filters():
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -485,8 +573,10 @@ async def get_despacho_resumen(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     base_filters = ["fecha_limpia::date BETWEEN %s AND %s"]
     base_params: list = [fecha_inicio, fecha_termino]
@@ -498,7 +588,8 @@ async def get_despacho_resumen(
     try:
         with conn.cursor() as cur:
             # ── KPIs globales ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COUNT(*)                                    AS total_registros,
                     COALESCE(SUM(kg_brutos), 0)                AS total_kg,
@@ -508,11 +599,14 @@ async def get_despacho_resumen(
                     COUNT(DISTINCT fecha_limpia::date)          AS dias
                 FROM appsheet.despacho_ingreso
                 {where}
-            """, base_params)
+            """,
+                base_params,
+            )
             kpi = _rows_to_dicts(cur)[0]
 
             # ── Tendencia semanal (unidades) ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     DATE_TRUNC('week', fecha_limpia::timestamp)::date AS semana,
                     COALESCE(SUM(total_unidades), 0)                  AS unidades,
@@ -521,11 +615,14 @@ async def get_despacho_resumen(
                 FROM appsheet.despacho_ingreso
                 {where}
                 GROUP BY 1 ORDER BY 1
-            """, base_params)
+            """,
+                base_params,
+            )
             tendencia_semanal = _rows_to_dicts(cur)
 
             # ── Top clientes por unidades ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COALESCE(cliente, 'Sin cliente')            AS cliente,
                     COALESCE(SUM(total_unidades), 0)            AS unidades,
@@ -536,11 +633,14 @@ async def get_despacho_resumen(
                 GROUP BY cliente
                 ORDER BY unidades DESC, kg DESC
                 LIMIT 10
-            """, base_params)
+            """,
+                base_params,
+            )
             top_clientes = _rows_to_dicts(cur)
 
             # ── Distribución por calidad (solo registros con unidades) ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     COALESCE(calidad, 'Sin calidad')            AS calidad,
                     COALESCE(SUM(total_unidades), 0)            AS unidades,
@@ -549,11 +649,14 @@ async def get_despacho_resumen(
                 {where} AND total_unidades > 0
                 GROUP BY calidad
                 ORDER BY unidades DESC
-            """, base_params)
+            """,
+                base_params,
+            )
             por_calidad = _rows_to_dicts(cur)
 
             # ── Top productos (unidades, semillas/pimientos) ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     CASE
                         WHEN producto LIKE '%%-25/26 %%'
@@ -567,11 +670,14 @@ async def get_despacho_resumen(
                 GROUP BY 1
                 ORDER BY unidades DESC
                 LIMIT 10
-            """, base_params)
+            """,
+                base_params,
+            )
             top_productos = _rows_to_dicts(cur)
 
             # ── Últimos 10 despachos ──
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     fecha_limpia::date::text        AS fecha,
                     COALESCE(cliente, '—')          AS cliente,
@@ -584,7 +690,9 @@ async def get_despacho_resumen(
                 {where}
                 ORDER BY fecha_limpia DESC
                 LIMIT 15
-            """, base_params)
+            """,
+                base_params,
+            )
             ultimos = _rows_to_dicts(cur)
 
     finally:
@@ -610,7 +718,7 @@ _ODOO_HEADERS = [
     "Líneas del pedido/Cantidad",
     "Líneas del pedido/Código de Distribución Analítica/Código",
     "Líneas del pedido/Precio un.",
-    "",                                   # blank separator column (F)
+    "",  # blank separator column (F)
     "partner_id",
     "order_line/product_id",
     "order_line/product_qty",
@@ -647,8 +755,10 @@ async def despacho_odoo_page(request: Request):
 async def get_despacho_odoo_filters():
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -673,8 +783,10 @@ async def download_despacho_odoo(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     filters = ["i.fecha_limpia::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
@@ -687,7 +799,8 @@ async def download_despacho_odoo(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
+            cur.execute(
+                f"""
                 SELECT
                     i.cliente,
                     cl.nombre_odoo              AS partner_id,
@@ -701,7 +814,9 @@ async def download_despacho_odoo(
                     ON TRIM(cc.producto) = TRIM(i.producto)
                 {where}
                 ORDER BY i.cliente, i.producto
-            """, params)
+            """,
+                params,
+            )
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -717,24 +832,28 @@ async def download_despacho_odoo(
 
         # Vendedor only on first line per client (matches Odoo import format)
         vendedor_cell = cliente_val if cliente_val != prev_cliente else ""
-        partner_cell  = (partner_id or cliente_val) if cliente_val != prev_cliente else ""
-        prev_cliente  = cliente_val
+        partner_cell = (
+            (partner_id or cliente_val) if cliente_val != prev_cliente else ""
+        )
+        prev_cliente = cliente_val
 
         qty_val = int(qty) if qty is not None else ""
 
-        writer.writerow([
-            vendedor_cell,          # Vendedor
-            producto or "",         # Producto/Nombre
-            qty_val,                # Cantidad
-            product_id_str,         # Código Distribución Analítica
-            "",                     # Precio unitario (vacío — se completa en Odoo)
-            "",                     # blank separator
-            partner_cell,           # partner_id
-            product_id_str,         # order_line/product_id
-            qty_val,                # order_line/product_qty
-            analytic_dist,          # order_line/analytic_distribution
-            "",                     # order_line/price_unit
-        ])
+        writer.writerow(
+            [
+                vendedor_cell,  # Vendedor
+                producto or "",  # Producto/Nombre
+                qty_val,  # Cantidad
+                product_id_str,  # Código Distribución Analítica
+                "",  # Precio unitario (vacío — se completa en Odoo)
+                "",  # blank separator
+                partner_cell,  # partner_id
+                product_id_str,  # order_line/product_id
+                qty_val,  # order_line/product_qty
+                analytic_dist,  # order_line/analytic_distribution
+                "",  # order_line/price_unit
+            ]
+        )
 
     output.seek(0)
     filename = f"odoo_despacho_{fecha_inicio}_{fecha_termino}.csv"
