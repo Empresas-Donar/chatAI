@@ -137,9 +137,21 @@
     }
   });
 
+  // ── URL filter sync ───────────────────────────────────────────────────────
+  const FILTER_IDS = ['fil-from', 'fil-to', 'fil-empresa', 'fil-contratista'];
+
+  // Sync URL when user clicks download (secondary listener on btnDownload)
+  btnDownload.addEventListener('click', () => {
+    syncFiltersToURL(FILTER_IDS);
+  });
+
   // ── Init ──────────────────────────────────────────────────────────────────
   setDefaultDates();
-  loadFilters();
+  loadFilters().then(() => {
+    // Restore URL params after selects are populated; no auto-trigger (download is manual)
+    loadFiltersFromURL(FILTER_IDS);
+    updateState();
+  });
   initCards();
   updateState();
 })();

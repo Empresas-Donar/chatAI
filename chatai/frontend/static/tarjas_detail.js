@@ -232,8 +232,21 @@ function printWithHeader(title, filters) {
   });
 }
 
+// ── URL filter sync ───────────────────────────────────────────────────
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-labor', 'fil-campo', 'fil-tipo'];
+
+async function loadFiltersAndRestore() {
+  // Set default dates first so inputs are never empty when no URL params exist
+  initDates();
+  // Populate dynamic selects, then restore URL params so select values find their <option>
+  await loadFilters();
+  autoTriggerFromURL(FILTER_IDS, queryData);
+}
+
 // ── Events ───────────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', queryData);
+document.getElementById('btn-apply').addEventListener('click', () => {
+  queryData().then(() => syncFiltersToURL(FILTER_IDS));
+});
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/detalle/download-excel?' + currentParams();
 });
@@ -242,10 +255,10 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 });
 
 document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
-  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData(); });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') queryData().then(() => syncFiltersToURL(FILTER_IDS)); });
 });
 
+bindPopstate(FILTER_IDS, queryData);
+
 // ── Init ─────────────────────────────────────────────────────────────
-initDates();
-loadFilters();
-queryData();
+loadFiltersAndRestore();

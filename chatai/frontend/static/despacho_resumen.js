@@ -47,7 +47,13 @@ async function loadFilters() {
 }
 
 // ── Query ─────────────────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', fetchDashboard);
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cliente'];
+
+document.getElementById('btn-apply').addEventListener('click', () => {
+  fetchDashboard().then(() => syncFiltersToURL(FILTER_IDS));
+});
+
+bindPopstate(FILTER_IDS, fetchDashboard);
 
 async function fetchDashboard() {
   const from    = document.getElementById('fil-from').value;
@@ -190,6 +196,7 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
-loadFilters();
-// Auto-load on page open
-document.addEventListener('DOMContentLoaded', () => fetchDashboard());
+// Populate dynamic select first so restored value finds its <option>
+loadFilters().then(() => {
+  autoTriggerFromURL(FILTER_IDS, fetchDashboard);
+});
