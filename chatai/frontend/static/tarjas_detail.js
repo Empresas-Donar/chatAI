@@ -240,8 +240,7 @@ async function loadFiltersAndRestore() {
   initDates();
   // Populate dynamic selects, then restore URL params so select values find their <option>
   await loadFilters();
-  loadFiltersFromURL(FILTER_IDS);
-  queryData();
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 // ── Events ───────────────────────────────────────────────────────────

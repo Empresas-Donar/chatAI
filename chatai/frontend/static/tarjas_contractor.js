@@ -295,8 +295,7 @@ const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil
 async function loadFiltersAndRestore() {
   initDates();
   await loadFilters();
-  loadFiltersFromURL(FILTER_IDS);
-  queryData();
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 // ── Events ────────────────────────────────────────────────────────────

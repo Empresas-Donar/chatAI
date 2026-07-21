@@ -198,6 +198,5 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 setDefaultDates();
 // Populate dynamic select first so restored value finds its <option>
 loadFilters().then(() => {
-  loadFiltersFromURL(FILTER_IDS);
-  fetchDashboard();
+  autoTriggerFromURL(FILTER_IDS, fetchDashboard);
 });

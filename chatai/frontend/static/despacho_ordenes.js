@@ -114,6 +114,5 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 
 // Populate selects, restore URL params, then auto-run (replaces the DOMContentLoaded trigger)
 loadFilters().then(() => {
-  loadFiltersFromURL(FILTER_IDS);
-  fetchOrdenes();
+  autoTriggerFromURL(FILTER_IDS, fetchOrdenes);
 });

@@ -208,8 +208,7 @@ const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cc', 'fil-labor', 'fil-maquina', 
 async function loadFiltersAndRestore() {
   initDates();
   await loadFilters();
-  loadFiltersFromURL(FILTER_IDS);
-  queryData();
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 document.getElementById('btn-apply').addEventListener('click', () => {

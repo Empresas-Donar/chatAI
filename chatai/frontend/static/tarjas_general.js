@@ -238,8 +238,7 @@ const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cc', 'fil-tipo', 'fil-labor', 'fi
 async function loadFiltersAndRestore() {
   initDates();
   await loadFilters();
-  loadFiltersFromURL(FILTER_IDS);
-  queryData();
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 // ── Events ────────────────────────────────────────────────────────────
