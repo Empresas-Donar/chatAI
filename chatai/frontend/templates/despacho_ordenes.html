@@ -42,6 +42,7 @@
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" id="btn-apply">Consultar</button>
         <button class="btn btn-secondary" id="btn-download" disabled title="Consulta primero para habilitar la descarga">↓ CSV</button>
+        <button class="btn btn-secondary" id="btn-sync-preview" disabled title="Consulta primero para verificar los CCs en Odoo">Verificar CCs en Odoo</button>
       </div>
     </div>
   </div>
@@ -95,6 +96,75 @@
   </div>
 
 </div>
+
+<!-- CC Sync Preview Modal -->
+<div id="sync-modal" class="cc-modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="cc-modal-box">
+    <div class="cc-modal-header">
+      <div>
+        <h2 class="cc-modal-title">Verificación de Centros de Costo en Odoo</h2>
+        <p class="cc-modal-subtitle">Estado de cada CC presente en las órdenes del período seleccionado.</p>
+      </div>
+      <button class="cc-modal-close" id="btn-sync-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div id="sync-modal-loading" class="cc-modal-loading">
+      <div class="cc-spinner"></div>
+      <p>Consultando Odoo y verificando centros de costo…</p>
+    </div>
+
+    <div id="sync-modal-content" class="hidden">
+
+      <!-- Summary bar -->
+      <div class="cc-summary-row">
+        <div class="cc-chip cc-chip-ok"><span id="sync-ok-count">0</span> mapeados</div>
+        <div class="cc-chip cc-chip-warn" id="sync-unknown-chip" style="display:none">⚠ <span id="sync-unknown-count">0</span> sin mapear</div>
+        <div class="cc-chip cc-chip-warn" id="sync-empty-chip" style="display:none">— <span id="sync-empty-count">0</span> vacíos</div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="sync-unknown-alert" class="cc-alert cc-alert-warning hidden">
+        <span class="cc-alert-icon">⚠️</span>
+        <div>
+          <strong>Hay <span id="sync-unknown-count-msg">0</span> centros de costo sin mapear en Odoo.</strong>
+          Verifica que los códigos en AppSheet coincidan con los códigos de CC_analiticos en Odoo.
+        </div>
+      </div>
+      <div id="sync-bq-unavail-alert" class="cc-alert cc-alert-info hidden">
+        <span class="cc-alert-icon">ℹ️</span>
+        <div>BigQuery no disponible — los CCs no pudieron validarse contra Odoo. Verifica manualmente.</div>
+      </div>
+
+      <!-- CC status table -->
+      <div class="cc-list-wrap">
+        <table class="cc-list-table">
+          <thead>
+            <tr>
+              <th>Centro de Costo</th>
+              <th class="num">Órdenes</th>
+              <th class="num">Cantidad total</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="sync-preview-tbody"></tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <div id="sync-modal-error" class="cc-alert cc-alert-error hidden"></div>
+
+    <div class="cc-modal-footer">
+      <div></div>
+      <div class="cc-modal-footer-right">
+        <button class="btn" id="btn-sync-cancel" style="background:var(--surface);border:1px solid var(--border)">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}

@@ -15,6 +15,8 @@ Routes:
   GET  /despacho/odoo                   → Odoo export page
   GET  /api/despacho/odoo/filters       → Filter options (clientes, fechas)
   GET  /api/despacho/odoo/download      → CSV download for Odoo import
+
+  GET  /api/despacho/ordenes/sync-preview → CC sync status for sale orders
 """
 
 import csv
@@ -23,17 +25,45 @@ import decimal
 import io
 import json
 import logging
+import os
 import re
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 from auth import require_auth
 from db import get_connection
 
 logger = logging.getLogger("controllers.despacho")
+
+# ---------------------------------------------------------------------------
+# BigQuery helpers (reuse same pattern as purchase_orders_controller)
+# ---------------------------------------------------------------------------
+
+_BQ_ALL_CC_QUERY = """
+    SELECT
+      CAST(id AS STRING) AS id,
+      code,
+      active,
+      COALESCE(
+        JSON_VALUE(name, '$.es_CL'),
+        JSON_VALUE(name, '$.en_US'),
+        CAST(id AS STRING)
+      ) AS nombre
+    FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
+"""
+
+
+def _get_bq_client():
+    key_path = os.getenv("BQ_KEY_PATH")
+    project = os.getenv("BQ_PROJECT", "ace-scarab-484515-v1")
+    credentials = service_account.Credentials.from_service_account_file(key_path)
+    return bigquery.Client(project=project, credentials=credentials)
+
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -530,6 +560,138 @@ async def download_despacho_ordenes(
         media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ===========================================================================
+# Sync preview — CC status for sale orders
+# ===========================================================================
+
+
+@router.get("/api/despacho/ordenes/sync-preview")
+async def get_despacho_ordenes_sync_preview(
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
+    cliente: str = Query(None),
+    producto: str = Query(None),
+):
+    """
+    Devuelve, para el período filtrado, el estado de cada Centro de Costo (CC)
+    único presente en las órdenes de venta, validado contra BigQuery (CC_analiticos).
+
+    Estado por CC:
+      ok      → code existe y active = TRUE en Odoo
+      unknown → no encontrado en CC_analiticos (o BQ no disponible)
+      empty   → campo centro_costo vacío, NULL o valor '—'
+    """
+    if fecha_inicio and not _DATE_RE.match(fecha_inicio):
+        raise HTTPException(status_code=400, detail="fecha_inicio must be YYYY-MM-DD")
+    if fecha_termino and not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="fecha_termino must be YYYY-MM-DD")
+
+    # 1. Fetch all CC_analiticos from BigQuery (best-effort)
+    bq_available = False
+    active_codes: set[str] = set()  # active CC codes (lower-stripped)
+    all_codes: set[str] = set()  # all CC codes (lower-stripped) — active + archived
+    try:
+        bq = _get_bq_client()
+        bq_rows = list(bq.query(_BQ_ALL_CC_QUERY).result())
+        for r in bq_rows:
+            code = str(r["code"]).strip().lower() if r["code"] else None
+            if code:
+                all_codes.add(code)
+                if r["active"]:
+                    active_codes.add(code)
+        bq_available = True
+    except Exception as exc:
+        logger.warning(f"BigQuery no disponible en ordenes/sync-preview: {exc}")
+
+    # 2. Fetch distinct CC values + aggregates from PostgreSQL
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    filters = []
+    params: list = []
+    if fecha_inicio and fecha_termino:
+        filters.append(
+            "TO_DATE(SPLIT_PART(fecha, ' ', 1), 'MM/DD/YYYY') BETWEEN %s AND %s"
+        )
+        params.extend([fecha_inicio, fecha_termino])
+    if cliente:
+        filters.append("cliente = %s")
+        params.append(cliente)
+    if producto:
+        filters.append("producto = %s")
+        params.append(producto)
+
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(centro_costo, '')                       AS cc,
+                    COUNT(*)                                         AS num_ordenes,
+                    COALESCE(SUM(NULLIF(cantidad, '')::numeric), 0)  AS total_cantidad
+                FROM appsheet.despacho_venta
+                {where}
+                GROUP BY centro_costo
+                ORDER BY centro_costo
+            """,
+                params,
+            )
+            cc_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    # 3. Classify each CC
+    result = []
+    ok_count = unknown_count = empty_count = 0
+
+    for cc_raw, num_ordenes, total_cantidad in cc_rows:
+        cc_val = (cc_raw or "").strip()
+        is_empty = not cc_val or cc_val == "—"
+
+        if is_empty:
+            status = "empty"
+            empty_count += 1
+        elif not bq_available:
+            status = "unknown"
+            unknown_count += 1
+        else:
+            cc_lower = cc_val.lower()
+            if cc_lower in active_codes:
+                status = "ok"
+                ok_count += 1
+            elif cc_lower in all_codes:
+                # Exists in Odoo but archived
+                status = "archived"
+                unknown_count += 1
+            else:
+                status = "unknown"
+                unknown_count += 1
+
+        result.append(
+            {
+                "cc": cc_val if cc_val else "—",
+                "num_ordenes": int(num_ordenes),
+                "total_cantidad": float(total_cantidad),
+                "status": status,
+            }
+        )
+
+    return {
+        "ccs": result,
+        "bq_available": bq_available,
+        "ok_count": ok_count,
+        "unknown_count": unknown_count,
+        "empty_count": empty_count,
+        "total": len(result),
+    }
 
 
 # ===========================================================================
