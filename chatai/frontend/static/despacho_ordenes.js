@@ -7,9 +7,12 @@ function esc(s) {
 }
 function parseFecha(s) {
   if (!s) return '—';
-  // stored as MM/DD/YYYY HH:MM:SS
+  // source data stored as MM/DD/YYYY HH:MM:SS — reformat to DD/MM/YYYY
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (m) return `${m[2]}-${m[1]}-${m[3]}`;
+  if (m) return `${m[2]}/${m[1]}/${m[3]}`;
+  // fallback: if already YYYY-MM-DD, reformat to DD/MM/YYYY
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
   return s;
 }
 

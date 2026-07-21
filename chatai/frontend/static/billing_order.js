@@ -11,13 +11,14 @@ function esc(s) {
 
 function formatDisplayDate(isoStr) {
   if (!isoStr) return '';
-  const d = new Date(isoStr + 'T12:00:00');
-  return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
+  const [y, m, d] = isoStr.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
 }
 
 function formatShortDate(isoStr) {
-  const d = new Date(isoStr + 'T12:00:00');
-  return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'numeric' });
+  if (!isoStr) return '';
+  const [, m, d] = isoStr.slice(0, 10).split('-');
+  return `${d}/${m}`;
 }
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
