@@ -2891,6 +2891,238 @@ async def download_tarjas_resumen_horas_pdf(
 
 
 # ===========================================================================
+# Jornadas por trabajador — count of distinct work dates per worker
+# ===========================================================================
+
+
+@router.get("/tarjas/jornadas-trabajador", response_class=HTMLResponse)
+async def tarjas_jornadas_trabajador_page(request: Request):
+    return _templates.TemplateResponse(request, "tarjas_jornadas_trabajador.html")
+
+
+@router.get("/api/tarjas/jornadas-trabajador/filters")
+async def get_tarjas_jornadas_trabajador_filters():
+    """Distinct contratistas and empresas for filter dropdowns."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+    finally:
+        conn.close()
+
+    return {"contratistas": contratistas, "empresas": empresas}
+
+
+@router.get("/api/tarjas/jornadas-trabajador")
+async def get_tarjas_jornadas_trabajador(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    """Return jornada count (distinct work dates) per worker for the given period."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista "
+                "ORDER BY contratista, trabajador",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    return {"rows": rows, "count": len(rows)}
+
+
+@router.get("/api/tarjas/jornadas-trabajador/download-excel")
+async def download_tarjas_jornadas_trabajador_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    """Descarga el reporte de jornadas por trabajador como Excel."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+
+    where = "WHERE " + " AND ".join(filters)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Jornadas por trabajador"
+
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(bold=True, color="FFFFFF")
+    total_fill = PatternFill("solid", fgColor="D6E4F0")
+
+    headers = ["Trabajador", "Contratista", "Jornadas"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    total_jornadas = 0
+    for row_num, r in enumerate(rows, 2):
+        ws.cell(row=row_num, column=1, value=r["trabajador"] or "")
+        ws.cell(row=row_num, column=2, value=r["contratista"] or "")
+        jornadas = int(r["jornadas"] or 0)
+        ws.cell(row=row_num, column=3, value=jornadas)
+        total_jornadas += jornadas
+
+    # Total row
+    total_row = len(rows) + 2
+    total_cell = ws.cell(row=total_row, column=1, value="Suma total")
+    total_cell.font = Font(bold=True)
+    total_cell.fill = total_fill
+    ws.cell(row=total_row, column=2, value="").fill = total_fill
+    t = ws.cell(row=total_row, column=3, value=total_jornadas)
+    t.font = Font(bold=True)
+    t.fill = total_fill
+
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 14
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"jornadas_trabajador_{fecha_inicio}_{fecha_termino}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/api/tarjas/jornadas-trabajador/download-pdf")
+async def download_tarjas_jornadas_trabajador_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+                f"FROM appsheet.tarjas_pagos {where} "
+                "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    total = sum(int(r["jornadas"] or 0) for r in rows)
+    rows_html = "".join(
+        f'<tr><td>{r["trabajador"] or ""}</td>'
+        f'<td>{r["contratista"] or ""}</td>'
+        f'<td class="num">{r["jornadas"] or 0}</td></tr>'
+        for r in rows
+    )
+    rows_html += (
+        f'<tr class="total-row"><td><b>Suma total</b></td><td></td>'
+        f'<td class="num"><b>{total}</b></td></tr>'
+    )
+
+    header = _pdf_header(
+        "Jornadas por trabajador — Tarjas",
+        fecha_inicio,
+        fecha_termino,
+        {"Empresa": empresa, "Contratista": contratista},
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Jornadas</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"jornadas_trabajador_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+# ===========================================================================
 # Notas de crédito — contractor payment report (moved from despacho)
 # ===========================================================================
 

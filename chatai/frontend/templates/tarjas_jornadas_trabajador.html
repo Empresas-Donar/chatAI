@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Jornadas por trabajador — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Jornadas por trabajador</h1>
+      <p>Conteo de fechas de trabajo por trabajador en el período seleccionado</p>
+    </div>
+  </div>
+
+  <!-- Print header (filled by JS, visible only when printing) -->
+  <div id="print-header"></div>
+
+  <!-- Filters -->
+  <div class="filter-bar trp-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input lang="es-CL" type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input lang="es-CL" type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Empresa</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="trp-pivot-section" id="table-section" style="display:none">
+    <div class="trp-pivot-scroll">
+      <table class="trp-pivot" id="data-table">
+        <thead>
+          <tr>
+            <th>Trabajador</th>
+            <th>Contratista</th>
+            <th class="th-total">Jornadas</th>
+          </tr>
+        </thead>
+        <tbody id="data-tbody"></tbody>
+        <tfoot id="data-tfoot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="trp-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_jornadas_trabajador.js?v={{ static_v }}"></script>
+{% endblock %}
