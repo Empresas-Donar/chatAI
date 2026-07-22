@@ -32,12 +32,7 @@ _TRACTORISTA_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 
 AVAILABLE_REPORTS = [
-    {
-        "id": "general",
-        "label": "General operacional",
-        "description": "Ganancia promedio por labor y ranking por persona",
-        "category": "Tarjas — Contratistas",
-    },
+    # ── Contratistas — same order as the navigation menu ──────────────────────
     {
         "id": "detalle",
         "label": "Detalle operacional",
@@ -48,6 +43,12 @@ AVAILABLE_REPORTS = [
         "id": "contratista",
         "label": "Por persona operacional",
         "description": "Detalle diario por trabajador y contratista",
+        "category": "Tarjas — Contratistas",
+    },
+    {
+        "id": "general",
+        "label": "General operacional",
+        "description": "Ganancia promedio por labor y ranking por persona",
         "category": "Tarjas — Contratistas",
     },
     {
@@ -62,6 +63,13 @@ AVAILABLE_REPORTS = [
         "description": "Pivot de horas extra diarias por trabajador",
         "category": "Tarjas — Contratistas",
     },
+    {
+        "id": "jornadas-trabajador",
+        "label": "Jornadas por trabajador",
+        "description": "Conteo de jornadas (días distintos) por trabajador",
+        "category": "Tarjas — Contratistas",
+    },
+    # ── Tractoristas — same order as the navigation menu ─────────────────────
     {
         "id": "detalle-tractorista",
         "label": "Detalle tractorista",
@@ -90,6 +98,7 @@ def init(templates: Jinja2Templates) -> None:
 
 # ── Shared PDF utilities ──────────────────────────────────────────────────────
 
+
 def _serialize(v):
     if isinstance(v, decimal.Decimal):
         return float(v)
@@ -104,11 +113,32 @@ def _rows_to_dicts(cur):
 
 
 def _logo_b64() -> str:
-    path = Path(__file__).parent.parent.parent / "frontend" / "static" / "img" / "donar_logo.png"
+    """Return the Donar logo as a base64-encoded PNG, resized to max 200 px wide.
+
+    The original PNG is 1288×539 px (~680 KB, ~907 KB base64). Embedding that
+    full size into the HTML string fed to xhtml2pdf causes text-layout corruption
+    in table cells (issue #12). Resizing to ≤200 px wide brings the base64 to
+    ~29 KB, which xhtml2pdf handles correctly.
+    """
+    path = (
+        Path(__file__).parent.parent.parent
+        / "frontend"
+        / "static"
+        / "img"
+        / "donar_logo.png"
+    )
     try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except OSError:
+        from PIL import Image
+
+        img = Image.open(path)
+        max_w = 200
+        w, h = img.size
+        if w > max_w:
+            img = img.resize((max_w, int(h * max_w / w)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
         return ""
 
 
@@ -148,23 +178,45 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 .section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #111111; }
 .page-break { page-break-before: always; }
 .report-divider { border: none; border-top: 2px solid #333333; margin: 16px 0 12px 0; }
+.total-row td { background: #D6E4F0; font-weight: bold; }
 .pivot-table { table-layout: fixed; width: 100%; }
 .pivot-table th { font-size: 6.5pt; padding: 4px 3px; }
 .pivot-table td { font-size: 6.5pt; padding: 3px 3px; }
 .pivot-table .col-worker { width: 18%; }
 .pivot-table .col-tipo   { width: 9%; }
 .pivot-table .col-total  { width: 10%; text-align: right; font-weight: bold; border-left: 1.5px solid #888888; }
+.jornadas-table { table-layout: fixed; width: 100%; }
+.jornadas-table .col-worker { width: 45%; }
+.jornadas-table .col-contratista { width: 40%; }
+.jornadas-table .col-jornadas { width: 15%; text-align: right; }
 """
 
 
-def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, empresa: str | None) -> str:
+def _pdf_header(
+    title: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     now = datetime.date.today().strftime("%-d de %B de %Y")
     logo = _logo_b64()
     logo_cell = (
-        f'<td style="border:none;width:90px;padding:4px 8px;background:#1e293b;vertical-align:middle">'
-        f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" /></td>'
-    ) if logo else ""
-    empresa_chip = f'<span class="chip"><b>Empresa:</b> {empresa}</span>' if empresa else ""
+        (
+            f'<td style="border:none;width:90px;padding:4px 8px;background:#1e293b;vertical-align:middle">'
+            f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" /></td>'
+        )
+        if logo
+        else ""
+    )
+    empresa_chip = (
+        f'<span class="chip"><b>Empresa:</b> {empresa}</span>' if empresa else ""
+    )
+    contratista_chip = (
+        f'<span class="chip"><b>Contratista:</b> {contratista}</span>'
+        if contratista
+        else ""
+    )
     return f"""
     <table style="width:100%;border:none;margin-bottom:6px">
       <tr>
@@ -181,6 +233,7 @@ def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, empresa: str 
       <span class="chip"><b>Desde:</b> {_fmt_date_display(fecha_inicio)}</span>
       <span class="chip"><b>Hasta:</b> {_fmt_date_display(fecha_termino)}</span>
       {empresa_chip}
+      {contratista_chip}
     </div>
     """
 
@@ -189,11 +242,16 @@ def _pdf_header(title: str, fecha_inicio: str, fecha_termino: str, empresa: str 
 
 _HORAS_EXPR = """NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
                            THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
-_HORAS_SUM  = """COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
+_HORAS_SUM = """COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
                            THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
 
 
-def _base_where_pagos(fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None):
+def _base_where_pagos(
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+):
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if empresa:
@@ -205,7 +263,12 @@ def _base_where_pagos(fecha_inicio: str, fecha_termino: str, empresa: str | None
     return "WHERE " + " AND ".join(filters), params
 
 
-def _base_where_reporte(fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None):
+def _base_where_reporte(
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+):
     filters = ["fecha BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if empresa:
@@ -219,9 +282,17 @@ def _base_where_reporte(fecha_inicio: str, fecha_termino: str, empresa: str | No
 
 # ── HTML generators per report ────────────────────────────────────────────────
 
-def _html_general(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+
+def _html_general(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT labor,
                ROUND(AVG(total_trabajado)::numeric, 0)                     AS promedio_diario,
                ROUND(SUM(total_trabajado)::numeric / {_HORAS_EXPR}, 0)     AS ganancia_hora,
@@ -229,10 +300,13 @@ def _html_general(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
                COALESCE(SUM(total_trabajado), 0)                           AS total
         FROM appsheet.tarjas_pagos {where}
         GROUP BY labor ORDER BY total DESC
-    """, params)
+    """,
+        params,
+    )
     labor_rows = _rows_to_dicts(cur)
 
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, contratista,
                ROUND(AVG(total_trabajado)::numeric, 0)                     AS promedio_diario,
                ROUND(SUM(total_trabajado)::numeric / {_HORAS_EXPR}, 0)     AS ganancia_hora,
@@ -240,14 +314,17 @@ def _html_general(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
                COALESCE(SUM(total_trabajado), 0)                           AS total
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, contratista ORDER BY total DESC
-    """, params)
+        LIMIT 6
+    """,
+        params,
+    )
     ranking_rows = _rows_to_dicts(cur)
 
     fmtCLP = lambda v: _fmt_clp(v)
     fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
 
     labor_html = "".join(
-        f'<tr><td>{r["labor"]}</td>'
+        f"<tr><td>{r['labor']}</td>"
         f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
         f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
         f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
@@ -255,14 +332,16 @@ def _html_general(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
         for r in labor_rows
     )
     ranking_html = "".join(
-        f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td>'
+        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td>"
         f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
         f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
         f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
         f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
         for r in ranking_rows
     )
-    header = _pdf_header("General — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "General — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa, contratista
+    )
     return f"""
     {header}
     <p class="section-title">Ganancia promedio por labor</p>
@@ -278,9 +357,18 @@ def _html_general(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
     """
 
 
-def _html_detalle(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
-    where, params = _base_where_reporte(fecha_inicio, fecha_termino, empresa, contratista)
-    cur.execute(f"""
+def _html_detalle(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
+    where, params = _base_where_reporte(
+        fecha_inicio, fecha_termino, empresa, contratista
+    )
+    cur.execute(
+        f"""
         SELECT tipo_pago, "Nombre Labor" AS labor, "CC" AS centro_costo,
                SUM(jornadas) AS jornadas,
                COALESCE(SUM(horas_trabajadas), 0) AS horas_trabajadas,
@@ -296,20 +384,28 @@ def _html_detalle(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
         FROM appsheet.tarjas_reporte {where}
         GROUP BY tipo_pago, "Nombre Labor", "CC", nombre_campo
         ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     fmtCLP = _fmt_clp
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
     rows_html = "".join(
-        f'<tr><td>{r["tipo_pago"]}</td><td>{r["labor"]}</td><td>{r["centro_costo"]}</td>'
+        f"<tr><td>{r['tipo_pago']}</td><td>{r['labor']}</td><td>{r['centro_costo']}</td>"
         f'<td class="num">{r["jornadas"]}</td>'
         f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
         f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
         f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
     )
-    header = _pdf_header("Detalle operacional — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Detalle operacional — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
     return f"""
     {header}
     <table><thead>
@@ -320,25 +416,40 @@ def _html_detalle(cur, fecha_inicio: str, fecha_termino: str, empresa: str | Non
     """
 
 
-def _html_contratista(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_contratista(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, contratista, labor, tipo_pago,
                COALESCE(SUM(total_trabajado), 0) AS total,
                fecha::date::text AS fecha
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
         ORDER BY contratista, trabajador, fecha::date
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     fmtCLP = _fmt_clp
     rows_html = "".join(
-        f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td><td>{r["labor"]}</td>'
+        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td><td>{r['labor']}</td>"
         f'<td>{r["tipo_pago"]}</td><td>{_fmt_date_display(r["fecha"])}</td><td class="total">{fmtCLP(r["total"])}</td></tr>'
         for r in rows
     )
-    header = _pdf_header("Por persona operacional — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Por persona operacional — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
     return f"""
     {header}
     <table><thead>
@@ -348,15 +459,24 @@ def _html_contratista(cur, fecha_inicio: str, fecha_termino: str, empresa: str |
     """
 
 
-def _html_resumen_persona(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_resumen_persona(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, tipo_pago, fecha::date::text AS fecha,
                COALESCE(SUM(total_trabajado), 0) AS total
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, tipo_pago, fecha::date
         ORDER BY trabajador, tipo_pago, fecha::date
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
@@ -365,7 +485,9 @@ def _html_resumen_persona(cur, fecha_inicio: str, fecha_termino: str, empresa: s
         k = (r["trabajador"] or "", r["tipo_pago"] or "")
         if k not in workers:
             workers[k] = {"by_date": {}, "total": 0}
-        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
+        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(
+            r["fecha"], 0
+        ) + float(r["total"] or 0)
         workers[k]["total"] += float(r["total"] or 0)
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
@@ -388,7 +510,13 @@ def _html_resumen_persona(cur, fecha_inicio: str, fecha_termino: str, empresa: s
             rows_html += f'<td class="num" style="width:{date_pct}">{"" if not v else fmtCLP(v)}</td>'
         rows_html += f'<td class="col-total">{fmtCLP(entry["total"])}</td></tr>'
 
-    header = _pdf_header("Resumen por persona — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Resumen por persona — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
     return f"""
     {header}
     <table class="pivot-table"><thead>
@@ -397,16 +525,25 @@ def _html_resumen_persona(cur, fecha_inicio: str, fecha_termino: str, empresa: s
     """
 
 
-def _html_resumen_horas(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_resumen_horas(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, tipo_pago, fecha::date::text AS fecha,
                COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\.[0-9]+)?$'
                THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS horas
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, tipo_pago, fecha::date
         ORDER BY trabajador, tipo_pago, fecha::date
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
@@ -415,8 +552,10 @@ def _html_resumen_horas(cur, fecha_inicio: str, fecha_termino: str, empresa: str
         k = (r["trabajador"] or "", r["tipo_pago"] or "")
         if k not in workers:
             workers[k] = {"by_date": {}, "total": 0}
-        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + (r["horas"] or 0)
-        workers[k]["total"] += (r["horas"] or 0)
+        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + (
+            r["horas"] or 0
+        )
+        workers[k]["total"] += r["horas"] or 0
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
     n_dates = len(dates)
@@ -434,10 +573,18 @@ def _html_resumen_horas(cur, fecha_inicio: str, fecha_termino: str, empresa: str
         rows_html += f'<tr class="{cls}"><td class="col-worker">{"<b>" + trab + "</b>" if is_first else ""}</td><td class="col-tipo">{tipo}</td>'
         for d in dates:
             v = entry["by_date"].get(d, 0)
-            rows_html += f'<td class="num" style="width:{date_pct}">{v if v else ""}</td>'
+            rows_html += (
+                f'<td class="num" style="width:{date_pct}">{v if v else ""}</td>'
+            )
         rows_html += f'<td class="col-total">{entry["total"]} h</td></tr>'
 
-    header = _pdf_header("Horas extra por persona — Tarjas Contratistas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Horas extra por persona — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
     return f"""
     {header}
     <table class="pivot-table"><thead>
@@ -446,7 +593,13 @@ def _html_resumen_horas(cur, fecha_inicio: str, fecha_termino: str, empresa: str
     """
 
 
-def _html_detalle_tractorista(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_detalle_tractorista(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if empresa:
@@ -457,7 +610,8 @@ def _html_detalle_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
         params.append(contratista)
     where = "WHERE " + " AND ".join(filters)
 
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
                SUM(jornadas) AS jornadas,
                CASE WHEN SUM(jornadas) > 0
@@ -468,19 +622,23 @@ def _html_detalle_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
         FROM appsheet.tarjas_reporte {where}
         GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
         ORDER BY contratista, "CC", "Nombre Labor"
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     fmtCLP = _fmt_clp
     rows_html = "".join(
-        f'<tr><td>{r["tipo_pago"]}</td><td>{r["centro_costo"]}</td><td>{r["labor"]}</td>'
+        f"<tr><td>{r['tipo_pago']}</td><td>{r['centro_costo']}</td><td>{r['labor']}</td>"
         f'<td class="num">{r["jornadas"]}</td>'
         f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
         f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
-        f'<td>{r["contratista"]}</td></tr>'
+        f"<td>{r['contratista']}</td></tr>"
         for r in rows
     )
-    header = _pdf_header("Detalle tractorista — Tarjas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Detalle tractorista — Tarjas", fecha_inicio, fecha_termino, empresa
+    )
     return f"""
     {header}
     <table><thead>
@@ -491,7 +649,13 @@ def _html_detalle_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
     """
 
 
-def _html_general_tractorista(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_general_tractorista(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if empresa:
@@ -502,38 +666,47 @@ def _html_general_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
         params.append(contratista)
     where = "WHERE " + " AND ".join(filters)
 
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT labor,
                ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
                COALESCE(SUM(total_tractor), 0) AS total
         FROM appsheet.tarjas_pagos {where}
         GROUP BY labor ORDER BY total DESC
-    """, params)
+    """,
+        params,
+    )
     labor_rows = _rows_to_dicts(cur)
 
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, contratista,
                ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
                COALESCE(SUM(total_tractor), 0) AS total
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, contratista ORDER BY total DESC
-    """, params)
+        LIMIT 6
+    """,
+        params,
+    )
     ranking_rows = _rows_to_dicts(cur)
 
     fmtCLP = _fmt_clp
     labor_html = "".join(
-        f'<tr><td>{r["labor"]}</td>'
+        f"<tr><td>{r['labor']}</td>"
         f'<td class="num">{fmtCLP(r["avg_rate"])}</td>'
         f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
         for r in labor_rows
     )
     ranking_html = "".join(
-        f'<tr><td>{r["trabajador"]}</td><td>{r["contratista"]}</td>'
+        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td>"
         f'<td class="num">{fmtCLP(r["avg_rate"])}</td>'
         f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
         for r in ranking_rows
     )
-    header = _pdf_header("General tractorista — Tarjas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "General tractorista — Tarjas", fecha_inicio, fecha_termino, empresa
+    )
     return f"""
     {header}
     <p class="section-title">Ganancia promedio por labor</p>
@@ -547,7 +720,13 @@ def _html_general_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
     """
 
 
-def _html_resumen_tractorista(cur, fecha_inicio: str, fecha_termino: str, empresa: str | None, contratista: str | None = None) -> str:
+def _html_resumen_tractorista(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if empresa:
@@ -558,13 +737,16 @@ def _html_resumen_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
         params.append(contratista)
     where = "WHERE " + " AND ".join(filters)
 
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trabajador, tipo_pago, fecha::date::text AS fecha,
                COALESCE(SUM(total_tractor), 0) AS total_tractor
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, tipo_pago, fecha::date
         ORDER BY trabajador, tipo_pago, fecha::date
-    """, params)
+    """,
+        params,
+    )
     rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
@@ -573,7 +755,9 @@ def _html_resumen_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
         k = (r["trabajador"] or "", r["tipo_pago"] or "")
         if k not in workers:
             workers[k] = {"by_date": {}, "total": 0}
-        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + float(r["total_tractor"] or 0)
+        workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(
+            r["fecha"], 0
+        ) + float(r["total_tractor"] or 0)
         workers[k]["total"] += float(r["total_tractor"] or 0)
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
@@ -596,7 +780,9 @@ def _html_resumen_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
             rows_html += f'<td class="num" style="width:{date_pct}">{"" if not v else fmtCLP(v)}</td>'
         rows_html += f'<td class="col-total">{fmtCLP(entry["total"])}</td></tr>'
 
-    header = _pdf_header("Resumen tractorista — Tarjas", fecha_inicio, fecha_termino, empresa)
+    header = _pdf_header(
+        "Resumen tractorista — Tarjas", fecha_inicio, fecha_termino, empresa
+    )
     return f"""
     {header}
     <table class="pivot-table"><thead>
@@ -605,25 +791,87 @@ def _html_resumen_tractorista(cur, fecha_inicio: str, fecha_termino: str, empres
     """
 
 
+def _html_jornadas_trabajador(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(empresa)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    where = "WHERE " + " AND ".join(filters)
+
+    cur.execute(
+        f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+        f"FROM appsheet.tarjas_pagos {where} "
+        "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+        params,
+    )
+    rows = _rows_to_dicts(cur)
+
+    total = sum(int(r["jornadas"] or 0) for r in rows)
+    rows_html = "".join(
+        f"<tr><td>{r['trabajador'] or ''}</td>"
+        f'<td style="white-space:nowrap">{r["contratista"] or ""}</td>'
+        f'<td class="num">{r["jornadas"] or 0}</td></tr>'
+        for r in rows
+    )
+    rows_html += (
+        f'<tr class="total-row"><td><b>Suma total</b></td><td></td>'
+        f'<td class="num"><b>{total}</b></td></tr>'
+    )
+
+    header = _pdf_header(
+        "Jornadas por trabajador — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
+    return f"""
+    {header}
+    <table width="100%"><thead>
+      <tr>
+        <th>Trabajador</th>
+        <th style="white-space:nowrap">Contratista</th>
+        <th class="num">Jornadas</th>
+      </tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
 _REPORT_GENERATORS = {
-    "general":              _html_general,
-    "detalle":              _html_detalle,
-    "contratista":          _html_contratista,
-    "resumen-persona":      _html_resumen_persona,
-    "resumen-horas":        _html_resumen_horas,
-    "detalle-tractorista":  _html_detalle_tractorista,
-    "general-tractorista":  _html_general_tractorista,
-    "resumen-tractorista":  _html_resumen_tractorista,
+    "detalle": _html_detalle,
+    "contratista": _html_contratista,
+    "general": _html_general,
+    "resumen-persona": _html_resumen_persona,
+    "resumen-horas": _html_resumen_horas,
+    "jornadas-trabajador": _html_jornadas_trabajador,
+    "detalle-tractorista": _html_detalle_tractorista,
+    "general-tractorista": _html_general_tractorista,
+    "resumen-tractorista": _html_resumen_tractorista,
 }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @router.get("/reportes", response_class=HTMLResponse)
 async def reportes_page(request: Request):
-    return _templates.TemplateResponse(request, "reportes.html", {
-        "reports": AVAILABLE_REPORTS,
-    })
+    return _templates.TemplateResponse(
+        request,
+        "reportes.html",
+        {
+            "reports": AVAILABLE_REPORTS,
+        },
+    )
 
 
 @router.get("/api/reportes/bulk-pdf")
@@ -647,14 +895,18 @@ async def bulk_pdf_download(
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     sections: list[str] = []
     try:
         with conn.cursor() as cur:
             for report_id in selected:
                 generator = _REPORT_GENERATORS[report_id]
-                section_html = generator(cur, fecha_inicio, fecha_termino, empresa, contratista)
+                section_html = generator(
+                    cur, fecha_inicio, fecha_termino, empresa, contratista
+                )
                 sections.append(section_html)
     finally:
         conn.close()
