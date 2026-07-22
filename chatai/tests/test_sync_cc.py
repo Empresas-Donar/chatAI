@@ -1,8 +1,9 @@
 """
 tests/test_sync_cc.py
 ---------------------
-Regression tests for apps/sync_cc.py — specifically the id_cc deduplication logic
-that resolves colliding codes across different companies.
+Regression tests for apps/sync_cc.py:
+  - id_cc deduplication logic (issue #5)
+  - Modelos_Distribucion_Analitica sync (issue #7)
 
 No BigQuery or PostgreSQL connection is required; all tests are pure-unit against
 the in-process functions via direct import.
@@ -10,6 +11,7 @@ the in-process functions via direct import.
 
 import sys
 from pathlib import Path
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 
@@ -177,3 +179,195 @@ class TestFetchOdooCCDuplicateCodes:
         by_code, _ = _run_fetch_odoo_cc(rows)
         assert by_code["100"]["company_id"] == 2
         assert by_code["200"]["company_id"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Helpers for issue #7 — Modelos_Distribucion_Analitica
+# ---------------------------------------------------------------------------
+
+
+def _model_row(
+    id_: int,
+    numeracion: str,
+    analytic_distribution: str,
+    company_id: int,
+    analytic_distribution_code_id: Optional[int] = None,
+) -> dict:
+    """Return a dict mimicking a BigQuery row from Modelos_Distribucion_Analitica."""
+    return {
+        "id": str(id_),
+        "x_studio_numeracin": numeracion,
+        "analytic_distribution": analytic_distribution,
+        "company_id": str(company_id),
+        "analytic_distribution_code_id": str(analytic_distribution_code_id) if analytic_distribution_code_id else None,
+    }
+
+
+def _run_fetch_distribucion_models(model_rows: list[dict], by_code: dict):
+    """
+    Import fetch_odoo_distribucion_models and call it with a mock BQ client
+    and the provided by_code dict.  Returns list of dicts ready to insert.
+    """
+    mock_bq_module = MagicMock()
+    mock_sa_module = MagicMock()
+    with (
+        patch.dict(
+            "sys.modules",
+            {
+                "google": MagicMock(),
+                "google.cloud": MagicMock(),
+                "google.cloud.bigquery": mock_bq_module,
+                "google.oauth2": MagicMock(),
+                "google.oauth2.service_account": mock_sa_module,
+                "psycopg2": MagicMock(),
+                "dotenv": MagicMock(),
+            },
+        ),
+        patch("builtins.open", MagicMock()),
+    ):
+        import importlib
+        import sync_cc
+
+        importlib.reload(sync_cc)
+
+        mock_client = MagicMock()
+        mock_query_result = MagicMock()
+        mock_query_result.result.return_value = iter(model_rows)
+        mock_client.query.return_value = mock_query_result
+
+        return sync_cc.fetch_odoo_distribucion_models(mock_client, by_code)
+
+
+class TestSyncDistribucionModels:
+    """
+    Issue #7 regression: Modelos_Distribucion_Analitica must be synced into tarjas_cc
+    using x_studio_numeracin as id_cc and analytic_distribution as valor_odoo.
+    """
+
+    def test_7_sync_distribucion_analitica_regression(self):
+        """
+        Regression: model 632 (PIMENTONES AL1 26/27) distributes 9.6% to CC 735 and
+        90.4% to CC 736.  After fetch, the model must appear in the result with:
+          - id_cc = "632"
+          - valor_odoo = '{"735": 9.6, "736": 90.4}'
+          - cultivo resolved from by_code via x_studio_numeracin or fallback
+        """
+        by_code = {
+            "735": {"id": "1001", "nombre": "AL1 PIM.ROJO TEMP 26-27", "company_id": 2},
+            "736": {"id": "1002", "nombre": "AL2 PIM.AMARILLO TEMP 26-27", "company_id": 2},
+        }
+        rows = [
+            _model_row(
+                id_=91,
+                numeracion="632",
+                analytic_distribution='{"735": 9.6, "736": 90.4}',
+                company_id=2,
+                analytic_distribution_code_id=272,
+            )
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+
+        assert len(result) == 1
+        model = result[0]
+        assert model["id_cc"] == "632"
+        assert model["valor_odoo"] == '{"735": 9.6, "736": 90.4}'
+        # cultivo: no CC has code "632" in by_code, no id match for 272 → fallback to numeracion
+        assert model["cultivo"] == "632"
+
+    def test_cultivo_resolved_by_code_match(self):
+        """
+        When a CC exists in by_code whose key equals x_studio_numeracin,
+        its nombre is used as cultivo.
+        """
+        by_code = {
+            "270": {"id": "131", "nombre": "Administraciones Donar", "company_id": 1},
+        }
+        rows = [
+            _model_row(
+                id_=1,
+                numeracion="270",
+                analytic_distribution='{"131": 100.0}',
+                company_id=1,
+                analytic_distribution_code_id=22,
+            )
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["cultivo"] == "Administraciones Donar"
+
+    def test_cultivo_resolved_by_odoo_id_fallback(self):
+        """
+        When no CC code matches x_studio_numeracin but analytic_distribution_code_id
+        matches an Odoo id in by_code, that nombre is used as cultivo.
+        """
+        by_code = {
+            # CC with odoo id "251" has code "653", so code "428" won't match
+            "653": {"id": "251", "nombre": "CARRO DESPARRAMADOR N 7", "company_id": 3},
+        }
+        rows = [
+            _model_row(
+                id_=86,
+                numeracion="428",
+                analytic_distribution='{"724": 50.0, "725": 50.0}',
+                company_id=3,
+                analytic_distribution_code_id=251,
+            )
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["cultivo"] == "CARRO DESPARRAMADOR N 7"
+
+    def test_cultivo_fallback_to_numeracion(self):
+        """
+        When no CC name can be resolved, cultivo falls back to x_studio_numeracin.
+        """
+        by_code: dict = {}
+        rows = [
+            _model_row(
+                id_=99,
+                numeracion="999",
+                analytic_distribution='{"500": 100.0}',
+                company_id=2,
+                analytic_distribution_code_id=None,
+            )
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["cultivo"] == "999"
+
+    def test_model_without_numeracion_is_skipped(self):
+        """Models with empty x_studio_numeracin must be skipped."""
+        by_code: dict = {}
+        rows = [
+            {
+                "id": "50",
+                "x_studio_numeracin": "",
+                "analytic_distribution": '{"100": 100.0}',
+                "company_id": "2",
+                "analytic_distribution_code_id": None,
+            }
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert len(result) == 0
+
+    def test_id_campo_derived_from_company_id(self):
+        """company_id must be mapped to id_campo via COMPANY_TO_CAMPO."""
+        by_code: dict = {}
+        rows = [
+            _model_row(99, "500", '{"100": 100.0}', company_id=2),
+            _model_row(100, "501", '{"101": 100.0}', company_id=3),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 2, 5: 3, 6: 4, 7: 4}
+        assert result[0]["id_campo"] == 1   # company_id=2 → campo 1
+        assert result[1]["id_campo"] == 2   # company_id=3 → campo 2
+
+    def test_multiple_models_all_returned(self):
+        """All models with valid numeracin must be present in the result."""
+        by_code: dict = {}
+        rows = [
+            _model_row(91, "632", '{"735": 9.6, "736": 90.4}', company_id=2),
+            _model_row(92, "633", '{"737": 9.6, "738": 90.4}', company_id=2),
+            _model_row(90, "639", '{"733": 0.7, "736": 13.97}', company_id=2),
+            _model_row(82, "1500", '{"122": 26.9, "395": 5.92}', company_id=2),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        ids = {m["id_cc"] for m in result}
+        assert ids == {"632", "633", "639", "1500"}
