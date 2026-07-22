@@ -5,6 +5,9 @@ Syncs Odoo analytic accounts (CC_analiticos in BigQuery) into:
   - appsheet.tarjas_cc  : inserts new CC, fixes {"": 100} valor_odoo
   - appsheet.despacho_cc: fixes {"": 100} id_odoo
 
+Also syncs Odoo analytic distribution models (Modelos_Distribucion_Analitica in BigQuery) into:
+  - appsheet.tarjas_cc  : inserts distribution models as "virtual CCs" using x_studio_numeracin as id_cc
+
 Run manually:
   python apps/sync_cc.py
 
@@ -339,6 +342,103 @@ def sync_tarjas_cc(
     log.info(f"tarjas_cc → insertados: {len(to_insert)}, corregidos: {len(to_fix)}")
 
 
+def fetch_odoo_distribucion_models(
+    bq: bigquery.Client,
+    by_code: dict[str, dict],
+) -> list[dict]:
+    """
+    Fetch all Odoo analytic distribution models (Modelos_Distribucion_Analitica) and
+    return a list of rows ready to insert into appsheet.tarjas_cc.
+
+    Each model becomes a "virtual CC" in tarjas_cc:
+      - id_cc       = x_studio_numeracin  (the model's Odoo numeración)
+      - cultivo     = name from CC_analiticos (first by code match, then by id match,
+                      fallback to x_studio_numeracin itself)
+      - id_campo    = derived from company_id via COMPANY_TO_CAMPO
+      - valor_odoo  = analytic_distribution JSON as-is from Odoo
+
+    Models with no x_studio_numeracin are skipped.
+    """
+    rows = list(
+        bq.query("""
+        SELECT
+          CAST(id AS STRING) AS id,
+          x_studio_numeracin,
+          analytic_distribution,
+          company_id,
+          CAST(analytic_distribution_code_id AS STRING) AS analytic_distribution_code_id
+        FROM `ace-scarab-484515-v1.odoo_data.Modelos_Distribucion_Analitica`
+        WHERE x_studio_numeracin IS NOT NULL
+    """).result()
+    )
+
+    # Build reverse lookup: odoo_id → nombre, using all entries in by_code.
+    by_odoo_id: dict[str, str] = {info["id"]: info["nombre"] for info in by_code.values()}
+
+    result: list[dict] = []
+    for r in rows:
+        numeracion = str(r["x_studio_numeracin"]).strip()
+        if not numeracion:
+            continue
+
+        # Resolve cultivo: code match → id match → fallback to numeracion
+        cultivo = None  # type: Optional[str]
+        if numeracion in by_code:
+            cultivo = by_code[numeracion]["nombre"]
+        elif r["analytic_distribution_code_id"]:
+            cc_id = str(r["analytic_distribution_code_id"])
+            cultivo = by_odoo_id.get(cc_id)
+
+        if cultivo is None:
+            log.warning(
+                f"Modelo distribución {numeracion}: sin nombre CC, usando numeración como cultivo"
+            )
+            cultivo = numeracion
+
+        analytic_dist = r["analytic_distribution"] or "{}"
+
+        result.append(
+            {
+                "id_cc": numeracion,
+                "cultivo": cultivo,
+                "id_campo": COMPANY_TO_CAMPO.get(int(r["company_id"]), DEFAULT_CAMPO),
+                "valor_odoo": analytic_dist,
+            }
+        )
+
+    log.info(f"Modelos distribución analítica obtenidos de BigQuery: {len(result)}")
+    return result
+
+
+def sync_distribucion_models(models: list[dict], conn) -> None:
+    """
+    Insert analytic distribution models into appsheet.tarjas_cc.
+    Uses ON CONFLICT (id_cc) DO NOTHING — never overwrites existing rows.
+    """
+    if not models:
+        log.info("Modelos distribución → sin registros para insertar")
+        return
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT id_cc::text FROM appsheet.tarjas_cc")
+        existing_ids = {r[0] for r in cur.fetchall()}
+
+    to_insert = [m for m in models if m["id_cc"] not in existing_ids]
+
+    with conn.cursor() as cur:
+        for m in to_insert:
+            cur.execute(
+                """
+                INSERT INTO appsheet.tarjas_cc (id_cc, cultivo, id_campo, valor_odoo)
+                VALUES (%s, %s, %s, %s::jsonb)
+                ON CONFLICT (id_cc) DO NOTHING
+                """,
+                (m["id_cc"], m["cultivo"], m["id_campo"], m["valor_odoo"]),
+            )
+
+    log.info(f"Modelos distribución → insertados: {len(to_insert)}, omitidos (ya existían): {len(models) - len(to_insert)}")
+
+
 def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
     with conn.cursor() as cur:
         cur.execute("SELECT id_producto, producto, id_odoo FROM appsheet.despacho_cc")
@@ -378,10 +478,12 @@ def run() -> None:
     log.info("=== sync_cc start ===")
     bq = _bq_client()
     odoo, archived_to_active = fetch_odoo_cc(bq)
+    distribucion_models = fetch_odoo_distribucion_models(bq, odoo)
 
     conn = _pg_conn()
     try:
         sync_tarjas_cc(odoo, archived_to_active, conn)
+        sync_distribucion_models(distribucion_models, conn)
         sync_despacho_cc(odoo, conn)
         conn.commit()
     except Exception:
