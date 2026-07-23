@@ -36,10 +36,11 @@ SELECT
 
 FROM appsheet.tarjas_reporte r
 
--- join l1: nombre exacto, colapsando espacios múltiples
+-- join l1: nombre exacto, colapsando espacios múltiples y espacios adyacentes a paréntesis
+--   ej. "CONSTRUCCIÓN INFRAESTRUCTURA ( caminos...)" → "construcción infraestructura (caminos...)"
 LEFT JOIN appsheet.tarjas_labores l1
-       ON TRIM(REGEXP_REPLACE(LOWER(l1.labor), '\s+', ' ', 'g'))
-        = TRIM(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'))
+       ON TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(l1.labor), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
+        = TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
 
 -- join l2: prefijo [X.Y] en el nombre — ej. "[2.1]AMARRA" → "2.1"
 LEFT JOIN appsheet.tarjas_labores l2
