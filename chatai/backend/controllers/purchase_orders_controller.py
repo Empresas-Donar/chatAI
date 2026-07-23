@@ -46,10 +46,13 @@ def _get_bq_client():
     return bigquery.Client(project=project, credentials=credentials)
 
 
-def _sync_labores(conn, fecha_inicio: str, fecha_termino: str, vendedor: str, nombre_campo: str):
+def _sync_labores(
+    conn, fecha_inicio: str, fecha_termino: str, vendedor: str, nombre_campo: str
+):
     """Find labores without a product code in the given period and auto-map from BigQuery."""
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT DISTINCT r."Nombre Labor"
             FROM appsheet.tarjas_reporte r
             WHERE r.fecha BETWEEN %s AND %s
@@ -57,8 +60,8 @@ def _sync_labores(conn, fecha_inicio: str, fecha_termino: str, vendedor: str, no
               AND r.nombre_campo = %s
               AND COALESCE(
                   (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
-                   WHERE TRIM(REGEXP_REPLACE(LOWER(l.labor), '\s+', ' ', 'g'))
-                       = TRIM(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'))
+                   WHERE TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(l.labor), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
+                       = TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
                    LIMIT 1),
                   (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
                    WHERE r."Nombre Labor" ~ '^\[[\d.]+\]'
@@ -69,14 +72,18 @@ def _sync_labores(conn, fecha_inicio: str, fecha_termino: str, vendedor: str, no
                      AND l.codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^([\d]+\.[\d]+)-'))
                    LIMIT 1)
               ) IS NULL
-        """, (fecha_inicio, fecha_termino, vendedor, nombre_campo))
+        """,
+            (fecha_inicio, fecha_termino, vendedor, nombre_campo),
+        )
         unmapped = [row[0] for row in cur.fetchall()]
 
     if not unmapped:
         return
 
     bq = _get_bq_client()
-    placeholders = ", ".join(f"'{labor.replace(chr(39), chr(39)*2)}'" for labor in unmapped)
+    placeholders = ", ".join(
+        f"'{labor.replace(chr(39), chr(39) * 2)}'" for labor in unmapped
+    )
     query = f"""
         SELECT
             JSON_VALUE(p.name, '$.es_CL') AS nombre,
@@ -93,13 +100,17 @@ def _sync_labores(conn, fecha_inicio: str, fecha_termino: str, vendedor: str, no
 
     with conn.cursor() as cur:
         for labor, codigo in matches.items():
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO appsheet.tarjas_labores (codigo_labor, labor)
                 VALUES (%s, %s)
                 ON CONFLICT DO NOTHING
-            """, (codigo, labor))
+            """,
+                (codigo, labor),
+            )
             logger.info(f"Auto-mapped labor: '{labor}' → {codigo}")
     conn.commit()
+
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -129,9 +140,11 @@ def _serialize(v):
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @router.get("/odoo/tarjas", response_class=HTMLResponse)
 async def purchase_order_page(request: Request):
     return _templates.TemplateResponse(request, "purchase_orders.html")
+
 
 @router.get("/purchase-orders", response_class=HTMLResponse)
 async def purchase_order_legacy(request: Request):
@@ -148,8 +161,10 @@ async def get_filters():
     """Return distinct contractors and companies for the filter dropdowns."""
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -188,12 +203,15 @@ async def get_purchase_order(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     contratista,
                     nombre_campo,
@@ -216,7 +234,9 @@ async def get_purchase_order(
                   AND fecha BETWEEN %s AND %s
                 GROUP BY contratista, nombre_campo, tipo_pago, "CC", "Nombre Labor"
                 ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             rows = cur.fetchall()
             columns = [d[0] for d in cur.description]
     finally:
@@ -227,22 +247,28 @@ async def get_purchase_order(
 
     data = [{k: _serialize(v) for k, v in zip(columns, r)} for r in rows]
 
-    total_trato  = sum(r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO)
-    total_al_dia = sum(r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_AL_DIA)
-    total_pagar  = total_trato + total_al_dia
-    pct_trato    = round(total_trato  / total_pagar * 100, 1) if total_pagar else 0
-    pct_al_dia   = round(total_al_dia / total_pagar * 100, 1) if total_pagar else 0
+    total_trato = sum(
+        r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
+    )
+    total_al_dia = sum(
+        r["total_labor"] or 0
+        for r in data
+        if r.get("tipo_pago") == _PAYMENT_TYPE_AL_DIA
+    )
+    total_pagar = total_trato + total_al_dia
+    pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
+    pct_al_dia = round(total_al_dia / total_pagar * 100, 1) if total_pagar else 0
 
     header = {
-        "contractor":   data[0]["contratista"],
-        "company":      data[0]["nombre_campo"],
-        "date_from":    fecha_inicio,
-        "date_to":      fecha_termino,
-        "total_trato":  total_trato,
+        "contractor": data[0]["contratista"],
+        "company": data[0]["nombre_campo"],
+        "date_from": fecha_inicio,
+        "date_to": fecha_termino,
+        "total_trato": total_trato,
         "total_al_dia": total_al_dia,
-        "total":        total_pagar,
-        "pct_trato":    pct_trato,
-        "pct_al_dia":   pct_al_dia,
+        "total": total_pagar,
+        "pct_trato": pct_trato,
+        "pct_al_dia": pct_al_dia,
     }
     return {"header": header, "rows": data}
 
@@ -263,8 +289,10 @@ async def export_odoo_csv(
 
     try:
         conn = get_connection()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     try:
         _sync_labores(conn, fecha_inicio, fecha_termino, contratista, empresa)
@@ -275,7 +303,8 @@ async def export_odoo_csv(
     try:
         with conn.cursor() as cur:
             # Detect excluded rows (no product_id or unmapped CC) and sum their value
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
                 FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor"     = %s
@@ -285,10 +314,13 @@ async def export_odoo_csv(
                       "order_line/product_id" IS NULL
                       OR "order_line/analytic_distribution" LIKE '%%"": %%'
                   )
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             excluded_amount = float(cur.fetchone()[0] or 0)
 
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     "partner_id",
                     "order_line/product_id",
@@ -310,7 +342,9 @@ async def export_odoo_csv(
                     "order_line/product_id",
                     "order_line/analytic_distribution"
                 ORDER BY "order_line/product_id"
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -330,13 +364,15 @@ async def export_odoo_csv(
 
     for i, row in enumerate(rows):
         partner_id, product_id, qty, analytic, price = row
-        ws.append([
-            partner_id if i == 0 else None,
-            product_id,
-            float(qty) if qty is not None else None,
-            analytic,
-            float(price) if price is not None else None,
-        ])
+        ws.append(
+            [
+                partner_id if i == 0 else None,
+                product_id,
+                float(qty) if qty is not None else None,
+                analytic,
+                float(price) if price is not None else None,
+            ]
+        )
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -401,7 +437,7 @@ async def get_cc_status():
     """
     # 1. Fetch ALL Odoo CC (active + archived) to detect stale IDs
     active_ids: set[str] | None = None
-    odoo_names: dict[str, str] = {}   # id → nombre legible
+    odoo_names: dict[str, str] = {}  # id → nombre legible
     bq_available = False
     try:
         bq = _get_bq_client()
@@ -416,7 +452,9 @@ async def get_cc_status():
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     cc_rows = []
     last_sync = None
@@ -428,7 +466,9 @@ async def get_cc_status():
             cc_rows = cur.fetchall()
 
             try:
-                cur.execute("SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'")
+                cur.execute(
+                    "SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'"
+                )
                 meta = cur.fetchone()
                 last_sync = meta[0] if meta else None
             except Exception:
@@ -470,14 +510,16 @@ async def get_cc_status():
         # Resolve human-readable names for stored IDs
         stored_names = [odoo_names.get(sid, sid) for sid in stored_ids]
 
-        result.append({
-            "id_cc": id_cc,
-            "cultivo": cultivo,
-            "stored_ids": stored_ids,
-            "stored_names": stored_names,
-            "archived_ids": archived_ids,
-            "status": status,
-        })
+        result.append(
+            {
+                "id_cc": id_cc,
+                "cultivo": cultivo,
+                "stored_ids": stored_ids,
+                "stored_names": stored_names,
+                "archived_ids": archived_ids,
+                "status": status,
+            }
+        )
 
     return {
         "ccs": result,
@@ -524,12 +566,15 @@ async def get_export_preview(
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     last_sync = None
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     "order_line/product_id"            AS product_id,
                     "order_line/analytic_distribution"  AS analytic,
@@ -540,11 +585,15 @@ async def get_export_preview(
                   AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
                 ORDER BY "order_line/product_id", fecha
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             all_rows = cur.fetchall()
 
             try:
-                cur.execute("SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'")
+                cur.execute(
+                    "SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'"
+                )
                 meta = cur.fetchone()
                 last_sync = meta[0] if meta else None
             except Exception:
@@ -577,54 +626,64 @@ async def get_export_preview(
         cc_display = _cc_display(analytic_dict, odoo_names)
 
         if not product_id:
-            excluded_rows.append({
-                "product_id": "–",
-                "cc_display": cc_display,
-                "qty": qty_f,
-                "price_unit": price_f,
-                "total": total_line,
-                "reason": "Labor sin mapear en Odoo",
-            })
+            excluded_rows.append(
+                {
+                    "product_id": "–",
+                    "cc_display": cc_display,
+                    "qty": qty_f,
+                    "price_unit": price_f,
+                    "total": total_line,
+                    "reason": "Labor sin mapear en Odoo",
+                }
+            )
             total_excluded += total_line
             continue
 
         if not cc_ids:
-            excluded_rows.append({
-                "product_id": product_id,
-                "cc_display": "–",
-                "qty": qty_f,
-                "price_unit": price_f,
-                "total": total_line,
-                "reason": "CC vacío o sin mapear",
-            })
+            excluded_rows.append(
+                {
+                    "product_id": product_id,
+                    "cc_display": "–",
+                    "qty": qty_f,
+                    "price_unit": price_f,
+                    "total": total_line,
+                    "reason": "CC vacío o sin mapear",
+                }
+            )
             total_excluded += total_line
             continue
 
         archived = [cid for cid in cc_ids if bq_available and cid not in active_ids]
 
-        analytic_str = _json.dumps(analytic_dict, ensure_ascii=False) if analytic_dict else "–"
+        analytic_str = (
+            _json.dumps(analytic_dict, ensure_ascii=False) if analytic_dict else "–"
+        )
 
         if archived:
-            excluded_rows.append({
-                "product_id": product_id,
-                "analytic_distribution": analytic_str,
-                "cc_display": cc_display,
-                "archived_ids": archived,
-                "qty": qty_f,
-                "price_unit": price_f,
-                "total": total_line,
-                "reason": f"CC archivado: {', '.join(odoo_names.get(a, a) for a in archived)}",
-            })
+            excluded_rows.append(
+                {
+                    "product_id": product_id,
+                    "analytic_distribution": analytic_str,
+                    "cc_display": cc_display,
+                    "archived_ids": archived,
+                    "qty": qty_f,
+                    "price_unit": price_f,
+                    "total": total_line,
+                    "reason": f"CC archivado: {', '.join(odoo_names.get(a, a) for a in archived)}",
+                }
+            )
             total_excluded += total_line
         else:
-            preview_rows.append({
-                "product_id": product_id,
-                "analytic_distribution": analytic_str,
-                "cc_display": cc_display,
-                "qty": qty_f,
-                "price_unit": price_f,
-                "total": total_line,
-            })
+            preview_rows.append(
+                {
+                    "product_id": product_id,
+                    "analytic_distribution": analytic_str,
+                    "cc_display": cc_display,
+                    "qty": qty_f,
+                    "price_unit": price_f,
+                    "total": total_line,
+                }
+            )
             total_ok += total_line
 
     return {
@@ -662,8 +721,8 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
     2. Name-prefix siblings in same root_plan: archived name stripped of ' CC-NNN' suffix
        matches the start of N active CCs in the same plan → split evenly (1/N each)
     """
-    by_code: dict[str, str] = {}          # code → active_id
-    by_plan: dict[str, list[dict]] = {}   # root_plan_id → list of all rows
+    by_code: dict[str, str] = {}  # code → active_id
+    by_plan: dict[str, list[dict]] = {}  # root_plan_id → list of all rows
     active_ids: set[str] = set()
 
     for r in bq_rows:
@@ -677,15 +736,20 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
                 by_code[code] = oid
 
         if plan:
-            by_plan.setdefault(plan, []).append({
-                "id": oid, "code": code, "active": r["active"],
-                "nombre": r["nombre"] or "", "root_plan_id": plan,
-            })
+            by_plan.setdefault(plan, []).append(
+                {
+                    "id": oid,
+                    "code": code,
+                    "active": r["active"],
+                    "nombre": r["nombre"] or "",
+                    "root_plan_id": plan,
+                }
+            )
 
-    _dir_suffix = re.compile(r'[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$', re.IGNORECASE)
+    _dir_suffix = re.compile(r"[-\s]*(NORTE|SUR|ORIENTE|PONIENTE)\s*$", re.IGNORECASE)
 
     def _stem(name: str) -> str:
-        return _dir_suffix.sub('', name).strip()
+        return _dir_suffix.sub("", name).strip()
 
     def _lev(a: str, b: str) -> int:
         a, b = a.lower(), b.lower()
@@ -696,7 +760,9 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
             prev = curr[:]
             curr[0] = prev[0] + 1
             for i, ca in enumerate(a):
-                curr[i + 1] = prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+                curr[i + 1] = (
+                    prev[i] if ca == cb else 1 + min(prev[i], prev[i + 1], curr[i])
+                )
         return curr[len(a)]
 
     def _matches(base: str, stem: str) -> bool:
@@ -704,7 +770,7 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
         if s.startswith(b):
             return True
         if _lev(b, s) <= 1:
-            return re.findall(r'\d+', b) == re.findall(r'\d+', s)
+            return re.findall(r"\d+", b) == re.findall(r"\d+", s)
         return False
 
     replacements: dict[str, list[tuple[str, float]]] = {}
@@ -722,12 +788,13 @@ def _build_replacements_map(bq_rows: list) -> dict[str, list[tuple[str, float]]]
 
         # Strategy 2: fuzzy name siblings in same plan (handles splits + typos in Odoo)
         nombre = r["nombre"] or ""
-        base = re.sub(r'\s+CC-\d+\s*$', '', nombre, flags=re.IGNORECASE).strip()
+        base = re.sub(r"\s+CC-\d+\s*$", "", nombre, flags=re.IGNORECASE).strip()
         plan = str(r.get("root_plan_id") or "")
 
         if base and plan:
             siblings = [
-                s for s in by_plan.get(plan, [])
+                s
+                for s in by_plan.get(plan, [])
                 if s["active"] and _matches(base, _stem(s["nombre"]))
             ]
             if siblings:
@@ -765,7 +832,9 @@ async def trigger_cc_sync():
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     fixed = 0
     now_iso = datetime.datetime.utcnow().isoformat()
@@ -800,7 +869,9 @@ async def trigger_cc_sync():
                         continue
                     if kid not in active_ids and kid in archived_to_replacements:
                         for repl_id, fraction in archived_to_replacements[kid]:
-                            updated[repl_id] = round(updated.get(repl_id, 0) + pct * fraction, 4)
+                            updated[repl_id] = round(
+                                updated.get(repl_id, 0) + pct * fraction, 4
+                            )
                         changed = True
                     else:
                         updated[kid] = pct
@@ -820,10 +891,13 @@ async def trigger_cc_sync():
                     key TEXT PRIMARY KEY, value TEXT
                 )
             """)
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO appsheet.sync_meta (key, value) VALUES ('last_cc_sync', %s)
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """, (now_iso,))
+            """,
+                (now_iso,),
+            )
 
         conn.commit()
     except Exception as exc:
@@ -843,13 +917,36 @@ async def trigger_cc_sync():
 # Billing order PDF
 # ---------------------------------------------------------------------------
 
+
 def _logo_b64() -> str:
-    path = Path(__file__).parent.parent.parent / "frontend" / "static" / "img" / "donar_logo.png"
+    """Return the Donar logo as a base64-encoded PNG, resized to max 200 px wide.
+
+    The original PNG is 1288×539 px (~680 KB, ~907 KB base64). Embedding that
+    full size into the HTML string fed to xhtml2pdf causes text-layout corruption
+    in table cells (issue #12). Resizing to ≤200 px wide brings the base64 to
+    ~29 KB, which xhtml2pdf handles correctly.
+    """
+    path = (
+        Path(__file__).parent.parent.parent
+        / "frontend"
+        / "static"
+        / "img"
+        / "donar_logo.png"
+    )
     try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except OSError:
+        from PIL import Image
+
+        img = Image.open(path)
+        max_w = 200
+        w, h = img.size
+        if w > max_w:
+            img = img.resize((max_w, int(h * max_w / w)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
         return ""
+
 
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 14mm; }
@@ -925,8 +1022,21 @@ def _fmt_clp(v) -> str:
 def _fmt_date_display(iso: str) -> str:
     try:
         d = datetime.date.fromisoformat(iso)
-        months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
-        return f"{d.day} {months[d.month-1]} {d.year}"
+        months = [
+            "ene",
+            "feb",
+            "mar",
+            "abr",
+            "may",
+            "jun",
+            "jul",
+            "ago",
+            "sep",
+            "oct",
+            "nov",
+            "dic",
+        ]
+        return f"{d.day} {months[d.month - 1]} {d.year}"
     except Exception:
         return iso
 
@@ -952,23 +1062,29 @@ async def billing_order_pdf(
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     try:
         with conn.cursor() as cur:
             # Header totals (same query as get_purchase_order)
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT tipo_pago, SUM(total_labor) AS total_labor
                 FROM appsheet.tarjas_reporte
                 WHERE contratista  = %s
                   AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
                 GROUP BY tipo_pago
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             tipo_rows = cur.fetchall()
 
             # Pivot data: worker × date
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT trabajador, fecha::date::text AS fecha,
                        SUM(total_trabajado) AS total
                 FROM appsheet.tarjas_pagos
@@ -977,15 +1093,17 @@ async def billing_order_pdf(
                   AND fecha::date BETWEEN %s AND %s
                 GROUP BY trabajador, fecha::date
                 ORDER BY trabajador, fecha::date
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             pivot_rows = cur.fetchall()
     finally:
         conn.close()
 
     # Compute totals
-    total_trato  = sum(float(r[1] or 0) for r in tipo_rows if r[0] == "trato")
+    total_trato = sum(float(r[1] or 0) for r in tipo_rows if r[0] == "trato")
     total_al_dia = sum(float(r[1] or 0) for r in tipo_rows if r[0] != "trato")
-    total_pagar  = total_trato + total_al_dia
+    total_pagar = total_trato + total_al_dia
 
     # Build pivot structure
     dates: list[str] = sorted({r[1] for r in pivot_rows if r[1]})
@@ -1023,11 +1141,15 @@ async def billing_order_pdf(
             f'<td class="tot">{_fmt_clp(row_total)}</td></tr>'
         )
 
-    foot_cells = "".join(f'<td>{_fmt_clp(col_totals[d])}</td>' for d in dates)
+    foot_cells = "".join(f"<td>{_fmt_clp(col_totals[d])}</td>" for d in dates)
     foot_html = f'<tr class="foot"><td>Suma total</td>{foot_cells}<td>{_fmt_clp(grand_total)}</td></tr>'
 
     logo = _logo_b64()
-    logo_html = f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />' if logo else "EMPRESAS DONAR"
+    logo_html = (
+        f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />'
+        if logo
+        else "EMPRESAS DONAR"
+    )
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -1120,6 +1242,7 @@ async def billing_order_pdf(
 # OC document print-PDF  (opens in new tab, same layout as the web page)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/api/purchase-orders/print-pdf")
 async def purchase_order_print_pdf(
     contratista: str,
@@ -1133,11 +1256,14 @@ async def purchase_order_print_pdf(
     try:
         conn = get_connection()
     except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
 
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT tipo_pago, "CC", "Nombre Labor",
                        SUM(jornadas)                                              AS jornadas,
                        CASE WHEN SUM(jornadas) > 0
@@ -1150,29 +1276,33 @@ async def purchase_order_print_pdf(
                   AND fecha BETWEEN %s AND %s
                 GROUP BY tipo_pago, "CC", "Nombre Labor"
                 ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
-            """, (contratista, empresa, fecha_inicio, fecha_termino))
+            """,
+                (contratista, empresa, fecha_inicio, fecha_termino),
+            )
             rows = cur.fetchall()
     finally:
         conn.close()
 
     if not rows:
-        raise HTTPException(status_code=404, detail="Sin datos para los filtros indicados")
+        raise HTTPException(
+            status_code=404, detail="Sin datos para los filtros indicados"
+        )
 
-    total_trato  = sum(float(r[5] or 0) for r in rows if r[0] == _PAYMENT_TYPE_TRATO)
+    total_trato = sum(float(r[5] or 0) for r in rows if r[0] == _PAYMENT_TYPE_TRATO)
     total_al_dia = sum(float(r[5] or 0) for r in rows if r[0] != _PAYMENT_TYPE_TRATO)
-    total_pagar  = total_trato + total_al_dia
+    total_pagar = total_trato + total_al_dia
 
     d1 = _fmt_date_display(fecha_inicio)
     d2 = _fmt_date_display(fecha_termino)
-    glosa  = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
+    glosa = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
     semana = f"Semana desde {d1} al {d2}"
 
     rows_html = ""
     for i, (tipo, cc, labor, jornadas, unitario, total) in enumerate(rows):
         is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
         tipo_label = "Trato" if is_trato else "Al día"
-        tipo_cls   = "badge-trato" if is_trato else "badge-aldia"
-        even_cls   = "even" if i % 2 == 0 else ""
+        tipo_cls = "badge-trato" if is_trato else "badge-aldia"
+        even_cls = "even" if i % 2 == 0 else ""
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{cc or ""}</td>
@@ -1183,7 +1313,11 @@ async def purchase_order_print_pdf(
         </tr>"""
 
     logo = _logo_b64()
-    logo_html = f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />' if logo else "EMPRESAS DONAR"
+    logo_html = (
+        f'<img src="data:image/png;base64,{logo}" class="hdr-logo-img" />'
+        if logo
+        else "EMPRESAS DONAR"
+    )
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
