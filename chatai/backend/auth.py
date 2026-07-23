@@ -22,6 +22,7 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 _SESSION_COOKIE = "donar_session"
+_GTOKEN_COOKIE = "donar_gtoken"
 _MAX_AGE = 60 * 60 * 8  # 8 hours
 
 
@@ -46,6 +47,29 @@ def set_session(response: RedirectResponse, username: str) -> None:
 
 def clear_session(response: RedirectResponse) -> None:
     response.delete_cookie(_SESSION_COOKIE)
+    response.delete_cookie(_GTOKEN_COOKIE)
+
+
+def set_google_token(response: RedirectResponse, access_token: str) -> None:
+    signed = _signer().dumps(access_token)
+    response.set_cookie(
+        key=_GTOKEN_COOKIE,
+        value=signed,
+        max_age=_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
+    )
+
+
+def get_google_token(request: Request) -> Optional[str]:
+    signed = request.cookies.get(_GTOKEN_COOKIE)
+    if not signed:
+        return None
+    try:
+        return _signer().loads(signed, max_age=_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
 
 
 def get_current_user(request: Request) -> Optional[str]:
@@ -85,6 +109,7 @@ def get_user_role(email: str) -> str:
         return "user"
     try:
         from db import get_connection
+
         conn = get_connection()
         try:
             with conn.cursor() as cur:
@@ -94,7 +119,7 @@ def get_user_role(email: str) -> str:
                     return "admin"
                 cur.execute(
                     "SELECT role FROM public.user_roles WHERE email = %s",
-                    (email.strip().lower(),)
+                    (email.strip().lower(),),
                 )
                 row = cur.fetchone()
                 return row[0] if row else "user"
@@ -111,7 +136,9 @@ def require_admin(request: Request):
         raise _LoginRedirect(request.url.path)
     role = get_user_role(user)
     if role != "admin":
-        raise HTTPException(status_code=403, detail="Acceso restringido a administradores")
+        raise HTTPException(
+            status_code=403, detail="Acceso restringido a administradores"
+        )
     return user
 
 

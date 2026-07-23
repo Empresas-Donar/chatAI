@@ -8,9 +8,6 @@ Routes:
   GET /auth/callback  → handle Google callback, verify domain, set session
 """
 
-import hashlib
-import hmac
-import json
 import logging
 import os
 import secrets
@@ -19,7 +16,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from auth import set_session
+from auth import set_session, set_google_token
 
 logger = logging.getLogger("google_auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -47,7 +44,7 @@ async def google_login(request: Request):
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
-        "scope": "openid email profile",
+        "scope": "openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets",
         "state": state,
         "hd": ALLOWED_DOMAIN,
         "access_type": "online",
@@ -116,4 +113,5 @@ async def google_callback(request: Request):
     logger.info("Google login success: %s", email)
     response = RedirectResponse(url="/chat", status_code=302)
     set_session(response, email)
+    set_google_token(response, access_token)
     return response

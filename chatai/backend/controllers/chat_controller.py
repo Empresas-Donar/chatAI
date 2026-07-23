@@ -27,13 +27,13 @@ import chat_cache as cache
 router = APIRouter(prefix="/chat", tags=["chat"])
 _templates: Jinja2Templates = None
 _client: genai.Client = None
-_embed_client: genai.Client = None   # same client, kept as alias for clarity
+_embed_client: genai.Client = None  # same client, kept as alias for clarity
 
 EMBED_MODEL = "text-embedding-004"
-GCP_PROJECT  = "ace-scarab-484515-v1"
+GCP_PROJECT = "ace-scarab-484515-v1"
 GCP_LOCATION = "us-central1"
-MODEL        = "gemini-2.5-pro"
-KEY_PATH     = os.environ.get(
+MODEL = "gemini-2.5-pro"
+KEY_PATH = os.environ.get(
     "BIGQUERY_KEY_PATH",
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json",
 )
@@ -837,8 +837,12 @@ _TOOLS = [
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "sql": types.Schema(type=types.Type.STRING, description="Query SQL BigQuery"),
-                "max_rows": types.Schema(type=types.Type.INTEGER, description="Máximo filas (default 100)"),
+                "sql": types.Schema(
+                    type=types.Type.STRING, description="Query SQL BigQuery"
+                ),
+                "max_rows": types.Schema(
+                    type=types.Type.INTEGER, description="Máximo filas (default 100)"
+                ),
             },
             required=["sql"],
         ),
@@ -859,8 +863,12 @@ _TOOLS = [
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "sql": types.Schema(type=types.Type.STRING, description="Query SQL PostgreSQL estándar"),
-                "max_rows": types.Schema(type=types.Type.INTEGER, description="Máximo filas (default 200)"),
+                "sql": types.Schema(
+                    type=types.Type.STRING, description="Query SQL PostgreSQL estándar"
+                ),
+                "max_rows": types.Schema(
+                    type=types.Type.INTEGER, description="Máximo filas (default 200)"
+                ),
             },
             required=["sql"],
         ),
@@ -900,11 +908,24 @@ _TOOLS = [
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "chart_type": types.Schema(type=types.Type.STRING, description="'bar' | 'line' | 'pie' | 'doughnut'"),
-                "title": types.Schema(type=types.Type.STRING, description="Título del gráfico"),
-                "labels": types.Schema(type=types.Type.STRING, description="Array JSON de etiquetas, ej: '[\"Ene\",\"Feb\"]'"),
-                "values": types.Schema(type=types.Type.STRING, description="Array JSON de valores numéricos, ej: '[1200,3400]'"),
-                "dataset_label": types.Schema(type=types.Type.STRING, description="Nombre del dataset"),
+                "chart_type": types.Schema(
+                    type=types.Type.STRING,
+                    description="'bar' | 'line' | 'pie' | 'doughnut'",
+                ),
+                "title": types.Schema(
+                    type=types.Type.STRING, description="Título del gráfico"
+                ),
+                "labels": types.Schema(
+                    type=types.Type.STRING,
+                    description='Array JSON de etiquetas, ej: \'["Ene","Feb"]\'',
+                ),
+                "values": types.Schema(
+                    type=types.Type.STRING,
+                    description="Array JSON de valores numéricos, ej: '[1200,3400]'",
+                ),
+                "dataset_label": types.Schema(
+                    type=types.Type.STRING, description="Nombre del dataset"
+                ),
             },
             required=["chart_type", "title", "labels", "values", "dataset_label"],
         ),
@@ -930,9 +951,21 @@ _WRITE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_PK_CANDIDATES = ["id", "name", "id_Resumen", "id_resumen", "id_guia", "id_venta",
-                  "id_conteo", "id_contratista", "id_personal", "id_labor",
-                  "channel_id", "sensor_id", "zone_id"]
+_PK_CANDIDATES = [
+    "id",
+    "name",
+    "id_Resumen",
+    "id_resumen",
+    "id_guia",
+    "id_venta",
+    "id_conteo",
+    "id_contratista",
+    "id_personal",
+    "id_labor",
+    "channel_id",
+    "sensor_id",
+    "zone_id",
+]
 
 
 def _extract_table_name(sql: str) -> str:
@@ -988,24 +1021,34 @@ def _call_tool(name: str, args: dict) -> str:
             trace = _build_trace(sql, rows, "BigQuery (Odoo)")
             badge = _build_source_badge(trace)
             result = json.loads(json.dumps(rows, ensure_ascii=False, default=str))
-            return json.dumps({"rows": result, "__source_badge__": badge, "__trace__": trace}, ensure_ascii=False)
+            return json.dumps(
+                {"rows": result, "__source_badge__": badge, "__trace__": trace},
+                ensure_ascii=False,
+            )
         if name == "query_postgres":
             sql = args["sql"]
             rows = pg.run_pg_query(sql, int(args.get("max_rows", 200)))
             trace = _build_trace(sql, rows, "PostgreSQL (AppSheet)")
             badge = _build_source_badge(trace)
             result = json.loads(json.dumps(rows, ensure_ascii=False, default=str))
-            return json.dumps({"rows": result, "__source_badge__": badge, "__trace__": trace}, ensure_ascii=False)
+            return json.dumps(
+                {"rows": result, "__source_badge__": badge, "__trace__": trace},
+                ensure_ascii=False,
+            )
         if name == "list_tables":
             return json.dumps(bq.list_tables(), ensure_ascii=False)
         if name == "describe_table":
-            return json.dumps(bq.describe_table(args["table_id"]), ensure_ascii=False, default=str)
+            return json.dumps(
+                bq.describe_table(args["table_id"]), ensure_ascii=False, default=str
+            )
         if name == "render_chart":
             try:
                 labels = json.loads(args["labels"])
                 values = json.loads(args["values"])
             except Exception:
-                return json.dumps({"error": "labels y values deben ser arrays JSON válidos"})
+                return json.dumps(
+                    {"error": "labels y values deben ser arrays JSON válidos"}
+                )
             chart_payload = {
                 "chart_type": args.get("chart_type", "bar"),
                 "title": args.get("title", ""),
@@ -1021,13 +1064,18 @@ def _call_tool(name: str, args: dict) -> str:
 
 # ── History helpers ───────────────────────────────────────────────────────────
 
+
 def _ensure_traces_column() -> None:
     """Add traces and charts JSONB columns to chat_history if they don't exist yet."""
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS traces JSONB")
-            cur.execute("ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS charts JSONB")
+            cur.execute(
+                "ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS traces JSONB"
+            )
+            cur.execute(
+                "ALTER TABLE public.chat_history ADD COLUMN IF NOT EXISTS charts JSONB"
+            )
         conn.commit()
     except Exception as e:
         _log.warning("Could not add columns to chat_history: %s", e)
@@ -1036,7 +1084,13 @@ def _ensure_traces_column() -> None:
         conn.close()
 
 
-def _save_messages(username: str, user_msg: str, model_reply: str, traces: list = None, charts: list = None) -> None:
+def _save_messages(
+    username: str,
+    user_msg: str,
+    model_reply: str,
+    traces: list = None,
+    charts: list = None,
+) -> None:
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
@@ -1046,9 +1100,13 @@ def _save_messages(username: str, user_msg: str, model_reply: str, traces: list 
             )
             cur.execute(
                 "INSERT INTO public.chat_history (username, role, message, traces, charts) VALUES (%s, %s, %s, %s, %s)",
-                (username, "model", model_reply,
-                 json.dumps(traces, default=str) if traces else None,
-                 json.dumps(charts, default=str) if charts else None),
+                (
+                    username,
+                    "model",
+                    model_reply,
+                    json.dumps(traces, default=str) if traces else None,
+                    json.dumps(charts, default=str) if charts else None,
+                ),
             )
         conn.commit()
     except Exception as e:
@@ -1061,22 +1119,39 @@ def _save_messages(username: str, user_msg: str, model_reply: str, traces: list 
 def _load_history(username: str, limit: int = 40) -> list[dict]:
     conn = pg._get_conn()
     try:
-        with conn.cursor(cursor_factory=__import__("psycopg2").extras.RealDictCursor) as cur:
-            cur.execute("""
+        with conn.cursor(
+            cursor_factory=__import__("psycopg2").extras.RealDictCursor
+        ) as cur:
+            cur.execute(
+                """
                 SELECT id, role, message, traces, charts, created_at
                 FROM public.chat_history
                 WHERE username = %s
                 ORDER BY id DESC
                 LIMIT %s
-            """, (username, limit))
+            """,
+                (username, limit),
+            )
             rows = cur.fetchall()
             result = []
             for r in reversed(rows):
-                entry = {"role": r["role"], "message": r["message"], "created_at": str(r["created_at"])}
+                entry = {
+                    "role": r["role"],
+                    "message": r["message"],
+                    "created_at": str(r["created_at"]),
+                }
                 if r["traces"]:
-                    entry["traces"] = r["traces"] if isinstance(r["traces"], list) else json.loads(r["traces"])
+                    entry["traces"] = (
+                        r["traces"]
+                        if isinstance(r["traces"], list)
+                        else json.loads(r["traces"])
+                    )
                 if r["charts"]:
-                    entry["charts"] = r["charts"] if isinstance(r["charts"], list) else json.loads(r["charts"])
+                    entry["charts"] = (
+                        r["charts"]
+                        if isinstance(r["charts"], list)
+                        else json.loads(r["charts"])
+                    )
                 result.append(entry)
             return result
     finally:
@@ -1084,6 +1159,7 @@ def _load_history(username: str, limit: int = 40) -> list[dict]:
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
+
 
 def _ensure_prompt_table() -> None:
     conn = pg._get_conn()
@@ -1132,7 +1208,9 @@ def _save_system_prompt(new_prompt: str) -> int:
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE public.chat_prompts SET is_active = FALSE WHERE is_active = TRUE")
+            cur.execute(
+                "UPDATE public.chat_prompts SET is_active = FALSE WHERE is_active = TRUE"
+            )
             cur.execute(
                 "INSERT INTO public.chat_prompts (prompt, is_active) VALUES (%s, TRUE) RETURNING id",
                 (new_prompt,),
@@ -1155,7 +1233,9 @@ def init(templates: Jinja2Templates):
     # Support credentials from env var (base64 JSON) or local file path
     key_b64 = os.environ.get("BIGQUERY_KEY_B64")
     if key_b64:
-        import base64, tempfile
+        import base64
+        import tempfile
+
         key_json = base64.b64decode(key_b64)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
         tmp.write(key_json)
@@ -1178,6 +1258,7 @@ def init(templates: Jinja2Templates):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def chat_page(request: Request):
@@ -1187,6 +1268,7 @@ async def chat_page(request: Request):
 @router.get("/history")
 async def chat_history(request: Request):
     from auth import get_current_user
+
     username = get_current_user(request) or "anonymous"
     rows = _load_history(username, limit=60)
     return JSONResponse({"history": rows})
@@ -1195,11 +1277,14 @@ async def chat_history(request: Request):
 @router.delete("/history")
 async def clear_history(request: Request):
     from auth import get_current_user
+
     username = get_current_user(request) or "anonymous"
     conn = pg._get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM public.chat_history WHERE username = %s", (username,))
+            cur.execute(
+                "DELETE FROM public.chat_history WHERE username = %s", (username,)
+            )
         conn.commit()
     finally:
         conn.close()
@@ -1219,6 +1304,7 @@ async def get_prompt(_admin=Depends(require_admin)):
 @router.post("/prompt")
 async def update_prompt(request: Request, _admin=Depends(require_admin)):
     from fastapi import HTTPException
+
     body = await request.json()
     new_prompt = body.get("prompt", "").strip()
     if not new_prompt or len(new_prompt) < 100:
@@ -1255,6 +1341,7 @@ async def list_prompt_versions():
 @router.get("/prompt/versions/{version_id}")
 async def get_prompt_version(version_id: str):
     from fastapi import HTTPException
+
     if not version_id.isdigit():
         raise HTTPException(status_code=400, detail="ID de versión inválido")
     conn = pg._get_conn()
@@ -1269,12 +1356,14 @@ async def get_prompt_version(version_id: str):
         conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Versión no encontrada")
-    return JSONResponse({
-        "prompt": row[0],
-        "name": str(row[1]),
-        "is_active": row[2],
-        "saved_at": row[3].strftime("%d/%m/%Y %H:%M") if row[3] else "—",
-    })
+    return JSONResponse(
+        {
+            "prompt": row[0],
+            "name": str(row[1]),
+            "is_active": row[2],
+            "saved_at": row[3].strftime("%d/%m/%Y %H:%M") if row[3] else "—",
+        }
+    )
 
 
 _ROLE_RESTRICTION_USER = """
@@ -1289,10 +1378,12 @@ Si el usuario pregunta sobre estos temas, responde exactamente:
 ---
 """
 
+
 @router.post("/ask")
 async def chat_ask(request: Request):
     from auth import get_current_user, get_user_role
     from fastapi import HTTPException
+
     username = get_current_user(request) or "anonymous"
     user_role = get_user_role(username)
 
@@ -1304,7 +1395,9 @@ async def chat_ask(request: Request):
 
     user_question = messages[-1].get("parts", "")
     if not isinstance(user_question, str) or len(user_question) > 4000:
-        raise HTTPException(status_code=400, detail="Mensaje inválido o demasiado largo")
+        raise HTTPException(
+            status_code=400, detail="Mensaje inválido o demasiado largo"
+        )
 
     _log.info("chat/ask user=%s question_len=%d", username, len(user_question))
 
@@ -1317,17 +1410,28 @@ async def chat_ask(request: Request):
             cache_hit = True
             cached_reply, cached_traces, cached_charts = cached
             # Clean stale <br> from old cached replies
-            cached_reply = re.sub(r"^(\s*<br\s*/?>)+\s*", "", cached_reply, flags=re.IGNORECASE).strip()
-            _save_messages(username, user_question, cached_reply, cached_traces, cached_charts or None)
+            cached_reply = re.sub(
+                r"^(\s*<br\s*/?>)+\s*", "", cached_reply, flags=re.IGNORECASE
+            ).strip()
+            _save_messages(
+                username,
+                user_question,
+                cached_reply,
+                cached_traces,
+                cached_charts or None,
+            )
             _log.info("cache hit user=%s", username)
-            return JSONResponse({
-                "reply": cached_reply,
-                "traces": cached_traces,
-                "charts": cached_charts,
-                "from_cache": True,
-            })
+            return JSONResponse(
+                {
+                    "reply": cached_reply,
+                    "traces": cached_traces,
+                    "charts": cached_charts,
+                    "from_cache": True,
+                }
+            )
     # Lazy cleanup — 1% of requests to avoid dedicated cron
     import random
+
     if random.random() < 0.01:
         cache.cleanup()
 
@@ -1336,7 +1440,9 @@ async def chat_ask(request: Request):
         role = "user" if m["role"] == "user" else "model"
         history.append(types.Content(role=role, parts=[types.Part(text=m["parts"])]))
 
-    effective_system = _SYSTEM + (_ROLE_RESTRICTION_USER if user_role != "admin" else "")
+    effective_system = _SYSTEM + (
+        _ROLE_RESTRICTION_USER if user_role != "admin" else ""
+    )
     chat = _client.chats.create(
         model=MODEL,
         config=types.GenerateContentConfig(
@@ -1368,9 +1474,13 @@ async def chat_ask(request: Request):
                 badge = parsed.get("__source_badge__", "")
                 trace = parsed.get("__trace__")
                 chart = parsed.get("__chart__")
-                _log.info("tool_result has_trace=%s has_badge=%s has_chart=%s row_count=%s",
-                          trace is not None, bool(badge), chart is not None,
-                          trace.get("row_count") if trace else "n/a")
+                _log.info(
+                    "tool_result has_trace=%s has_badge=%s has_chart=%s row_count=%s",
+                    trace is not None,
+                    bool(badge),
+                    chart is not None,
+                    trace.get("row_count") if trace else "n/a",
+                )
                 if badge:
                     collected_badges.append(badge.strip())
                 if trace:
@@ -1390,19 +1500,31 @@ async def chat_ask(request: Request):
 
         response = chat.send_message(tool_parts)
 
-    _log.info("agentic_loop done badges=%d traces=%d charts=%d",
-              len(collected_badges), len(collected_traces), len(collected_charts))
+    _log.info(
+        "agentic_loop done badges=%d traces=%d charts=%d",
+        len(collected_badges),
+        len(collected_traces),
+        len(collected_charts),
+    )
 
     try:
         # Join all text parts (Gemini may split text + function_response across parts)
-        text_parts = [p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text]
+        text_parts = [
+            p.text
+            for p in response.candidates[0].content.parts
+            if hasattr(p, "text") and p.text
+        ]
         final_text = "\n".join(text_parts).strip()
     except (IndexError, AttributeError) as e:
         _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
-        raise HTTPException(status_code=502, detail="No se pudo obtener respuesta del modelo")
+        raise HTTPException(
+            status_code=502, detail="No se pudo obtener respuesta del modelo"
+        )
 
     # Strip stray HTML tags Gemini sometimes emits (e.g. <br>)
-    final_text = re.sub(r"^(\s*<br\s*/?>)+\s*", "", final_text, flags=re.IGNORECASE).strip()
+    final_text = re.sub(
+        r"^(\s*<br\s*/?>)+\s*", "", final_text, flags=re.IGNORECASE
+    ).strip()
 
     # Extract __chart__ payloads Gemini sometimes embeds as raw JSON in the text
     # instead of calling the render_chart tool properly
@@ -1429,14 +1551,19 @@ async def chat_ask(request: Request):
 
     # Anti-hallucination guard: block responses with numbers but no source badge
     # and no tool was called (i.e. Gemini answered from memory)
-    _has_numbers = bool(re.search(r'\b\d[\d\.]{2,}\b', final_text))
-    _has_source  = "__source_badge__" in final_text or "📊 Fuente:" in final_text
-    _tool_was_called = len(collected_badges) > 0 or len(collected_charts) > 0 or len(collected_traces) > 0
+    _has_numbers = bool(re.search(r"\b\d[\d\.]{2,}\b", final_text))
+    _has_source = "__source_badge__" in final_text or "📊 Fuente:" in final_text
+    _tool_was_called = (
+        len(collected_badges) > 0
+        or len(collected_charts) > 0
+        or len(collected_traces) > 0
+    )
 
     if _has_numbers and not _has_source and not _tool_was_called:
         _log.warning(
             "chat/ask blocked hallucination — numbers without source user=%s reply_preview=%.120s",
-            username, final_text
+            username,
+            final_text,
         )
         final_text = (
             "⚠️ No puedo responder esta pregunta sin consultar la base de datos primero. "
@@ -1446,21 +1573,44 @@ async def chat_ask(request: Request):
 
     # Store in cache only if a tool was called (i.e. real data was queried)
     if embedding and _tool_was_called:
-        cache.put(user_question, embedding, final_text, collected_traces, collected_charts or None)
+        cache.put(
+            user_question,
+            embedding,
+            final_text,
+            collected_traces,
+            collected_charts or None,
+        )
 
     # Persist to DB (fire and forget — don't block the response)
-    _log.info("saving user=%s traces=%d charts=%d tool_was_called=%s",
-              username, len(collected_traces), len(collected_charts), _tool_was_called)
-    _save_messages(username, user_question, final_text,
-                   collected_traces if collected_traces else None,
-                   collected_charts if collected_charts else None)
+    _log.info(
+        "saving user=%s traces=%d charts=%d tool_was_called=%s",
+        username,
+        len(collected_traces),
+        len(collected_charts),
+        _tool_was_called,
+    )
+    _save_messages(
+        username,
+        user_question,
+        final_text,
+        collected_traces if collected_traces else None,
+        collected_charts if collected_charts else None,
+    )
 
-    return JSONResponse({"reply": final_text, "traces": collected_traces, "charts": collected_charts, "from_cache": False})
+    return JSONResponse(
+        {
+            "reply": final_text,
+            "traces": collected_traces,
+            "charts": collected_charts,
+            "from_cache": False,
+        }
+    )
 
 
 @router.post("/download")
 async def chat_download(request: Request):
     from fastapi import HTTPException
+
     body = await request.json()
     fmt = body.get("format", "xlsx").lower()
     sql = body.get("sql", "").strip()
@@ -1483,6 +1633,69 @@ async def chat_download(request: Request):
     if fmt == "pdf":
         return _build_pdf(rows, sql)
     return _build_xlsx(rows, sql)
+
+
+@router.post("/export-sheets")
+async def chat_export_sheets(request: Request):
+    from fastapi import HTTPException
+    from auth import get_current_user, get_google_token
+
+    body = await request.json()
+    sql = body.get("sql", "").strip()
+    system = body.get("system", "bigquery")
+
+    if not sql or _WRITE_RE.match(sql):
+        raise HTTPException(status_code=400, detail="SQL inválida")
+
+    if not get_current_user(request):
+        raise HTTPException(status_code=401, detail="No autenticado")
+
+    google_token = get_google_token(request)
+    if not google_token:
+        raise HTTPException(
+            status_code=403,
+            detail="Permisos de Google Drive no disponibles. Por favor cerrá sesión y volvé a entrar con Google.",
+        )
+
+    try:
+        if system == "bigquery" or "ace-scarab" in sql:
+            rows = bq.run_query(sql, 5000)
+        else:
+            rows = pg.run_pg_query(sql, 5000)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="La consulta no devolvió datos")
+
+    try:
+        url = _build_gsheet(rows, google_token)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al crear Google Sheet: {e}")
+
+    return JSONResponse({"url": url})
+
+
+def _build_gsheet(rows: list[dict], google_token: str) -> str:
+    import gspread
+    from google.oauth2.credentials import Credentials
+
+    creds = Credentials(token=google_token)
+    gc = gspread.authorize(creds)
+
+    sh = gc.create("Donar Export")
+    ws = sh.get_worksheet(0)
+    ws.update_title("Datos")
+
+    headers = list(rows[0].keys())
+    data = [headers] + [
+        [str(r.get(h) if r.get(h) is not None else "") for h in headers]
+        for r in rows
+    ]
+    ws.update(data, "A1")
+    ws.format("1:1", {"textFormat": {"bold": True}})
+
+    return sh.url
 
 
 def _build_xlsx(rows: list[dict], sql: str) -> StreamingResponse:
@@ -1509,13 +1722,18 @@ def _build_xlsx(rows: list[dict], sql: str) -> StreamingResponse:
             val = row.get(header)
             ws.cell(row=row_idx, column=col_idx, value=val)
             if row_idx % 2 == 0:
-                ws.cell(row=row_idx, column=col_idx).fill = PatternFill("solid", fgColor="F0F4F0")
+                ws.cell(row=row_idx, column=col_idx).fill = PatternFill(
+                    "solid", fgColor="F0F4F0"
+                )
 
     for col_idx in range(1, len(headers) + 1):
         col_letter = get_column_letter(col_idx)
         max_len = max(
             len(str(headers[col_idx - 1])),
-            max((len(str(row.get(headers[col_idx - 1]) or "")) for row in rows[:50]), default=0)
+            max(
+                (len(str(row.get(headers[col_idx - 1]) or "")) for row in rows[:50]),
+                default=0,
+            ),
         )
         ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
 
@@ -1533,7 +1751,13 @@ def _build_xlsx(rows: list[dict], sql: str) -> StreamingResponse:
 def _build_pdf(rows: list[dict], sql: str) -> StreamingResponse:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Table,
+        TableStyle,
+        Paragraph,
+        Spacer,
+    )
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm
 
@@ -1541,21 +1765,26 @@ def _build_pdf(rows: list[dict], sql: str) -> StreamingResponse:
     page_size = landscape(A4) if len(headers) > 6 else A4
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=page_size,
-                            leftMargin=1.5*cm, rightMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=page_size,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+    )
 
     styles = getSampleStyleSheet()
     story = []
 
     story.append(Paragraph("Reporte de Datos — Empresas Donar", styles["Title"]))
-    story.append(Spacer(1, 0.3*cm))
+    story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(f"Total registros: {len(rows)}", styles["Normal"]))
-    story.append(Spacer(1, 0.5*cm))
+    story.append(Spacer(1, 0.5 * cm))
 
     # Build table data
     col_widths = None
-    page_width = page_size[0] - 3*cm
+    page_width = page_size[0] - 3 * cm
     col_w = page_width / len(headers)
     col_widths = [col_w] * len(headers)
 
@@ -1564,18 +1793,27 @@ def _build_pdf(rows: list[dict], sql: str) -> StreamingResponse:
         table_data.append([str(row.get(h) or "") for h in headers])
 
     t = Table(table_data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2D6A4F")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F0F4F0")]),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
+    t.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2D6A4F")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, colors.HexColor("#F0F4F0")],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
     story.append(t)
 
     doc.build(story)
