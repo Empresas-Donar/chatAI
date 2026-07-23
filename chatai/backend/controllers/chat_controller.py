@@ -982,6 +982,18 @@ def _extract_table_name(sql: str) -> str:
     return table
 
 
+def _has_valid_traces(traces: list) -> bool:
+    """Return True only if at least one trace has real query data (sql + row_count > 0).
+
+    Traces from render_chart / list_tables / describe_table carry no sql or row_count,
+    so caching those would produce cache hits without download buttons for later users.
+    """
+    return any(
+        bool(t.get("sql")) and t.get("row_count", 0) > 0
+        for t in (traces or [])
+    )
+
+
 def _build_trace(sql: str, rows: list[dict], system: str) -> dict:
     """Build a structured trace object for data provenance."""
     table = _extract_table_name(sql)
@@ -1571,8 +1583,10 @@ async def chat_ask(request: Request):
             "(facturas, remuneraciones, tarjas, despacho, sensores, etc.)."
         )
 
-    # Store in cache only if a tool was called (i.e. real data was queried)
-    if embedding and _tool_was_called:
+    # Store in cache only when at least one trace has real query data (sql + row_count > 0).
+    # Caching chart-only or list_tables responses would produce cache hits without download
+    # buttons for later users (issue #30).
+    if embedding and _has_valid_traces(collected_traces):
         cache.put(
             user_question,
             embedding,

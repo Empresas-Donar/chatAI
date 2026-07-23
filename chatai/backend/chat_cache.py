@@ -27,9 +27,9 @@ import pg_client as pg
 
 _log = logging.getLogger("chat_cache")
 
-SIMILARITY_THRESHOLD = 0.08   # cosine distance — lower = more similar
-TTL_SHORT_HOURS      = 1      # for time-sensitive questions
-TTL_LONG_HOURS       = 6      # for historical / stable questions
+SIMILARITY_THRESHOLD = 0.08  # cosine distance — lower = more similar
+TTL_SHORT_HOURS = 1  # for time-sensitive questions
+TTL_LONG_HOURS = 6  # for historical / stable questions
 
 _TIME_SENSITIVE = re.compile(
     r"\b(hoy|ayer|este mes|esta semana|esta temporada|ahora|hoy día|"
@@ -54,7 +54,9 @@ def _ensure_charts_column() -> None:
         conn = pg._get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("ALTER TABLE public.chat_cache ADD COLUMN IF NOT EXISTS charts JSONB")
+                cur.execute(
+                    "ALTER TABLE public.chat_cache ADD COLUMN IF NOT EXISTS charts JSONB"
+                )
             conn.commit()
         finally:
             conn.close()
@@ -68,7 +70,8 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list, list
         conn = _get_conn()
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT id, reply, traces, charts,
                            embedding <=> %s::vector AS distance
                     FROM public.chat_cache
@@ -76,16 +79,21 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list, list
                       AND embedding <=> %s::vector < %s
                     ORDER BY distance
                     LIMIT 1
-                """, (embedding, embedding, SIMILARITY_THRESHOLD))
+                """,
+                    (embedding, embedding, SIMILARITY_THRESHOLD),
+                )
                 row = cur.fetchone()
                 if not row:
                     return None
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE public.chat_cache
                     SET hit_count  = hit_count + 1,
                         last_hit_at = NOW()
                     WHERE id = %s
-                """, (row["id"],))
+                """,
+                    (row["id"],),
+                )
                 conn.commit()
                 _log.info("cache hit id=%s dist=%.4f", row["id"], row["distance"])
                 traces = row["traces"] if row["traces"] else []
@@ -98,26 +106,33 @@ def get(question: str, embedding: list[float]) -> Optional[tuple[str, list, list
         return None
 
 
-def put(question: str, embedding: list[float], reply: str, traces: list, charts: list = None) -> None:
+def put(
+    question: str, embedding: list[float], reply: str, traces: list, charts: list = None
+) -> None:
     """Store a question+response in cache."""
     ttl = _ttl(question)
     try:
         conn = _get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO public.chat_cache
                       (question_raw, embedding, reply, traces, charts, ttl_hours, expires_at)
                     VALUES (%s, %s::vector, %s, %s, %s, %s, NOW() + (%s || ' hours')::INTERVAL)
-                """, (
-                    question,
-                    embedding,
-                    reply,
-                    json.dumps(traces, ensure_ascii=False, default=str),
-                    json.dumps(charts, ensure_ascii=False, default=str) if charts else None,
-                    ttl,
-                    ttl,
-                ))
+                """,
+                    (
+                        question,
+                        embedding,
+                        reply,
+                        json.dumps(traces, ensure_ascii=False, default=str),
+                        json.dumps(charts, ensure_ascii=False, default=str)
+                        if charts
+                        else None,
+                        ttl,
+                        ttl,
+                    ),
+                )
             conn.commit()
             _log.info("cache put ttl=%dh question=%.60s", ttl, question)
         finally:
