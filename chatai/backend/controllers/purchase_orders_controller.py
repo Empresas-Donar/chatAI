@@ -86,11 +86,11 @@ def _sync_labores(
     )
     query = f"""
         SELECT
-            JSON_VALUE(p.name, '$.es_CL') AS nombre,
-            p.default_code                AS codigo
+            TRIM(JSON_VALUE(p.name, '$.es_CL')) AS nombre,
+            p.default_code                       AS codigo
         FROM `ace-scarab-484515-v1.odoo_data.Producto` p
         WHERE p.default_code IS NOT NULL
-          AND JSON_VALUE(p.name, '$.es_CL') IN ({placeholders})
+          AND TRIM(JSON_VALUE(p.name, '$.es_CL')) IN ({placeholders})
     """
     results = bq.query(query).result()
     matches = {row.nombre: row.codigo for row in results}
