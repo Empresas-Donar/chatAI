@@ -38,6 +38,7 @@ SELECT DISTINCT
     p.tipo_pago,
     p.cuartel_cc                                                            AS "CC",
     p.labor                                                                 AS "Nombre Labor",
+    p.id_labor,
     COUNT(*) OVER (
         PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
     )                                                                       AS jornadas,
