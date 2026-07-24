@@ -1,237 +1,262 @@
-# AppSheet → PostgreSQL Migration Toolkit
+# ChatAI — Plataforma BI y Chat IA para Donar / KONTROLAG
 
-## Contexto del Proyecto
+## Qué hace esta aplicación
 
-Framework para migrar múltiples aplicaciones AppSheet a PostgreSQL.
+Este repositorio evolucionó de una herramienta de migración AppSheet → PostgreSQL a una **plataforma de inteligencia de negocio y analítica conversacional** para Empresas Donar y KONTROLAG SPA. Tiene tres funciones principales:
 
-Apps actuales:
-- `contratistas_isla_maipo`
-- `medicion_pozos`
+1. **Reportería operativa**: dashboards de tarjas (mano de obra), despachos (stock.picking Odoo), órdenes de compra — reemplazando Looker Studio
+2. **Chat IA**: interfaz de lenguaje natural con Gemini 2.5-pro que genera SQL, consulta PostgreSQL + BigQuery y exporta resultados (Excel, PDF, Google Sheets)
+3. **Migración AppSheet → PostgreSQL**: herramienta web que recibe CSVs, detecta tipos, valida y carga datos con UPSERT transaccional
 
-Convención de tablas: `appsheet.<nombre_app>_<nombre_tabla>`
+---
 
-Ejemplos:
+## Stack Técnico
+
+**Backend:** Python 3.11+, FastAPI 0.111+, Uvicorn
+**BD:** PostgreSQL 16 (Cloud SQL GCP) + Google BigQuery (Odoo warehouse)
+**LLM:** Google Gemini 2.5-pro via `google-genai` SDK con tool use
+**MCP:** FastMCP server expone las tablas BigQuery como herramientas al LLM
+**Export:** openpyxl (Excel), xhtml2pdf (PDF), gspread (Google Sheets)
+**Auth:** sesiones por cookie firmada (`itsdangerous`) + OAuth2 Google
+**Infra:** Cloud Run (`southamerica-west1`), Artifact Registry, Cloud Build
+
+---
+
+## Estructura del Proyecto
+
 ```
-appsheet.contratistas_isla_maipo_contratistas
-appsheet.medicion_pozos_ingresos
+chatai/
+  backend/
+    main.py                    — FastAPI app, middleware, routers
+    auth.py                    — sesiones cookie + OAuth2 Google
+    db.py                      — conexión PostgreSQL
+    pg_client.py               — ejecutor SELECT-only para el chat
+    chat_cache.py              — cache de respuestas LLM
+    controllers/               — capa HTTP (10 módulos)
+      chat_controller.py       — interfaz chat IA (streaming SSE)
+      tarjas_controller.py     — reportes mano de obra / contratistas
+      purchase_orders_controller.py — órdenes compra + sync Odoo
+      despacho_controller.py   — guías de despacho
+      reports_controller.py    — exportación PDF masiva
+      csv_migrator_controller.py — migración AppSheet → PG
+      sensors_controller.py    — sensores de riego
+      roles_controller.py      — control de acceso
+      login_controller.py      — sesiones
+      google_auth_controller.py — OAuth2
+    services/                  — lógica de negocio (sin HTTP)
+      csv_parser.py            — CSV → TableAnalysis (inferencia de tipos)
+      schema_builder.py        — genera DDL CREATE TABLE
+      sync_service.py          — carga datos con transacciones
+    models/
+      migration_models.py      — TableAnalysis, SyncResult
+    prompt_data/               — templates del system prompt
+  frontend/
+    templates/                 — 27 templates Jinja2 HTML5
+    static/                    — JS y CSS (sin framework, vanilla)
+  tests/                       — 14 módulos pytest
+  uploads/                     — CSVs temporales (auto-limpiados)
+
+core/                          — utilidades reutilizables (legacy migración)
+  type_inference.py            — detección tipos PostgreSQL
+  cleaners.py                  — limpieza datos CSV
+  loader.py / utils.py
+
+mcp_server/                    — servidor MCP para el chat IA
+  main.py                      — 3 tools: list_tables, describe_table, query_bigquery
+  bigquery_client.py           — credenciales GCP
+
+sql/
+  tarjas/                      — esquema PostgreSQL del sistema de tarjas
+    01_views_reporte.sql       — vista tarjas_reporte (consolidada)
+    02_views_odoo.sql          — vista tarjas_reporte_odoo (export Odoo)
+    03_insert_labores_bonhomia.sql
+    04_backfill_id_labor.sql
+    05_trigger_id_labor.sql
+    06_add_id_labor_to_labores.sql
+
+specs/                         — especificaciones de features (en español)
+apps/                          — scripts legacy de migración AppSheet
+data/                          — CSVs raw por app
 ```
 
 ---
 
-## Arquitectura
+## Módulos Principales
 
+### Tarjas (mano de obra agrícola)
+Controlador más grande (3,637 líneas). Gestiona pagos a contratistas por labor agrícola.
+
+**Vistas disponibles:**
+- `tarjas_general` — resumen por contratista/campo/labor
+- `tarjas_detalle` — detalle semana a semana
+- `tarjas_contratista` — tabla pivot trabajadores (horas, costo/hr)
+- `tarjas_jornadas_trabajador` — horas por trabajador por fecha
+- `tarjas_notas` — notas de crédito
+- Variantes `tractorista` para pagos de maquinaria
+
+**Mapeo de labores (4 niveles de fallback):**
+El JOIN `tarjas_pagos → tarjas_labores` usa 4 niveles de tolerancia: id_labor exacto → texto normalizado → prefijo → BONHOMIA. Esto es crítico para la vista `tarjas_reporte_odoo`.
+
+**Tablas PostgreSQL:**
 ```
-core/     → lógica reutilizable (db, cleaners, loader, utils)
-apps/     → scripts específicos por app
-sql/      → definición de esquemas por app
-data/     → CSV raw y procesados por app
-logs/     → salidas de migración
+appsheet.tarjas_pagos          — registros de pago (origen AppSheet)
+appsheet.tarjas_labores        — catálogo de labores con codigo_labor (Odoo)
+appsheet.tarjas_cc             — centros de costo con analytic_distribution JSON
+appsheet.tarjas_reporte        — VIEW consolidada para reportes
+appsheet.tarjas_reporte_odoo   — VIEW formato Odoo (product_id, CC JSON)
 ```
 
-No mezclar responsabilidades entre capas. La lógica reutilizable siempre va en `core/`.
+### Chat IA
+Interfaz conversacional con streaming SSE. Gemini 2.5-pro decide qué SQL ejecutar, usa MCP para BigQuery y `pg_client` para PostgreSQL. Tiene auto-corrección: si el SQL falla, el LLM reintenta.
+
+**Reglas de integridad del LLM:** no puede inventar datos, siempre debe ejecutar SQL antes de responder, no puede responder preguntas fuera del dominio de negocio.
+
+**Exports:** Excel (openpyxl), PDF (xhtml2pdf), Google Sheets (gspread → Drive del usuario).
+
+**Tablas PostgreSQL:**
+```
+public.chat_messages           — historial de conversaciones
+public.system_prompt           — prompt del sistema (editable por admin)
+```
+
+### Purchase Orders / Odoo Sync
+Gestiona pedidos de venta (BigQuery `Pedidos_de_Venta`) y sincronización de centros de costo con Odoo. Incluye resolución de códigos duplicados por fuzzy matching.
+
+### Despacho
+Dashboard de guías de despacho (BigQuery `Despachos`). Incluye preview de sync de distribución analítica antes del export.
+
+### CSV Migrator
+Interfaz web que acepta CSVs de AppSheet, detecta tipos automáticamente (BOOLEAN, DATE, NUMERIC, TEXT), muestra preview, hace dry-run y confirma con UPSERT transaccional. Los logs se transmiten en tiempo real por SSE.
 
 ---
 
-## Date Format Convention
+## Fuentes de Datos
 
-All dates visible to the user must be displayed as **`DD/MM/YYYY`** — no exceptions.
+### PostgreSQL — esquema `appsheet`
+Tablas migradas desde AppSheet. Prefijo: `appsheet.<nombre_app>_<tabla>`.
 
-This applies to:
-- UI components: tables, forms, modals, date pickers, tooltips
-- Exported files: PDFs and Excel/CSV reports
-- Any user-facing text (error messages, labels, summaries)
+Convención de PKs: `TEXT NOT NULL PRIMARY KEY` (nunca SERIAL — AppSheet genera sus propios IDs).
 
-This does NOT apply to:
-- Internal API JSON responses (use ISO 8601: `YYYY-MM-DD`)
-- Database storage (always store as native `DATE`/`TIMESTAMP`)
-- Git commit messages or code
+### BigQuery — `ace-scarab-484515-v1.odoo_data`
+16 tablas exportadas desde Odoo. Las principales:
 
-When generating or reviewing frontend code, always verify date formatting functions output `DD/MM/YYYY`.
+| Tabla | Contenido |
+|---|---|
+| `Cuentas_por_cobrar` | Facturas a clientes |
+| `Remuneraciones` | Liquidaciones de sueldo |
+| `Nomina` | Líneas detalladas de liquidaciones |
+| `Pedidos_de_Venta` | Pedidos S00XXX |
+| `Lineas_del_Pedido_de_Venta` | Líneas por pedido |
+| `Despachos` | Guías DTE (stock.picking) |
+| `Movimientos_de_Stock` | Movimientos de stock |
+| `Ordenes_de_aplicacion` | Aplicaciones agrícolas |
+| `Empleados` | Ficha empleados con RUT (`formated_vat`) |
+| `Contactos` | Clientes, proveedores, empleados |
+| `Reporte_Analitico` | Líneas contables con CC analítico |
+| `Producto` / `Variantes_del_producto` | Catálogo de productos/insumos |
+| `Ubicaciones` | Bodegas y almacenes |
 
----
-
-## Language Convention
-
-All code must be written in English:
-- File names, variable names, function names, class names
-- Comments, docstrings, log messages, git commit messages
-
-Documentation must be written in Spanish:
-- spec files (specs/**/*.md)
-- README files
-- Any other markdown documentation files
-
-Exception: table names, column names, and CSV field names stay in Spanish
-as defined by the client (e.g. `id_trabajador`, `contratista`, `fecha_inicio_trato`).
-Do not translate these — they must match the AppSheet source exactly.
+**Credenciales BigQuery:**
+- Service account key local: `/Users/bedomax/startups/donar/bigquery-odoo-key.json`
+- Variable de entorno en producción: `BIGQUERY_KEY_B64`
+- Cuenta gcloud: `gestion@empresasdonar.cl`
 
 ---
 
-## SQL Generation Rules for AppSheet Compatibility
+## Terminología del Dominio
 
-You are generating SQL for a PostgreSQL database that will be connected directly to AppSheet.
+| Término | Significado |
+|---|---|
+| **Tarjas** | Registros de trabajo diario en campo |
+| **Trato** | Pago a destajo (vs. "al día" = jornal) |
+| **Labor** | Tipo de trabajo: "AMARRA", "PODA", "REPLANTE", etc. |
+| **Contratista** | Empresa/cuadrillero que provee mano de obra |
+| **Nombre_campo** | Predio: "Isla de Maipo", "Bonhomia", "Zuñiga" |
+| **Cuartel** | Subdivisión del predio (lote agrícola) |
+| **CC** | Centro de Costo (dimensión analítica Odoo) |
+| **codigo_labor** | Código de producto Odoo para la labor |
+| **Despacho** | Transferencia de stock / guía DTE |
+| **Orden de Aplicación** | Aplicación de agroquímico en campo |
 
-STRICT RULES:
+---
 
-1. Keep column names EXACTLY as they appear in AppSheet.
-2. Respect uppercase, lowercase, underscores, and special characters (including `%`).
-3. Always wrap column names in double quotes in PostgreSQL.
-4. DO NOT rename columns.
-5. DO NOT normalize to snake_case.
-6. DO NOT refactor names.
-7. DO NOT change structure for architectural improvements.
-8. DO NOT remove fields unless explicitly instructed.
-9. DO NOT migrate virtual columns like `Related_*`.
-10. DO NOT migrate `_RowNumber` unless explicitly instructed.
+## Convenciones de Código
 
-The goal is zero structural changes so AppSheet can connect without breaking formulas, references, or virtual columns.
+**Idioma del código:** inglés (archivos, funciones, variables, comentarios, commits)
+**Documentación:** español (specs/, README, markdown)
+**Columnas DB:** español exacto del AppSheet original — NO renombrar
+**Fechas en UI:** `DD/MM/YYYY` — sin excepciones
+**Fechas internas:** ISO 8601 `YYYY-MM-DD` (APIs, DB)
 
-Generate production-ready SQL strictly following these rules.
+---
+
+## Reglas SQL / PostgreSQL
+
+1. PKs siempre `TEXT NOT NULL PRIMARY KEY`
+2. Dinero/porcentajes: `NUMERIC` (nunca TEXT)
+3. Siempre `ON CONFLICT ... DO UPDATE` (UPSERT) — nunca INSERT sin manejo de duplicados
+4. Envolver nombres de columnas en comillas dobles `"columna"` (AppSheet es case-sensitive)
+5. No migrar columnas virtuales AppSheet: `_RowNumber`, `Related_*`
+6. Preservar nombres de columnas exactamente como aparecen en AppSheet
 
 ---
 
 ## Reglas de Desarrollo
 
 1. No hardcodear credenciales — usar variables de entorno (`.env`)
-2. Usar funciones reutilizables en `core/`
+2. Lógica reutilizable va en `core/` o `services/`
 3. Validar tipos antes de insertar en DB
-4. Usar `ON CONFLICT` (UPSERT) siempre — nunca INSERT sin manejo de duplicados
-5. Evitar duplicación de código entre apps
-6. Mantener funciones pequeñas y testeables
-7. Documentar scripts críticos
+4. Funciones pequeñas y testeables
+5. No añadir manejo de errores para escenarios imposibles
+6. No abstraer prematuramente — si hay 3 líneas similares, no crear helper
 
 ---
 
-## Limpieza de Datos
+## Limpieza de Datos (CSV → PostgreSQL)
 
-Aplicar siempre estas transformaciones antes de insertar:
-
-| Entrada      | Salida         |
-|--------------|----------------|
-| `$18.000`    | `18000`        |
-| `45,00%`     | `0.45`         |
-| Fechas       | `YYYY-MM-DD`   |
-| Boolean      | `True`/`False` |
-| EnumList     | `TEXT[]`       |
-
----
-
-## AppSheet + PostgreSQL Conventions
-
-**Primary Keys**
-- Always `TEXT NOT NULL PRIMARY KEY` — never `SERIAL` or `INTEGER`
-- AppSheet generates its own string IDs; the column name must match exactly what AppSheet uses as Row ID
-
-**Columns to NEVER migrate**
-- `_RowNumber` — virtual Sheets column, does not exist in PostgreSQL
-- `Related_*` — reverse ref virtual columns, AppSheet generates these automatically
-- Any AppSheet formula/virtual columns
-
-**Type Mapping**
-| AppSheet type | PostgreSQL type |
+| Entrada | Salida |
 |---|---|
-| Text | `TEXT` |
-| Number / Decimal / Price | `NUMERIC` |
-| Date | `DATE` |
-| DateTime | `TIMESTAMP` |
-| Yes/No | `BOOLEAN` |
+| `$18.000` | `18000` |
+| `45,00%` | `0.45` |
+| Fechas | `YYYY-MM-DD` |
+| Boolean | `True`/`False` |
 | EnumList | `TEXT[]` |
-| Ref | `TEXT` (FK to the referenced table's PK) |
-
-**Ref columns (relationships)**
-- Store as `TEXT` with a real FK constraint
-- AppSheet uses these to navigate relationships automatically
-
-**Column names**
-- AppSheet is case-sensitive — column names must match exactly what AppSheet expects
-- Never rename, add spaces, or change casing
-
-**After connecting AppSheet to PostgreSQL**
-- Run "Regenerate Structure" so AppSheet re-scans types
-- If a column type is wrong (e.g. date stored as TEXT), AppSheet will not recognize it correctly
-- Test all views and actions in preview mode before going live
-
-## Revisión de SQL
-
-Al generar o revisar SQL:
-
-- Validar foreign keys y orden de creación de tablas
-- Usar `NUMERIC` para dinero/porcentajes, no `TEXT`
-- Nunca migrar columnas virtuales de AppSheet
-- Nunca migrar columnas `Related_*`
 
 ---
 
-## Flujo de Migración
+## Despliegue
 
-1. Analizar CSV de entrada
-2. Aplicar limpieza automática (`core/cleaners.py`)
-3. Insertar con transacción
-4. Loggear resultados
-5. Validar conteos finales
+**Cloud Run:** `chatai` en `southamerica-west1`, auto-scaling desde 0
+**Build:** `cloudbuild.yaml` → Docker → Artifact Registry `integraciones/chatai:latest`
+**Deploy manual:** `gcloud run deploy chatai --region southamerica-west1`
 
----
-
-## Orden de Migración (dependencias)
-
-1. empresa
-2. labor
-3. contratistas
-4. trabajadores
-5. tratos
-6. registro
-7. registro_trato
-8. resumen
-9. pagos
-10. usuarios
+**Variables de entorno:**
+```
+DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD
+BIGQUERY_KEY_B64          — clave GCP en base64
+SECRET_KEY                — firma de cookies
+AUTH_USER / AUTH_PASSWORD — auth de sesión
+HTTPS_ONLY                — enforce HTTPS en prod
+ALLOWED_ORIGINS           — CORS
+```
 
 ---
 
-## Futuro
+## Testing
 
-- CLI central: `python migrate.py --app nombre_app`
-- Validación automática de esquemas
-- Comparador Sheet vs DB
-- Migraciones incrementales
+Pytest con 14 módulos en `chatai/tests/`. Cada test usa fixtures propios. No hay mocks de BD — los tests de integración usan la DB real (local o test). Estrategia: regresión SQL, validación de formato DD/MM/YYYY, lógica de negocio.
+
+Ejecutar: `cd chatai && pytest tests/ -v`
 
 ---
 
-## Fuente de Datos: Odoo en Google Cloud (BigQuery)
-
-El cliente **KONTROLAG SPA** (RUT 77235191-7) tiene una instancia de Odoo activa que exporta datos a BigQuery.
+## Fuente BigQuery (contexto para queries)
 
 **GCP Project:** `ace-scarab-484515-v1`
 **Dataset:** `odoo_data`
 **Service Account:** `odoo-bigquery@ace-scarab-484515-v1.iam.gserviceaccount.com`
-**Clave JSON local:** `/Users/bedomax/startups/donar/bigquery-odoo-key.json`
 
-### Tablas disponibles (verificadas 28/05/2026)
-
-| Tabla BigQuery | Modelo Odoo | Filas | Contenido |
-|---|---|---|---|
-| `Contactos` | res.partner | 5.541 | Clientes, proveedores y empleados — directorio completo |
-| `Cuentas_Contables` | account.account | 3.767 | Plan de cuentas contable |
-| `Cuentas_por_cobrar` | account.move | 111 | Facturas emitidas a clientes |
-| `Despachos` | stock.picking | 6.469 | Guías de despacho con DTE SII tipo 52 — cabeceras de transferencias de stock salientes (Agricola Donar Uno) |
-| `Diarios_Contables` | account.journal | 203 | Diarios contables (ventas, compras, banco, etc.) |
-| `Empleados` | hr.employee | 118 | Ficha completa de empleados: nombre, RUT (`formated_vat`), cargo, depto, contrato, datos privados |
-| `Lineas_del_Pedido_de_Venta` | sale.order.line | 3.297 | Líneas de pedido de venta: producto, cantidad, precio, estado facturación, distribución analítica |
-| `Movimientos_de_Stock` | stock.move | 19.777 | Movimientos de stock a nivel operación (incluye manufactura, despachos, ajustes) |
-| `Nomina` | hr.payslip.line | 46.068 | **Líneas detalladas** de liquidaciones (reglas salariales por empleado) |
-| `Ordenes_de_aplicacion` | stock.move.line | 1.482 | Órdenes de aplicación agrícola (movimientos de insumos) |
-| `Pedidos_de_Venta` | sale.order | 951 | Pedidos de venta completos (S00XXX): cliente, monto, estado, fecha |
-| `Producto` | product.template | 6.077 | Templates de producto: nombre, tipo, ingredientes activos, concentración, marca (`bl_marca`) |
-| `Remuneraciones` | hr.payslip | 1.214 | Cabeceras de liquidaciones de sueldo |
-| `Reporte_Analitico` | account.move.line | 132.924 | Líneas contables con distribución analítica (centro de costo) |
-| `Ubicaciones` | stock.location | 129 | Ubicaciones de bodega/almacén |
-| `Variantes_del_producto` | product.product | 6.074 | Variantes de productos/insumos (join con `Producto` para nombre e ingredientes) |
-
-### gcloud
-
-- **Cuenta activa:** `gestion@empresasdonar.cl`
-- Autenticar con: `gcloud auth application-default login` o usar la clave JSON del service account
-
-### Conexión BigQuery desde Python
+### Conexión desde Python
 
 ```python
 from google.cloud import bigquery
@@ -241,378 +266,28 @@ credentials = service_account.Credentials.from_service_account_file(
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json"
 )
 client = bigquery.Client(project="ace-scarab-484515-v1", credentials=credentials)
-
-df = client.query("""
-    SELECT * FROM `ace-scarab-484515-v1.odoo_data.Cuentas_por_cobrar`
-""").to_dataframe()
 ```
-
-### Columnas clave — Contactos (res.partner)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del partner en Odoo |
-| `name` | Nombre completo |
-| `vat` | RUT (e.g. `77235191-7`) |
-| `is_company` | TRUE = empresa, FALSE = persona |
-| `customer_rank` | > 0 = es cliente |
-| `supplier_rank` | > 0 = es proveedor |
-| `employee` | TRUE = es empleado |
-| `email` / `phone` / `mobile` | Datos de contacto |
-| `street`, `city`, `state_id` | Dirección |
-| `l10n_cl_sii_taxpayer_type` | Tipo contribuyente SII Chile |
-| `l10n_cl_activity_description` | Giro comercial |
-| `commercial_company_name` | Nombre comercial de la empresa |
-
-### Columnas clave — Cuentas_Contables (account.account)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID interno |
-| `code` | Código de cuenta (e.g. `1101010`) |
-| `name` | Nombre de la cuenta (JSON bilingüe `{"es_CL": "..."}`) |
-| `account_type` | Tipo: `asset_cash`, `liability_payable`, `expense`, `income`, etc. |
-| `internal_group` | Grupo: `asset`, `liability`, `income`, `expense` |
-| `reconcile` | TRUE = cuenta reconciliable |
-| `company_id` | ID de la empresa propietaria |
-
-### Columnas clave — Cuentas_por_cobrar (account.move)
-
-| Campo Odoo | Significado |
-|---|---|
-| `name` | Número de factura (e.g. `FAC 000135`) |
-| `invoice_partner_display_name` | Nombre del cliente |
-| `invoice_date` | Fecha emisión |
-| `invoice_date_due` | Fecha vencimiento |
-| `amount_untaxed` | Monto neto |
-| `amount_tax` | IVA |
-| `amount_total` | Total con IVA |
-| `amount_residual` | Saldo pendiente de cobro |
-| `payment_state` | Estado: `not_paid`, `partial`, `paid` |
-| `state` | Estado doc: `posted`, `draft`, `cancel` |
-| `l10n_cl_sii_send_ident` | RUT receptor (Chile) |
-| `x_studio_estado_aprobacin` | Campo custom Odoo Studio |
-
-### Columnas clave — Remuneraciones (hr.payslip) — cabeceras
-
-| Campo Odoo | Significado |
-|---|---|
-| `name` | Nombre liquidación (empleado + mes) |
-| `employee_id` | ID empleado (join con `Contactos.id` vía `employee=TRUE`) |
-| `date_from` / `date_to` | Período de la liquidación |
-| `gross_wage` | Sueldo bruto |
-| `net_wage` | Sueldo líquido |
-| `sueldo_base` | Sueldo base contractual |
-| `descuentos` | Total descuentos |
-| `aportes_patronales` | Costos patronales |
-| `haberes` | Total haberes |
-| `state` | `done` = liquidación cerrada |
-
-### Columnas clave — Nomina (hr.payslip.line) — líneas detalladas
-
-| Campo | Significado |
-|---|---|
-| `slip_id` | ID liquidación madre (join con `Remuneraciones.id`) |
-| `employee_id` | ID empleado |
-| `name` | Nombre de la regla (e.g. `BONO TRATO`, `TOTAL DESCUENTOS`, `Salario neto`) |
-| `code` | Código regla salarial (e.g. `NET`, `TDE`, `BTRATO`) |
-| `category_id` | Categoría (haberes, descuentos, aportes, etc.) |
-| `amount` / `total` | Monto de la línea |
-| `bl_signed_total` | Monto con signo (negativo para descuentos) |
-| `quantity` / `rate` | Cantidad y tasa aplicada |
-| `date_from` / `date_to` | Período |
-| `contract_id` | ID del contrato de trabajo |
-| `x_studio_afp` | AFP del trabajador |
-| `x_studio_isapre` | Isapre del trabajador |
-| `tipo_auxiliar` | Tipo auxiliar de la línea |
-
-### Columnas clave — Reporte_Analitico (account.move.line)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID de la línea contable |
-| `move_id` | ID del asiento contable |
-| `move_name` | Nombre del asiento (e.g. `FAC/2026/01/0001`) |
-| `account_id` | ID cuenta contable (join con `Cuentas_Contables.id`) |
-| `journal_id` | ID diario contable (join con `Diarios_Contables.id`) |
-| `partner_id` | ID cliente/proveedor (join con `Contactos.id`) |
-| `date` | Fecha del movimiento |
-| `invoice_date` | Fecha de factura (si aplica) |
-| `debit` / `credit` | Debe / Haber |
-| `balance` | Saldo neto (debit - credit) |
-| `analytic_distribution` | JSON con distribución analítica `{"ID_CC": porcentaje}` |
-| `parent_state` | Estado: `posted`, `draft`, `cancel` |
-| `name` | Descripción de la línea |
-| `ref` | Referencia del asiento |
-| `product_id` | Producto asociado (si aplica) |
-| `quantity` | Cantidad |
-| `price_unit` / `price_subtotal` | Precio unitario / subtotal |
-| `x_studio_n_de_oc` | N° de OC (custom Studio) |
-| `x_studio_documento` | Documento de referencia (custom Studio) |
-| `x_studio_estado_aprobacin` | Estado aprobación (custom Studio) |
-
-> **Importante:** La distribución analítica está en `analytic_distribution` como JSON string `{"12345": 100.0}` donde la key es el ID del centro de costo analítico. No existe columna `analytic_account_id` directa.
-
-### Columnas clave — Ordenes_de_aplicacion (stock.move.line)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del movimiento |
-| `move_id` | ID de la operación de stock padre |
-| `picking_id` | ID guía de despacho / transferencia |
-| `product_id` | ID producto/insumo (join con `Variantes_del_producto.id`) |
-| `product_uom_id` | Unidad de medida |
-| `quantity` / `quantity_product_uom` | Cantidad movida |
-| `location_id` | Ubicación origen (join con `Ubicaciones.id`) |
-| `location_dest_id` | Ubicación destino |
-| `date` | Fecha del movimiento |
-| `state` | Estado: `done`, `assigned`, `cancel` |
-| `reference` | Referencia (e.g. `D1/OUT/00019`) |
-| `product_category_name` | Categoría del producto (e.g. `AG / INSUMOS AGRO / AGROQUIMICOS`) |
-| `x_studio_empresa` | ID empresa asociada (custom Studio) |
-| `x_studio_distribucin_analtica` | Distribución analítica (custom Studio) |
-| `x_studio_guia_despacho` | Guía de despacho (custom Studio) |
-| `x_studio_dosis_x_hectarea` | Dosis por hectárea aplicada |
-| `x_studio_dosis_x_100l` | Dosis por 100L aplicada |
-| `x_studio_mojamiento_ha` | Mojamiento por hectárea |
-| `x_studio_tipo_de_aplicacin` | Tipo de aplicación agrícola |
-
-### Columnas clave — Despachos (stock.picking)
-
-Cabeceras de guías de despacho emitidas por Agricola Donar Uno SPA. Cada fila es una transferencia completa (no la línea de producto).
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del despacho |
-| `name` | Referencia interna (e.g. `D1/OUT/00421`) |
-| `state` | Estado: `done`, `assigned`, `cancel` |
-| `partner_id` | ID cliente receptor (join con `Contactos.id`) |
-| `sale_id` | ID pedido de venta origen (join con `Pedidos_de_Venta.id`) |
-| `date_done` | Fecha de completado |
-| `date` / `scheduled_date` | Fecha programada |
-| `l10n_latam_document_number` | N° guía DTE (e.g. `000421`) |
-| `l10n_cl_dte_status` | Estado SII: `accepted`, `rejected` |
-| `l10n_cl_delivery_guide_reason` | Razón de traslado (código SII) |
-| `l10n_cl_sii_send_ident` | RUT receptor |
-| `origin` | Referencia de origen (e.g. `S00485` = pedido de venta) |
-| `location_id` / `location_dest_id` | Ubicación origen/destino (join con `Ubicaciones.id`) |
-| `x_studio_chofer` | ID chofer (join con `Contactos.id`) |
-| `note` | Notas (incluye datos del chofer y patente en texto libre) |
-
-### Columnas clave — Empleados (hr.employee)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del empleado en Odoo |
-| `name` | Nombre completo |
-| `firstname` / `last_name` / `middle_name` / `mothers_name` | Nombre desglosado |
-| `formated_vat` | RUT formateado (campo Chile) |
-| `job_title` | Cargo |
-| `department_id` | ID departamento |
-| `company_id` | ID empresa (1=Donar, 2=Donar Uno, 7=KONTROLAG) |
-| `work_email` | Email laboral |
-| `mobile_phone` | Teléfono móvil |
-| `contract_id` | ID contrato activo |
-| `first_contract_date` | Fecha primer contrato (antigüedad) |
-| `departure_date` | Fecha de egreso (si aplica) |
-| `gender` | Género: `male`, `female`, `other` |
-| `marital` | Estado civil |
-| `children` | Número de cargas familiares |
-| `active` | TRUE = empleado activo |
-| `employee_type` | Tipo: `employee`, `student`, etc. |
-| `bl_tramo_asignacion_familiar` | Tramo asignación familiar (Chile) |
-| `bl_pago_efectivo` | TRUE = se paga en efectivo |
-| `x_studio_operacin` | ID operación asociada (custom Studio) |
-
-### Columnas clave — Pedidos_de_Venta (sale.order)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del pedido |
-| `name` | Número de pedido (e.g. `S00485`) |
-| `partner_id` | ID cliente (join con `Contactos.id`) |
-| `state` | Estado: `sale` (confirmado), `draft`, `cancel`, `done` |
-| `date_order` | Fecha de confirmación |
-| `amount_untaxed` / `amount_tax` / `amount_total` | Montos neto/IVA/total |
-| `amount_to_invoice` | Monto pendiente de facturar |
-| `invoice_status` | Estado facturación: `invoiced`, `to invoice`, `nothing` |
-| `delivery_status` | Estado entrega: `pending`, `partial`, `full` |
-| `company_id` | Empresa emisora |
-| `analytic_account_id` | Centro de costo analítico del pedido |
-| `warehouse_id` | Bodega de despacho |
-| `x_studio_superficiem` | Superficie en metros (custom, instalaciones) |
-| `x_studio_tiempo_entrega` / `x_studio_tiempo_instalacin` | Tiempos estimados (instalaciones) |
-
-### Columnas clave — Lineas_del_Pedido_de_Venta (sale.order.line)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID de la línea |
-| `order_id` | ID pedido de venta padre (join con `Pedidos_de_Venta.id`) |
-| `order_partner_id` | ID cliente del pedido |
-| `product_id` | ID variante de producto (join con `Variantes_del_producto.id`) |
-| `name` | Descripción de la línea |
-| `product_uom_qty` | Cantidad pedida |
-| `qty_delivered` | Cantidad entregada |
-| `qty_invoiced` | Cantidad facturada |
-| `qty_to_invoice` | Cantidad pendiente de facturar |
-| `price_unit` | Precio unitario |
-| `price_subtotal` | Subtotal neto |
-| `price_total` | Total con impuesto |
-| `price_tax` | Monto impuesto |
-| `invoice_status` | Estado: `invoiced`, `to invoice`, `nothing` |
-| `state` | Estado del pedido padre |
-| `analytic_distribution` | JSON distribución analítica (mismo formato que `Reporte_Analitico`) |
-| `is_service` | TRUE = es un servicio |
-| `display_type` | `line_note` = línea de texto (sin producto ni precio) |
-| `company_id` | Empresa |
-
-### Columnas clave — Producto (product.template)
-
-Tabla de templates de producto. Más completa que `Variantes_del_producto` para datos de agroquímicos.
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del template (diferente al ID de `Variantes_del_producto`) |
-| `name` | Nombre en JSON bilingüe `{"es_CL": "...", "en_US": "..."}` |
-| `default_code` | Código interno |
-| `type` | Tipo: `product` (almacenable), `consu` (consumible), `service` |
-| `active` | TRUE = activo |
-| `list_price` | Precio de venta |
-| `categ_id` | Categoría del producto |
-| `uom_id` / `uom_po_id` | Unidad de medida venta / compra |
-| `bl_marca` | Marca comercial |
-| `ingrediente_activo_1/2/3` | Ingredientes activos (agroquímicos) |
-| `concentracion_ia1/2/3` | Concentración de cada ingrediente activo |
-| `x_studio_concentracin` | Concentración total (custom Studio) |
-| `x_studio_utilidad` | Utilidad/uso del producto |
-| `sale_ok` / `purchase_ok` | Se puede vender / comprar |
-
-### Columnas clave — Movimientos_de_Stock (stock.move)
-
-Nivel operación (stock.move), distinto de `Ordenes_de_aplicacion` que es stock.move.line. Un stock.move puede tener múltiples líneas.
-
-| Campo | Significado |
-|---|---|
-| `id` | ID del movimiento |
-| `name` | Nombre/referencia (e.g. `D1/MO/00112`) |
-| `reference` | Referencia del picking asociado |
-| `product_id` | ID producto (join con `Variantes_del_producto.id`) |
-| `product_uom_qty` / `product_qty` / `quantity` | Cantidades demandada/real/ejecutada |
-| `location_id` / `location_dest_id` | Ubicaciones origen/destino |
-| `picking_id` | ID del despacho/picking padre (join con `Despachos.id`) |
-| `state` | Estado: `done`, `assigned`, `cancel` |
-| `date` | Fecha del movimiento |
-| `origin` | Referencia origen (pedido, orden manufactura) |
-| `sale_line_id` | Línea de pedido de venta origen |
-| `purchase_line_id` | Línea de pedido de compra origen |
-| `raw_material_production_id` | ID orden de manufactura (si aplica) |
-| `is_done` | TRUE = completado |
-| `picked` | TRUE = retirado físicamente |
-| `scrapped` | TRUE = merma |
-| `price_unit` | Precio unitario del movimiento |
-| `x_studio_dosis_x_hectarea` / `x_studio_dosis_x_100l` | Dosis agronómicas (custom) |
-| `x_studio_stock_isla` / `x_studio_stock_zuig` | Stock por predio (custom) |
-| `x_stock_bodega_lanas` | Stock bodega Lanas (custom) |
-
-### Columnas clave — Variantes_del_producto (product.product)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID de la variante |
-| `product_tmpl_id` | ID del template de producto |
-| `default_code` | Código interno / referencia (e.g. `4669`) |
-| `barcode` | Código de barras |
-| `active` | TRUE = producto activo |
-
-### Columnas clave — Ubicaciones (stock.location)
-
-| Campo | Significado |
-|---|---|
-| `id` | ID de la ubicación |
-| `name` | Nombre corto (e.g. `Consumo`) |
-| `complete_name` | Ruta completa (e.g. `WH/Stock/Sector A`) |
-| `usage` | Tipo: `internal`, `customer`, `supplier`, `production`, `view` |
-| `scrap_location` | TRUE = es ubicación de merma |
-| `company_id` | Empresa propietaria |
-| `warehouse_id` | Bodega a la que pertenece |
-
-### Contexto del negocio
-
-- KONTROLAG SPA presta servicios agrícolas de supervisión e instalaciones a empresas de la zona central de Chile
-- Opera con fuerte estacionalidad: **70 empleados en peak (feb 2025)**, ~10 fuera de temporada
-- Facturación concentrada en **diciembre–mayo** (temporada de fruta)
-- **Agricola Donar Dos SpA** es cliente directo de KONTROLAG (empresa del grupo Donar)
-- Los campos con prefijo `x_studio_` son personalizaciones de Odoo Studio del cliente
-
-### Hallazgos financieros (al 07/05/2026)
-
-- **Facturación total histórica:** $858.7 MM — solo 24% cobrado; $650 MM pendiente
-- **Deuda crítica (+90 días):** $171.6 MM
-  - Exportadora Rancagua: $198.8 MM vencidos (~128 días)
-  - Agricola Curico: $107.7 MM vencidos (~145 días)
-  - Agricola Donar Dos SpA: $50.2 MM vencidos (~129 días)
-- **Costo laboral 2025:** ~$2.200 MM acumulado — facturación llegó rezagada en dic 2025
-- **Ratio saludable:** abril 2026 fue el primer mes con 72% costo laboral / facturación neta
-
----
-
-## Mapa de Datos y Cruces de Negocio
-
-El sistema combina dos fuentes principales para responder preguntas de negocio:
-
-### Fuente 1: AppSheet → PostgreSQL (esquema `appsheet`)
-
-**App `contratistas_isla_maipo`** — gestión de mano de obra agrícola en predios Zuñiga, Isla de Maipo y Talagante:
-- `contratistas` — empresas contratistas con condiciones pactadas (valor jornada, bono, % trato)
-- `trabajadores` — nómina por contratista
-- `tratos` — contratos de labor por campo / centro de costo / período, con valor unitario
-- `registro` / `registro_trato` — movimientos diarios por trabajador (jornadas, horas extra, unidades trato)
-- `pagos` — liquidación diaria: total trabajador, total contratista, total a pagar por empresa/CC/labor
-- `labor` — catálogo de labores agrícolas
-- `cultivos` / `cultivos_detalle` — qué cultivo hay en cada campo y centro de costo
-
-**App `tarjas`** — cuadrillas en campo, integrada con Odoo:
-- `tarjas_reporte_odoo` — view que mapea pagos diarios a líneas de pedido de compra Odoo
-
-**App `medicion_pozos`** — registros de pozos de agua (en proceso de migración)
-
-### Fuente 2: Odoo → BigQuery (`odoo_data`, proyecto `ace-scarab-484515-v1`)
-
-| Tabla | Contenido |
-|---|---|
-| `Cuentas_por_cobrar` | Facturas emitidas a clientes (account.move) |
-| `Remuneraciones` | Liquidaciones de sueldo de empleados KONTROLAG |
-| `Reporte_Analítico_staging_1778157508` | Líneas contables por centro de costo |
-| `Ordenes_de_aplicación_staging_1778157654` | Órdenes de aplicación agrícola |
 
 ### Cruces clave entre fuentes
 
-| Pregunta de negocio | Join |
+| Pregunta | Join |
 |---|---|
-| Costo de mano de obra por CC vs lo contabilizado | `pagos."CC"` ↔ clave en JSON `Reporte_Analitico.analytic_distribution` |
-| Costo laboral mensual vs remuneraciones Odoo | `pagos."Mes"` ↔ `Remuneraciones.date_from` |
-| Detalle de reglas salariales por empleado | `Remuneraciones.id` ↔ `Nomina.slip_id` |
-| Qué se le facturó al cliente vs lo que costó producirlo | `Cuentas_por_cobrar.partner_id` ↔ `Contactos.id` |
-| Nombre de cuenta contable por ID | `Reporte_Analitico.account_id` ↔ `Cuentas_Contables.id` |
-| Nombre de proveedor/cliente en línea contable | `Reporte_Analitico.partner_id` ↔ `Contactos.id` |
-| Órdenes de aplicación vs producto usado | `Ordenes_de_aplicacion.product_id` ↔ `Variantes_del_producto.id` |
-| Nombre e ingredientes de un producto | `Variantes_del_producto.product_tmpl_id` ↔ `Producto.id` |
-| Bodega origen/destino de un despacho | `Movimientos_de_Stock.location_id` ↔ `Ubicaciones.id` |
-| Despacho → pedido de venta que lo originó | `Despachos.sale_id` ↔ `Pedidos_de_Venta.id` |
-| Líneas de lo que se vendió por pedido | `Pedidos_de_Venta.id` ↔ `Lineas_del_Pedido_de_Venta.order_id` |
-| Movimientos de stock de un despacho | `Despachos.id` ↔ `Movimientos_de_Stock.picking_id` |
-| Empleado → liquidaciones de sueldo | `Empleados.id` ↔ `Remuneraciones.employee_id` |
-| Rentabilidad por contratista | `pagos."Total a Pagar"` agrupado por `"Contratista"` vs `Cuentas_por_cobrar` |
-| RUT de cliente en factura | `Cuentas_por_cobrar.partner_id` → `Contactos.vat` |
-| RUT de empleado | `Empleados.formated_vat` (directo) |
+| Costo mano de obra por CC vs contabilidad | `tarjas_pagos."CC"` ↔ `Reporte_Analitico.analytic_distribution` |
+| Costo laboral mensual vs remuneraciones | `tarjas_pagos."Mes"` ↔ `Remuneraciones.date_from` |
+| Nombre cuenta contable | `Reporte_Analitico.account_id` ↔ `Cuentas_Contables.id` |
+| RUT empleado | `Empleados.formated_vat` (directo) |
+| Despacho → pedido de venta | `Despachos.sale_id` ↔ `Pedidos_de_Venta.id` |
+| Nombre producto | `Variantes_del_producto.product_tmpl_id` ↔ `Producto.id` |
+| CC de línea contable | `JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID_CC')` |
 
-> **Nota `analytic_distribution`:** Es un JSON string. Para extraer el CC: `JSON_EXTRACT_SCALAR(analytic_distribution, '$.ID_CC')` en BigQuery, o parsear con `json.loads()` en Python.
+> **Nota:** `analytic_distribution` es un JSON string `{"12345": 100.0}` donde la key es el ID del CC analítico de Odoo.
 
-### Campo → Empresa facturada
+---
 
-| Campo AppSheet | Empresa en Odoo |
-|---|---|
-| Isla de Maipo | Agricola Donar Dos SpA |
-| Zuñiga | Agricola Donar Dos SpA |
-| Talagante | (verificar en Cuentas_por_cobrar) |
+## Hallazgos financieros KONTROLAG (al 07/05/2026)
+
+- **Facturación total histórica:** $858.7 MM — solo 24% cobrado; $650 MM pendiente
+- **Deuda crítica (+90 días):** $171.6 MM
+- **Costo laboral 2025:** ~$2.200 MM acumulado
+- **Ratio saludable:** abril 2026 fue el primer mes con 72% costo laboral / facturación neta
+- Peak de empleados: ~70 (feb 2025); fuera de temporada: ~10
