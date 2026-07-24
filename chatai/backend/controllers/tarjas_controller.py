@@ -366,14 +366,8 @@ async def get_tarjas_general(
 
     try:
         with conn.cursor() as cur:
-            _horas_expr = """
-                NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
-                               THEN horas_trabajadas::numeric ELSE 0 END), 0)
-            """
-            _horas_sum = """
-                COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
-                               THEN horas_trabajadas::numeric ELSE 0 END), 0)
-            """
+            _horas_expr = "NULLIF(SUM(horas_trabajadas), 0)"
+            _horas_sum  = "COALESCE(SUM(horas_trabajadas), 0)"
             # 1) Average earnings per labor
             cur.execute(
                 f"""
@@ -1315,8 +1309,7 @@ async def get_tarjas_resumen_horas_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT trabajador, COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
-                "THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS total "
+                "SELECT trabajador, COALESCE(SUM(horas_extras), 0)::numeric AS total "
                 "FROM appsheet.tarjas_pagos "
                 "WHERE trabajador IS NOT NULL "
                 "GROUP BY trabajador ORDER BY total DESC"
@@ -1388,8 +1381,7 @@ async def get_tarjas_resumen_horas(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS horas_trabajadas "
+                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas_trabajadas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
@@ -1799,10 +1791,7 @@ async def download_tarjas_general_excel(
         nombre_campo=_empresa_to_campo(empresa),
     )
     try:
-        _horas_expr = """
-            NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
-                           THEN horas_trabajadas::numeric ELSE 0 END), 0)
-        """
+        _horas_expr = "NULLIF(SUM(horas_trabajadas), 0)"
         with conn.cursor() as cur:
             cur.execute(
                 f"""
@@ -1969,8 +1958,7 @@ async def download_tarjas_contratista_excel(
         filters.append("labor = %s")
         params.append(labor)
     where = "WHERE " + " AND ".join(filters)
-    _horas_sum = """COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$'
-                        THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
+    _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -2249,8 +2237,7 @@ async def download_tarjas_resumen_horas_excel(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_extras::numeric ELSE 0 END),0)::numeric AS horas "
+                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
@@ -2532,8 +2519,8 @@ async def download_tarjas_general_pdf(
         contratista=contratista,
         nombre_campo=_empresa_to_campo(empresa),
     )
-    _horas_expr = "NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$' THEN horas_trabajadas::numeric ELSE 0 END), 0)"
-    _horas_sum = "COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$' THEN horas_trabajadas::numeric ELSE 0 END), 0)"
+    _horas_expr = "NULLIF(SUM(horas_trabajadas), 0)"
+    _horas_sum  = "COALESCE(SUM(horas_trabajadas), 0)"
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -2718,8 +2705,7 @@ async def download_tarjas_contratista_pdf(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    _horas_sum = """COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\\.[0-9]+)?$'
-                        THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
+    _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -2831,8 +2817,7 @@ async def download_tarjas_resumen_horas_pdf(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\\.[0-9]+)?$' "
-                f"THEN horas_extras::numeric ELSE 0 END),0)::numeric AS horas "
+                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
