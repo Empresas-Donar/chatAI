@@ -240,10 +240,8 @@ def _pdf_header(
 
 # ── SQL helpers ───────────────────────────────────────────────────────────────
 
-_HORAS_EXPR = """NULLIF(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
-                           THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
-_HORAS_SUM = """COALESCE(SUM(CASE WHEN horas_trabajadas ~ '^[0-9]+(\.[0-9]+)?$'
-                           THEN horas_trabajadas::numeric ELSE 0 END), 0)"""
+_HORAS_EXPR = "NULLIF(SUM(horas_trabajadas), 0)"
+_HORAS_SUM = "COALESCE(SUM(horas_trabajadas), 0)"
 
 
 def _base_where_pagos(
@@ -536,8 +534,7 @@ def _html_resumen_horas(
     cur.execute(
         f"""
         SELECT trabajador, tipo_pago, fecha::date::text AS fecha,
-               COALESCE(SUM(CASE WHEN horas_extras ~ '^[0-9]+(\.[0-9]+)?$'
-               THEN horas_extras::numeric ELSE 0 END), 0)::numeric AS horas
+               COALESCE(SUM(horas_extras), 0)::numeric AS horas
         FROM appsheet.tarjas_pagos {where}
         GROUP BY trabajador, tipo_pago, fecha::date
         ORDER BY trabajador, tipo_pago, fecha::date
