@@ -49,3 +49,6 @@ availableSecrets:
 
 images:
   - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
