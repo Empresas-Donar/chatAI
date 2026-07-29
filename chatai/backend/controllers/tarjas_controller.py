@@ -3423,14 +3423,14 @@ async def get_tarjas_tractorista_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE estado = 'Aprobado' AND LOWER(TRIM(tipo_pago)) = 'tractorista' "
+                "WHERE LOWER(TRIM(tipo_pago)) = 'tractorista' "
                 "AND contratista IS NOT NULL ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
-                "WHERE estado = 'Aprobado' AND LOWER(TRIM(tipo_pago)) = 'tractorista' "
+                "WHERE LOWER(TRIM(tipo_pago)) = 'tractorista' "
                 "AND nombre_campo IS NOT NULL ORDER BY nombre_campo"
             )
             campos = [r[0] for r in cur.fetchall()]

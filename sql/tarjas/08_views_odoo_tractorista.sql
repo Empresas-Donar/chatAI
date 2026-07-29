@@ -2,12 +2,11 @@
 -- TARJAS: Vista reporte para importación a Odoo — solo Tractoristas
 -- Análoga a tarjas_reporte_odoo pero para tipo_pago = 'Tractorista'.
 --
--- Diferencias respecto a cuadrilla:
---   qty       → SUM(horas_extras)    (horas de maquinaria, no conteo de jornadas)
---   price_unit → SUM(total_tractor) / SUM(horas_extras)  (tarifa por hora)
+-- Modelo de pago tractorista: tarifa diaria fija (total_tractor), no por hora.
+-- horas_extras = 0 siempre → se usa jornadas (COUNT) como qty, igual que cuadrilla.
 --
--- Construida directamente desde tarjas_pagos para poder agregar horas_extras
--- sin necesidad de modificar la vista base tarjas_reporte.
+--   qty        → COUNT(*)        (número de jornadas/días por grupo)
+--   price_unit → AVG(total_tractor)  (tarifa por jornada)
 --
 -- Estrategias de join para product_id (idénticas a tarjas_reporte_odoo):
 --   l0 → id_labor numérico en tarjas_pagos (robusto, post-backfill issue #27)
@@ -19,21 +18,17 @@ CREATE OR REPLACE VIEW appsheet.tarjas_reporte_odoo_tractorista AS
 SELECT
     agg.contratista                                          AS "Vendedor",
     agg.labor                                                AS "Lineas del pedido/Producto/Nombre",
-    agg.horas_extras                                         AS "Lineas del pedido/Cantidad",
+    agg.jornadas                                             AS "Lineas del pedido/Cantidad",
     agg.cuartel_cc                                           AS "Lineas del pedido/Código de Distribución Analítica/Código",
-    CASE WHEN agg.horas_extras > 0
-         THEN ROUND(agg.total_tractor / agg.horas_extras, 2)
-         ELSE NULL END                                       AS "Lineas del pedido/Precio un.",
+    agg.total_unitario                                       AS "Lineas del pedido/Precio un.",
     agg.contratista                                          AS "partner_id",
 
     -- order_line/product_id: l0 (id_labor directo) gana sobre los fallbacks de texto
     COALESCE(l0.codigo_labor, l1.codigo_labor, l2.codigo_labor, l3.codigo_labor) AS "order_line/product_id",
-    agg.horas_extras                                         AS "order_line/product_qty",
+    agg.jornadas                                             AS "order_line/product_qty",
     (SELECT jsonb_object_agg(k, ROUND(v::numeric, 2))
      FROM jsonb_each_text(cc.valor_odoo) AS t(k,v))::text    AS "order_line/analytic_distribution",
-    CASE WHEN agg.horas_extras > 0
-         THEN ROUND(agg.total_tractor / agg.horas_extras, 2)
-         ELSE NULL END                                       AS "order_line/price_unit",
+    agg.total_unitario                                       AS "order_line/price_unit",
 
     -- campos de filtro (no se exportan, solo para WHERE en el endpoint)
     agg.fecha,
@@ -41,23 +36,17 @@ SELECT
     agg.id_labor
 
 FROM (
-    -- Agregación diaria por (contratista, nombre_campo, fecha, cuartel_cc, labor)
-    -- Usa la misma lógica de partición que tarjas_reporte pero para tractoristas
     SELECT
         p.contratista,
         p.nombre_campo,
         p.fecha::DATE                           AS fecha,
         p.cuartel_cc,
         p.labor,
-        -- id_labor: tomar el primero no nulo del grupo (todos deberían coincidir)
         MIN(p.id_labor)                         AS id_labor,
-        SUM(p.horas_extras)                     AS horas_extras,
-        SUM(p.total_tractor)                    AS total_tractor
+        COUNT(*)                                AS jornadas,
+        ROUND(AVG(p.total_tractor)::NUMERIC, 2) AS total_unitario
     FROM appsheet.tarjas_pagos p
-    WHERE p.estado = 'Aprobado'
-      AND LOWER(TRIM(p.tipo_pago)) = 'tractorista'
-      AND p.horas_extras IS NOT NULL
-      AND p.horas_extras > 0
+    WHERE LOWER(TRIM(p.tipo_pago)) = 'tractorista'
     GROUP BY
         p.contratista,
         p.nombre_campo,

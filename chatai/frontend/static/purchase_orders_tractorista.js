@@ -36,18 +36,6 @@ async function loadFilters() {
   }
 }
 
-// ── Default dates (current week Mon–Sun) ─────────────────────────────────
-function initDates() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  document.getElementById('inp-date-from').value = monday.toISOString().slice(0, 10);
-  document.getElementById('inp-date-to').value   = sunday.toISOString().slice(0, 10);
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────
 function showError(msg) {
   const box = document.getElementById('error-box');
@@ -99,7 +87,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     const data = await res.json();
 
     if (!data.rows.length) {
-      document.getElementById('oc-document').style.display = '';
+      document.getElementById('oc-document').style.display = 'block';
       document.getElementById('doc-tbody').innerHTML = '';
       document.getElementById('doc-tfoot').innerHTML = '';
       document.getElementById('empty-state').classList.remove('hidden');
@@ -151,7 +139,7 @@ function renderDocument(data) {
 
   document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('btn-odoo-export').disabled = false;
-  document.getElementById('oc-document').style.display = '';
+  document.getElementById('oc-document').style.display = 'block';
 }
 
 // ── Odoo export button ────────────────────────────────────────────────────
@@ -197,5 +185,4 @@ document.getElementById('btn-odoo-export').addEventListener('click', async () =>
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────
-initDates();
 loadFilters();

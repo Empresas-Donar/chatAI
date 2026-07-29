@@ -14,8 +14,7 @@
       <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Orden de compra — Tarjas tractoristas</h1>
       <p style="margin:0;color:var(--text-muted);font-size:14px">
         Genera la orden de compra semanal por contratista tractorista y campo.
-        La cantidad corresponde a las horas de maquinaria (<code>horas_extras</code>)
-        y el precio unitario es la tarifa por hora (<code>total_tractor / horas_extras</code>).
+        La cantidad corresponde a las jornadas por labor y CC (<code>total_tractor</code> promedio como precio unitario).
         Diseñado para importar directamente en Odoo como orden de compra.
       </p>
     </div>
@@ -79,8 +78,8 @@
           <tr>
             <th>CC</th>
             <th>Labor</th>
-            <th class="num">Horas</th>
-            <th class="num">Precio/hora</th>
+            <th class="num">Jornadas</th>
+            <th class="num">Precio/jornada</th>
             <th class="num">Total</th>
             <th>product_id</th>
           </tr>
