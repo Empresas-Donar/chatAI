@@ -218,6 +218,16 @@ def _check_pivot_date_range(dates: list[str], report_label: str) -> None:
         )
 
 
+def _pdf_title(report_name: str, contratista: str | None) -> str:
+    """Build the PDF title as 'Tarjas-Reporte {report_name}-{Contratista}',
+    matching the naming issue #54 asked for. The contratista suffix is
+    omitted when the report isn't filtered to a single contratista."""
+    title = f"Tarjas-Reporte {report_name}"
+    if contratista:
+        title += f"-{contratista.title()}"
+    return title
+
+
 def _pivot_col_widths(fixed_pct: dict[str, float], n_dates: int) -> dict[str, str]:
     """Compute inline width styles for a wide date-pivot PDF table so xhtml2pdf's
     table-layout:fixed always fits the page — without explicit widths, reportlab
@@ -2233,7 +2243,7 @@ async def download_tarjas_detalle_tractorista_pdf(
         for r in rows
     )
     header = _pdf_header(
-        "Detalle tractorista — Tarjas",
+        _pdf_title("Detalle Tractoristas", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -2389,7 +2399,7 @@ async def download_tarjas_general_tractorista_pdf(
         for r in rows
     )
     header = _pdf_header(
-        "General tractorista — Tarjas",
+        _pdf_title("General Tractoristas", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -2687,12 +2697,13 @@ async def download_tarjas_resumen_persona_pdf(
 
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
+    title = _pdf_title("Resumen Por Persona", contratista)
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e293b;margin-bottom:12px">
       <tr>
         <td style="padding:10px 16px">{logo_html}</td>
         <td style="padding:10px 16px;color:#ffffff">
-          <b style="font-size:14pt">Resumen por trabajador</b><br/>
+          <b style="font-size:14pt">{title}</b><br/>
           <span style="font-size:9pt">Desde: {fecha_inicio} &nbsp; Hasta: {fecha_termino}</span>
         </td>
       </tr>
@@ -2783,7 +2794,7 @@ async def download_tarjas_general_pdf(
         for r in ranking_rows
     )
     header = _pdf_header(
-        "General — Tarjas",
+        _pdf_title("General Operacional", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -2858,7 +2869,7 @@ async def download_tarjas_detalle_pdf(
         for r in rows
     )
     header = _pdf_header(
-        "Detalle de la semana — Tarjas",
+        _pdf_title("Detalle Operacional", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -2992,7 +3003,7 @@ async def download_tarjas_contratista_pdf(
         )
 
     header = _pdf_header(
-        "Detalle contratista — Tarjas",
+        _pdf_title("Detalle Contratistas", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -3099,7 +3110,7 @@ async def download_tarjas_resumen_horas_pdf(
         rows_html += f'<td class="total" style="{w["total"]}">{entry["total"]}</td></tr>'
 
     header = _pdf_header(
-        "Horas extra por trabajador — Tarjas",
+        _pdf_title("Horas Extra", contratista),
         fecha_inicio,
         fecha_termino,
         {
@@ -3334,7 +3345,7 @@ async def download_tarjas_jornadas_trabajador_pdf(
     )
 
     header = _pdf_header(
-        "Jornadas por trabajador — Tarjas",
+        _pdf_title("Jornadas Por Trabajador", contratista),
         fecha_inicio,
         fecha_termino,
         {"Empresa": empresa, "Contratista": contratista},
