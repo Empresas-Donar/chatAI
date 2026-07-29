@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Orden de Compra Tractorista — Empresas Donar{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container" style="max-width:900px">
+
+  <div class="page-header" style="margin-bottom:20px">
+    <div>
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Orden de compra — Tarjas tractoristas</h1>
+      <p style="margin:0;color:var(--text-muted);font-size:14px">
+        Genera la orden de compra semanal por contratista tractorista y campo.
+        La cantidad corresponde a las horas de maquinaria (<code>horas_extras</code>)
+        y el precio unitario es la tarifa por hora (<code>total_tractor / horas_extras</code>).
+        Diseñado para importar directamente en Odoo como orden de compra.
+      </p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-card">
+    <div class="filter-group">
+      <label>Contratista</label>
+      <select id="sel-contractor"><option value="">Seleccione contratista…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Campo</label>
+      <select id="sel-campo"><option value="">Seleccione campo…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Fecha Inicio</label>
+      <input lang="es-CL" type="date" id="inp-date-from" />
+    </div>
+    <div class="filter-group">
+      <label>Fecha Término</label>
+      <input lang="es-CL" type="date" id="inp-date-to" />
+    </div>
+    <div>
+      <button class="btn btn-primary" id="btn-generate">Generar orden</button>
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box hidden"></div>
+
+  <!-- Export actions — visible only after a successful query -->
+  <div id="oc-document" style="display:none">
+    <div class="print-actions">
+      <button class="btn btn-secondary" id="btn-odoo-export">Exportar archivo Odoo</button>
+    </div>
+
+    <!-- Summary info bar -->
+    <div class="oc-header" style="margin-top:16px">
+      <div class="oc-company" style="padding:16px">
+        <div class="oc-company-name" id="doc-contractor"></div>
+        <div class="oc-company-sub">Campo: <span id="doc-campo"></span></div>
+        <div class="oc-company-week" id="doc-week"></div>
+      </div>
+      <div class="oc-dates">
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Inicio</span>
+          <span class="oc-date-val" id="doc-date-from"></span>
+        </div>
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Término</span>
+          <span class="oc-date-val" id="doc-date-to"></span>
+        </div>
+        <div class="oc-grand-total" id="doc-grand-total"></div>
+      </div>
+    </div>
+
+    <!-- Preview table -->
+    <div class="oc-table-wrap" style="margin-top:16px">
+      <table class="oc-table">
+        <thead>
+          <tr>
+            <th>CC</th>
+            <th>Labor</th>
+            <th class="num">Horas</th>
+            <th class="num">Precio/hora</th>
+            <th class="num">Total</th>
+            <th>product_id</th>
+          </tr>
+        </thead>
+        <tbody id="doc-tbody"></tbody>
+        <tfoot id="doc-tfoot"></tfoot>
+      </table>
+    </div>
+
+    <div id="empty-state" class="empty-state hidden" style="margin-top:16px">
+      <h3>Sin resultados</h3>
+      <p>No hay registros de tractorista para los filtros seleccionados.</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/purchase_orders_tractorista.js?v={{ static_v }}"></script>
+{% endblock %}

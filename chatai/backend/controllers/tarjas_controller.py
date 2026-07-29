@@ -3398,6 +3398,242 @@ async def export_tarjas_notas_odoo(
 
 
 # ---------------------------------------------------------------------------
+# Tractorista Odoo purchase order page + export
+# GET /odoo/tarjas-tractorista  → HTML page (Orden de compra tractorista)
+# GET /api/tarjas/tractorista/filters  → filter dropdowns
+# GET /api/tarjas/tractorista/odoo-export  → Excel download
+# ---------------------------------------------------------------------------
+
+
+@router.get("/odoo/tarjas-tractorista", response_class=HTMLResponse)
+async def odoo_tarjas_tractorista_page(request: Request):
+    return _templates.TemplateResponse(request, "purchase_orders_tractorista.html")
+
+
+@router.get("/api/tarjas/tractorista/filters")
+async def get_tarjas_tractorista_filters():
+    """Filter options for the Odoo tractorista purchase order page."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE estado = 'Aprobado' AND LOWER(TRIM(tipo_pago)) = 'tractorista' "
+                "AND contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
+                "WHERE estado = 'Aprobado' AND LOWER(TRIM(tipo_pago)) = 'tractorista' "
+                "AND nombre_campo IS NOT NULL ORDER BY nombre_campo"
+            )
+            campos = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    return {"contratistas": contratistas, "campos": campos}
+
+
+@router.get("/api/tarjas/tractorista/preview")
+async def get_tarjas_tractorista_preview(
+    contratista: str = Query(...),
+    campo: str = Query(...),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+):
+    """Preview rows from tarjas_reporte_odoo_tractorista for the given filters."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    "Lineas del pedido/Código de Distribución Analítica/Código" AS cc,
+                    "Lineas del pedido/Producto/Nombre"                         AS labor,
+                    SUM("order_line/product_qty")                               AS horas,
+                    CASE WHEN SUM("order_line/product_qty") > 0
+                         THEN ROUND(
+                             SUM("order_line/product_qty" * "order_line/price_unit")
+                             / SUM("order_line/product_qty"), 2)
+                         ELSE NULL END                                          AS precio_hora,
+                    COALESCE(MAX("order_line/product_id"), '(sin mapeo)')       AS product_id
+                FROM appsheet.tarjas_reporte_odoo_tractorista
+                WHERE "Vendedor"   = %s
+                  AND nombre_campo = %s
+                  AND fecha BETWEEN %s AND %s
+                GROUP BY
+                    "Lineas del pedido/Código de Distribución Analítica/Código",
+                    "Lineas del pedido/Producto/Nombre"
+                ORDER BY cc, labor
+                """,
+                (contratista, campo, fecha_inicio, fecha_termino),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    total_horas = sum(float(r[2] or 0) for r in rows)
+    total_monto = sum(float(r[2] or 0) * float(r[3] or 0) for r in rows)
+
+    return {
+        "rows": [
+            {
+                "cc": r[0],
+                "labor": r[1],
+                "horas": float(r[2]) if r[2] is not None else None,
+                "precio_hora": float(r[3]) if r[3] is not None else None,
+                "total": (float(r[2] or 0) * float(r[3] or 0)) if r[3] is not None else None,
+                "product_id": r[4],
+            }
+            for r in rows
+        ],
+        "total_horas": total_horas,
+        "total_monto": total_monto,
+        "contratista": contratista,
+        "campo": campo,
+        "fecha_inicio": fecha_inicio,
+        "fecha_termino": fecha_termino,
+    }
+
+
+@router.get("/api/tarjas/tractorista/odoo-export")
+async def export_tarjas_tractorista_odoo(
+    contratista: str = Query(...),
+    campo: str = Query(...),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    # Auto-sync unmapped labores (same as purchase orders export)
+    from .purchase_orders_controller import _sync_labores
+
+    try:
+        _sync_labores(conn, fecha_inicio, fecha_termino, contratista, campo)
+    except Exception as exc:
+        logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
+
+    excluded_amount = 0.0
+    try:
+        with conn.cursor() as cur:
+            # Sum excluded rows (no product_id or unmapped CC)
+            cur.execute(
+                """
+                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
+                FROM appsheet.tarjas_reporte_odoo_tractorista
+                WHERE "Vendedor"   = %s
+                  AND nombre_campo = %s
+                  AND fecha BETWEEN %s AND %s
+                  AND (
+                      "order_line/product_id" IS NULL
+                      OR "order_line/analytic_distribution" LIKE '%%"": %%'
+                  )
+                """,
+                (contratista, campo, fecha_inicio, fecha_termino),
+            )
+            excluded_amount = float(cur.fetchone()[0] or 0)
+
+            # Group and aggregate valid rows
+            cur.execute(
+                """
+                SELECT
+                    "partner_id",
+                    "order_line/product_id",
+                    SUM("order_line/product_qty")               AS qty,
+                    "order_line/analytic_distribution",
+                    CASE WHEN SUM("order_line/product_qty") > 0
+                         THEN ROUND(
+                             SUM("order_line/product_qty" * "order_line/price_unit")
+                             / SUM("order_line/product_qty"), 2)
+                         ELSE NULL END                          AS price_unit
+                FROM appsheet.tarjas_reporte_odoo_tractorista
+                WHERE "Vendedor"   = %s
+                  AND nombre_campo = %s
+                  AND fecha BETWEEN %s AND %s
+                  AND "order_line/product_id" IS NOT NULL
+                  AND "order_line/analytic_distribution" NOT LIKE '%%"": %%'
+                GROUP BY
+                    "partner_id",
+                    "order_line/product_id",
+                    "order_line/analytic_distribution"
+                ORDER BY "order_line/product_id"
+                """,
+                (contratista, campo, fecha_inicio, fecha_termino),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hoja1"
+
+    headers = [
+        "partner_id",
+        "order_line/product_id",
+        "order_line/product_qty",
+        "order_line/analytic_distribution",
+        "order_line/price_unit",
+    ]
+    ws.append(headers)
+
+    for i, (partner_id, product_id, qty, analytic, price) in enumerate(rows):
+        ws.append(
+            [
+                partner_id if i == 0 else None,
+                product_id,
+                float(qty) if qty is not None else None,
+                analytic,
+                float(price) if price is not None else None,
+            ]
+        )
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = (
+        f"odoo_tractorista_{contratista.replace(' ', '_')}_{campo.replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.xlsx"
+    )
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Access-Control-Expose-Headers": "X-Excluded-Amount",
+    }
+    if excluded_amount > 0:
+        response_headers["X-Excluded-Amount"] = str(int(excluded_amount))
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=response_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Nota de crédito print-PDF  (opens in new tab, same layout as the web page)
 # ---------------------------------------------------------------------------
 
