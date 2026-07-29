@@ -194,7 +194,42 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 .num { text-align: right; }
 .total { text-align: right; font-weight: bold; border-left: 1.5px solid #888888; }
 .section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #111111; }
+table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
+table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 """
+
+
+# Beyond this many date columns, each column becomes too narrow for
+# reportlab to lay out text without overlapping neighboring cells (the
+# wide-pivot PDFs are meant for weekly/biweekly ranges, matching how these
+# reports are actually used — not multi-month exports).
+MAX_PIVOT_DATES = 45
+
+
+def _check_pivot_date_range(dates: list[str], report_label: str) -> None:
+    if len(dates) > MAX_PIVOT_DATES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El rango de fechas es demasiado amplio para el PDF de "
+                f"'{report_label}' ({len(dates)} días). Reduce el rango a "
+                f"{MAX_PIVOT_DATES} días o menos, o usa la descarga en Excel."
+            ),
+        )
+
+
+def _pivot_col_widths(fixed_pct: dict[str, float], n_dates: int) -> dict[str, str]:
+    """Compute inline width styles for a wide date-pivot PDF table so xhtml2pdf's
+    table-layout:fixed always fits the page — without explicit widths, reportlab
+    raises 'negative availWidth' once there are enough date columns to overflow
+    the page (e.g. a single week already crashes it: 7 dates + 5 fixed columns).
+    Fixed columns keep their given %; the remainder is split evenly across dates.
+    """
+    remaining = max(0.0, 100.0 - sum(fixed_pct.values()))
+    date_pct = (remaining / n_dates) if n_dates else 0.0
+    widths = {k: f"width:{v}%" for k, v in fixed_pct.items()}
+    widths["date"] = f"width:{date_pct}%"
+    return widths
 
 
 def _pdf_header(
@@ -2129,6 +2164,99 @@ async def download_tarjas_detalle_tractorista_excel(
     )
 
 
+@router.get("/api/tarjas/detalle-tractorista/download-pdf")
+async def download_tarjas_detalle_tractorista_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if centro_costo:
+        filters.append('"CC" = %s')
+        params.append(centro_costo)
+    if labor:
+        filters.append('"Nombre Labor" = %s')
+        params.append(labor)
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
+                       SUM(jornadas) AS jornadas,
+                       CASE WHEN SUM(jornadas) > 0
+                            THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+                            ELSE NULL END AS total_unitario,
+                       SUM(total_labor) AS costo_total,
+                       contratista, nombre_campo
+                FROM appsheet.tarjas_reporte {where}
+                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
+                ORDER BY contratista, "CC", "Nombre Labor"
+            """,
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    def clp(v):
+        return f"${float(v):,.0f}".replace(",", ".") if v else "—"
+
+    rows_html = "".join(
+        f"<tr><td>{r['tipo_pago']}</td><td>{r['centro_costo']}</td><td>{r['labor']}</td>"
+        f'<td class="num">{r["jornadas"]}</td>'
+        f'<td class="num">{clp(r["total_unitario"])}</td>'
+        f'<td class="total">{clp(r["costo_total"])}</td>'
+        f"<td>{r['contratista']}</td><td>{r['nombre_campo']}</td></tr>"
+        for r in rows
+    )
+    header = _pdf_header(
+        "Detalle tractorista — Tarjas",
+        fecha_inicio,
+        fecha_termino,
+        {
+            "Empresa": empresa,
+            "Contratista": contratista,
+            "CC": centro_costo,
+            "Labor": labor,
+        },
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Tipo pago</th><th>CC</th><th>Labor</th>
+      <th class="num">Jornadas</th><th class="num">Unitario</th>
+      <th class="num">Total</th><th>Contratista</th><th>Campo</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(
+        html, f"detalle_tractorista_{fecha_inicio}_{fecha_termino}.pdf"
+    )
+
+
 @router.get("/api/tarjas/general-tractorista/download-excel")
 async def download_tarjas_general_tractorista_excel(
     fecha_inicio: str = Query(...),
@@ -2198,6 +2326,89 @@ async def download_tarjas_general_tractorista_excel(
         ws.column_dimensions[col].width = w
     return _excel_response(
         wb, f"tarjas_general_tractorista_{fecha_inicio}_{fecha_termino}.xlsx"
+    )
+
+
+@router.get("/api/tarjas/general-tractorista/download-pdf")
+async def download_tarjas_general_tractorista_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if centro_costo:
+        filters.append("cuartel_cc = %s")
+        params.append(centro_costo)
+    if labor:
+        filters.append("labor = %s")
+        params.append(labor)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    where = "WHERE " + " AND ".join(filters)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT trabajador, contratista, labor, tipo_pago,
+                       ROUND(AVG(total_tractor)::numeric,2) AS promedio,
+                       COALESCE(SUM(total_tractor),0) AS total
+                FROM appsheet.tarjas_pagos {where}
+                GROUP BY trabajador, contratista, labor, tipo_pago
+                ORDER BY total DESC
+            """,
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    def clp(v):
+        return f"${float(v):,.0f}".replace(",", ".") if v else "—"
+
+    rows_html = "".join(
+        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td>"
+        f"<td>{r['labor']}</td><td>{r['tipo_pago']}</td>"
+        f'<td class="num">{clp(r["promedio"])}</td>'
+        f'<td class="total">{clp(r["total"])}</td></tr>'
+        for r in rows
+    )
+    header = _pdf_header(
+        "General tractorista — Tarjas",
+        fecha_inicio,
+        fecha_termino,
+        {
+            "Empresa": empresa,
+            "Contratista": contratista,
+            "CC": centro_costo,
+            "Labor": labor,
+        },
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>Contratista</th><th>Labor</th><th>Tipo de pago</th>
+      <th class="num">Promedio</th><th class="num">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(
+        html, f"general_tractorista_{fecha_inicio}_{fecha_termino}.pdf"
     )
 
 
@@ -2711,12 +2922,12 @@ async def download_tarjas_contratista_pdf(
             cur.execute(
                 f"""
                 SELECT trabajador, contratista, labor, tipo_pago,
-                       COALESCE(SUM(total_trabajado), 0)  AS total,
-                       {_horas_sum}                        AS horas,
-                       COUNT(DISTINCT fecha::date)         AS dias
+                       fecha::date::text AS fecha,
+                       COALESCE(SUM(total_trabajado), 0) AS total,
+                       {_horas_sum} AS horas
                 FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago
-                ORDER BY contratista, trabajador, labor
+                GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
+                ORDER BY contratista, trabajador, labor, fecha::date
                 """,
                 params,
             )
@@ -2727,35 +2938,61 @@ async def download_tarjas_contratista_pdf(
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".")
 
+    # Same per-date pivot as download_tarjas_contratista_excel — one column
+    # per date in the range, matching what the on-screen pivot table shows.
+    from collections import OrderedDict
+
+    dates = sorted({r["fecha"] for r in rows})
+    _check_pivot_date_range(dates, "Detalle contratista")
+    groups: "OrderedDict" = OrderedDict()
+    for r in rows:
+        key = (r["trabajador"], r["contratista"], r["labor"], r["tipo_pago"])
+        if key not in groups:
+            groups[key] = {"total_ganado": 0.0, "total_horas": 0.0, "by_date": {}}
+        g = groups[key]
+        g["total_ganado"] += float(r["total"] or 0)
+        g["total_horas"] += float(r["horas"] or 0)
+        g["by_date"][r["fecha"]] = g["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
+
+    w = _pivot_col_widths(
+        {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}, len(dates)
+    )
+    date_headers = "".join(
+        f'<th class="num" style="{w["date"]}">'
+        f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
+        for d in dates
+    )
+
     rows_html = ""
     prev_worker = None
-    prev_cont = None
-    for r in rows:
-        trabajador = r["trabajador"] or ""
-        cont = r["contratista"] or ""
+    for (trabajador, cont, labor_, tipo), g in groups.items():
+        trabajador = trabajador or ""
         is_new_worker = trabajador != prev_worker
         row_cls = "worker-first" if is_new_worker else ""
         worker_cell = trabajador if is_new_worker else ""
-        cont_cell = cont if cont != prev_cont else ""
         prev_worker = trabajador
-        prev_cont = cont
-        total = float(r["total"] or 0)
-        horas = float(r["horas"] or 0)
-        dias = int(r["dias"] or 0)
-        costo_hora = clp(round(total / horas)) if horas > 0 else "-"
-        prom_dia = clp(round(total / dias)) if dias > 0 else "-"
+        costo_hora = (
+            clp(round(g["total_ganado"] / g["total_horas"]))
+            if g["total_horas"] > 0
+            else "-"
+        )
+        date_cells = "".join(
+            f'<td class="num" style="{w["date"]}">'
+            f'{clp(g["by_date"][d]) if g["by_date"].get(d) else "-"}</td>'
+            for d in dates
+        )
         rows_html += (
             f"<tr class='{row_cls}'>"
-            f"<td>{worker_cell}</td><td>{cont_cell}</td>"
-            f"<td>{r['labor']}</td><td>{r['tipo_pago']}</td>"
-            f"<td class='num'>{costo_hora}</td>"
-            f"<td class='num'>{prom_dia}</td>"
-            f"<td class='num'>{dias}</td>"
-            f"<td class='total'>{clp(total)}</td></tr>"
+            f"<td style='{w['worker']}'>{worker_cell}</td>"
+            f"<td style='{w['labor']}'>{labor_ or ''}</td>"
+            f"<td style='{w['tipo']}'>{tipo or ''}</td>"
+            f"<td class='num' style='{w['rate']}'>{costo_hora}</td>"
+            f"{date_cells}"
+            f"<td class='total' style='{w['total']}'>{clp(g['total_ganado'])}</td></tr>"
         )
 
     header = _pdf_header(
-        "Resumen por trabajador — Tarjas",
+        "Detalle contratista — Tarjas",
         fecha_inicio,
         fecha_termino,
         {
@@ -2769,14 +3006,14 @@ async def download_tarjas_contratista_pdf(
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
-    <table><thead>
+    <table class="pivot-wide"><thead>
       <tr>
-        <th>Trabajador</th><th>Contratista</th><th>Labor</th>
-        <th>Tipo</th>
-        <th class="num">Costo/hr</th>
-        <th class="num">Prom/día</th>
-        <th class="num">Días</th>
-        <th class="num">Total</th>
+        <th style="{w['worker']}">Trabajador</th>
+        <th style="{w['labor']}">Labor</th>
+        <th style="{w['tipo']}">Tipo</th>
+        <th class="num" style="{w['rate']}">Costo/hr</th>
+        {date_headers}
+        <th class="num" style="{w['total']}">Total</th>
       </tr>
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
@@ -2838,8 +3075,11 @@ async def download_tarjas_resumen_horas_pdf(
         workers[k]["total"] += r["horas"] or 0
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
+    _check_pivot_date_range(dates, "Horas extra por persona")
+    w = _pivot_col_widths({"worker": 22, "tipo": 14, "total": 12}, len(dates))
     date_headers = "".join(
-        f'<th class="num">{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
+        f'<th class="num" style="{w["date"]}">'
+        f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
         for d in dates
     )
     rows_html = ""
@@ -2848,11 +3088,15 @@ async def download_tarjas_resumen_horas_pdf(
         is_first = prev != trab
         prev = trab
         cls = "worker-first" if is_first else ""
-        rows_html += f'<tr class="{cls}"><td>{"<b>" + trab + "</b>" if is_first else ""}</td><td>{tipo}</td>'
+        rows_html += (
+            f'<tr class="{cls}">'
+            f'<td style="{w["worker"]}">{"<b>" + trab + "</b>" if is_first else ""}</td>'
+            f'<td style="{w["tipo"]}">{tipo}</td>'
+        )
         for d in dates:
             v = entry["by_date"].get(d, 0)
-            rows_html += f'<td class="num">{v if v else ""}</td>'
-        rows_html += f'<td class="total">{entry["total"]}</td></tr>'
+            rows_html += f'<td class="num" style="{w["date"]}">{v if v else ""}</td>'
+        rows_html += f'<td class="total" style="{w["total"]}">{entry["total"]}</td></tr>'
 
     header = _pdf_header(
         "Horas extra por trabajador — Tarjas",
@@ -2868,8 +3112,8 @@ async def download_tarjas_resumen_horas_pdf(
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
-    <table><thead>
-      <tr><th>Trabajador</th><th>Tipo de pago</th>{date_headers}<th class="num">Total hrs</th></tr>
+    <table class="pivot-wide"><thead>
+      <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"horas_{fecha_inicio}_{fecha_termino}.pdf")
