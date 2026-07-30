@@ -29,6 +29,11 @@ AFFECTED_IDS = [
     "ccadf008", "d842f9a0",
 ]
 
+# Same root cause, different manifestation: hora extra omitted from
+# total_jornada entirely (not rounded up) — found while checking whether
+# Rodrigo Catalán / Maibet Lobo / Cristian González had other affected rows.
+OMITTED_EXTRA_ID = "c874eed9"
+
 
 @pytest.fixture
 def conn():
@@ -132,3 +137,48 @@ def test_62_cross_campo_isolation_only_zuniga_affected(conn):
         )
         count = cur.fetchone()[0]
     assert count == 0, f"{count} filas fuera de Zuñiga con el mismo patrón sin corregir"
+
+
+def test_62_omitted_hora_extra_regression(conn):
+    """id_Resumen='c874eed9' had the hora extra dropped from total_jornada
+    entirely (not rounded up — a different manifestation of the same root
+    cause, found while checking other rows for the 3 affected workers)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT valor_jornada, horas_trabajadas, total_hora_extra, total_jornada, "
+            "total_trabajado, contratista_jornada, total_contratista, total_pagar "
+            'FROM appsheet.tarjas_pagos WHERE "id_Resumen" = %s',
+            (OMITTED_EXTRA_ID,),
+        )
+        row = cur.fetchone()
+    (
+        valor_jornada, horas_trabajadas, total_hora_extra, total_jornada,
+        total_trabajado, contratista_jornada, total_contratista, total_pagar,
+    ) = row
+    expected_jornada = valor_jornada * horas_trabajadas + total_hora_extra
+    assert abs(expected_jornada - total_jornada) <= 1
+    assert abs(total_trabajado - total_jornada) <= 1
+    assert abs(round(total_jornada * Decimal("0.5")) - contratista_jornada) <= 1
+    assert abs(total_pagar - (total_trabajado + total_contratista)) <= 1
+
+
+def test_62_full_table_sweep_no_remaining_real_discrepancy(conn):
+    """Answers 'will this happen again?' for the current dataset: after both
+    fixes, every remaining total_jornada mismatch across the WHOLE table
+    (any worker, any campo) must be the known harmless $3 rounding artifact
+    (valor_jornada stored as a rounded integer approximating a repeating
+    decimal rate) — not a real hora-extra discrepancy."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT count(*) FROM appsheet.tarjas_pagos
+            WHERE lower(tipo_pago) IN ('al dia', 'al día')
+              AND valor_jornada IS NOT NULL AND horas_trabajadas IS NOT NULL
+              AND ABS(total_jornada - (valor_jornada*horas_trabajadas + COALESCE(total_hora_extra,0))) > 3
+            """
+        )
+        count = cur.fetchone()[0]
+    assert count == 0, (
+        f"{count} filas con una discrepancia real (>$3) en total_jornada — "
+        "el bug de horas extra reapareció o no quedó completamente resuelto"
+    )

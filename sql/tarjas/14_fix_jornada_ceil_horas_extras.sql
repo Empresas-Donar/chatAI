@@ -43,4 +43,21 @@ SET total_jornada = bug_rows.new_total_jornada,
 FROM bug_rows
 WHERE bug_rows."id_Resumen" = p."id_Resumen";
 
+-- ── Same root cause, different manifestation ────────────────────────────────
+-- id_Resumen='c874eed9' (Cristian González Dinamarca, 29 julio 2026) had the
+-- hora extra OMITTED entirely from total_jornada (not rounded up — just not
+-- added at all): total_jornada = valor_jornada*horas_trabajadas, ignoring
+-- total_hora_extra completely. Found while checking whether the same bug hit
+-- Rodrigo Catalán / Maibet Lobo / Cristian González elsewhere. A full-table
+-- sweep after this fix confirms 0 remaining rows with a real (non-$3-noise)
+-- total_jornada discrepancy.
+UPDATE appsheet.tarjas_pagos p
+SET total_jornada = (valor_jornada * horas_trabajadas + total_hora_extra),
+    total_trabajado = (valor_jornada * horas_trabajadas + total_hora_extra) + COALESCE(p.total_trato, 0),
+    contratista_jornada = ROUND((valor_jornada * horas_trabajadas + total_hora_extra) * 0.5),
+    total_contratista = ROUND((valor_jornada * horas_trabajadas + total_hora_extra) * 0.5) + COALESCE(p.contratista_trato, 0),
+    total_pagar = ((valor_jornada * horas_trabajadas + total_hora_extra) + COALESCE(p.total_trato, 0))
+                  + (ROUND((valor_jornada * horas_trabajadas + total_hora_extra) * 0.5) + COALESCE(p.contratista_trato, 0))
+WHERE p."id_Resumen" = 'c874eed9';
+
 COMMIT;
