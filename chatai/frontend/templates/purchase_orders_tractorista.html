@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Orden de Compra Tractorista — Empresas Donar{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container" style="max-width:900px">
+
+  <div class="page-header" style="margin-bottom:20px">
+    <div>
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Orden de compra — Tarjas tractoristas</h1>
+      <p style="margin:0;color:var(--text-muted);font-size:14px">
+        Genera la orden de compra semanal por contratista tractorista y campo.
+        La cantidad corresponde a las jornadas por labor y CC (<code>total_tractor</code> promedio como precio unitario).
+        Diseñado para importar directamente en Odoo como orden de compra.
+      </p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-card">
+    <div class="filter-group">
+      <label>Contratista</label>
+      <select id="sel-contractor"><option value="">Seleccione contratista…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Campo</label>
+      <select id="sel-campo"><option value="">Seleccione campo…</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Fecha Inicio</label>
+      <input lang="es-CL" type="date" id="inp-date-from" />
+    </div>
+    <div class="filter-group">
+      <label>Fecha Término</label>
+      <input lang="es-CL" type="date" id="inp-date-to" />
+    </div>
+    <div>
+      <button class="btn btn-primary" id="btn-generate">Generar orden</button>
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box hidden"></div>
+
+  <!-- Export actions — visible only after a successful query -->
+  <div id="oc-document" style="display:none">
+    <div class="print-actions">
+      <button class="btn btn-secondary" id="btn-odoo-export">Exportar archivo Odoo</button>
+    </div>
+
+    <!-- Summary info bar -->
+    <div class="oc-header" style="margin-top:16px">
+      <div class="oc-company" style="padding:16px">
+        <div class="oc-company-name" id="doc-contractor"></div>
+        <div class="oc-company-sub">Campo: <span id="doc-campo"></span></div>
+        <div class="oc-company-week" id="doc-week"></div>
+      </div>
+      <div class="oc-dates">
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Inicio</span>
+          <span class="oc-date-val" id="doc-date-from"></span>
+        </div>
+        <div class="oc-date-row">
+          <span class="oc-date-label">Fecha Término</span>
+          <span class="oc-date-val" id="doc-date-to"></span>
+        </div>
+        <div class="oc-grand-total" id="doc-grand-total"></div>
+      </div>
+    </div>
+
+    <!-- One table per CC — injected by JS -->
+    <div id="cc-sections"></div>
+
+    <div id="empty-state" class="empty-state hidden" style="margin-top:16px">
+      <h3>Sin resultados</h3>
+      <p>No hay registros de tractorista para los filtros seleccionados.</p>
+    </div>
+  </div>
+
+</div>
+<!-- Export Preview Modal -->
+<div id="cc-sync-modal" class="cc-modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="cc-modal-box">
+    <div class="cc-modal-header">
+      <div>
+        <h2 class="cc-modal-title">Vista previa — Exportación Odoo (Tractoristas)</h2>
+        <p class="cc-modal-subtitle">Verifica las líneas antes de descargar. Las filas sin product_id se excluyen del archivo.</p>
+      </div>
+      <button class="cc-modal-close" id="btn-cc-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div id="cc-modal-loading" class="cc-modal-loading">
+      <div class="cc-spinner"></div>
+      <p>Preparando vista previa…</p>
+    </div>
+
+    <div id="cc-modal-content" class="hidden">
+      <div class="cc-summary-row">
+        <div class="cc-chip cc-chip-ok"><span id="cc-rows-count">0</span> completas</div>
+        <div class="cc-chip cc-chip-warn" id="cc-excluded-chip" style="display:none">⚠ <span id="cc-excluded-count">0</span> sin mapeo</div>
+      </div>
+
+      <div id="cc-archived-alert" class="cc-alert cc-alert-warning hidden">
+        <span class="cc-alert-icon">⚠️</span>
+        <div>
+          <strong>Hay <span id="cc-excluded-count-msg">0</span> filas sin product_id.</strong>
+          No se incluirán en el archivo. Agrega el código de labor en <code>tarjas_labores</code> para corregirlas.
+        </div>
+      </div>
+
+      <div class="cc-legend">
+        <span><strong>product_id</strong> → Código de labor en Odoo</span>
+        <span><strong>product_qty</strong> → Jornadas del período</span>
+        <span><strong>analytic_distribution</strong> → JSON distribución CC</span>
+        <span><strong>price_unit</strong> → Precio por jornada (CLP)</span>
+        <span class="cc-legend-badge"><span class="cc-badge cc-badge-ok">OK</span> = se exporta</span>
+        <span class="cc-legend-badge"><span class="cc-badge cc-badge-archived">⚠ Sin mapeo</span> = NO se exporta</span>
+      </div>
+
+      <div class="cc-list-wrap">
+        <table class="cc-list-table">
+          <thead>
+            <tr>
+              <th>order_line/product_id</th>
+              <th class="num">order_line/product_qty</th>
+              <th>order_line/analytic_distribution</th>
+              <th class="num">order_line/price_unit</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="cc-preview-tbody"></tbody>
+          <tfoot id="cc-preview-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <div id="cc-modal-error" class="cc-alert cc-alert-error hidden"></div>
+
+    <div class="cc-modal-footer">
+      <div></div>
+      <div class="cc-modal-footer-right">
+        <button class="btn" id="btn-cc-cancel" style="background:var(--surface);border:1px solid var(--border)">Cancelar</button>
+        <button class="btn btn-primary" id="btn-cc-proceed">Descargar Excel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/purchase_orders_tractorista.js?v={{ static_v }}"></script>
+{% endblock %}
