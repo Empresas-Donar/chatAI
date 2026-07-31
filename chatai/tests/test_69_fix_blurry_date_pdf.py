@@ -11,6 +11,11 @@ treatment already used (and already correct) for the "Tabla por operador"
 pivot section added in issue #67 - applied to both <th> (thead) and every
 <td> (tbody), matching the pattern established in issue #52 (applying
 widths only to the header is not enough, it still overlaps in the body).
+
+NOTE: column widths were re-percentaged in issue #71 when a 5th column
+(Maquina) was added between Labor and Total a pagar (10/24/26/20/20
+instead of the original 12/30/33/25) - table-layout:fixed still applies,
+only the literal percentages changed.
 """
 
 import os
@@ -42,9 +47,10 @@ def test_69_data_table_has_fixed_layout_regression():
 
 def test_69_header_cells_have_explicit_widths_regression():
     fn = _pdf_function_source()
-    assert 'style="width:12%">Fecha' in fn, "Fecha header must have an explicit width"
-    assert 'style="width:30%">Trabajador' in fn, "Trabajador header must have an explicit width"
-    assert 'style="width:33%">Labor' in fn, "Labor header must have an explicit width"
+    assert 'style="width:10%">Fecha' in fn, "Fecha header must have an explicit width"
+    assert 'style="width:24%">Trabajador' in fn, "Trabajador header must have an explicit width"
+    assert 'style="width:26%">Labor' in fn, "Labor header must have an explicit width"
+    assert 'style="width:20%">Máquina' in fn, "Máquina header must have an explicit width"
 
 
 def test_69_body_cells_also_have_explicit_widths_regression():
@@ -52,10 +58,11 @@ def test_69_body_cells_also_have_explicit_widths_regression():
     every <td> in the body must repeat them or xhtml2pdf still overlaps
     text between columns."""
     fn = _pdf_function_source()
-    assert 'td style="width:12%"' in fn, "Fecha body cells must repeat the width"
-    assert 'td style="width:30%"' in fn, "Trabajador body cells must repeat the width"
-    assert 'td style="width:33%"' in fn, "Labor body cells must repeat the width"
+    assert 'td style="width:10%"' in fn, "Fecha body cells must repeat the width"
+    assert 'td style="width:24%"' in fn, "Trabajador body cells must repeat the width"
+    assert 'td style="width:26%"' in fn, "Labor body cells must repeat the width"
+    assert 'td style="width:20%"' in fn, "Máquina body cells must repeat the width"
 
 
 def test_69_column_widths_sum_to_100_percent():
-    assert 12 + 30 + 33 + 25 == 100
+    assert 10 + 24 + 26 + 20 + 20 == 100
