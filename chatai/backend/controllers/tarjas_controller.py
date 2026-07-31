@@ -228,6 +228,16 @@ def _pdf_title(report_name: str, contratista: str | None) -> str:
     return title
 
 
+def _escape_html(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def _pivot_col_widths(fixed_pct: dict[str, float], n_dates: int) -> dict[str, str]:
     """Compute inline width styles for a wide date-pivot PDF table so xhtml2pdf's
     table-layout:fixed always fits the page — without explicit widths, reportlab
@@ -3938,6 +3948,93 @@ async def export_tarjas_tractorista_odoo(
     )
 
 
+def _fetch_tractorista_pivot_rows(
+    conn,
+    contratista: str,
+    campo: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+    cc: str | None = None,
+) -> list[dict]:
+    """Raw (fecha, trabajador, labor, monto) rows behind every 'por operador'
+    view of the tractorista purchase order — shared by the Excel download,
+    the on-screen JSON preview, and the PDF pivot section, so the three never
+    drift apart. `cc` optionally scopes it to a single centro de costo, to
+    match a CC-filtered PDF."""
+    cc_filter = "AND cuartel_cc = %s" if cc else ""
+    params = [contratista, campo, fecha_inicio, fecha_termino]
+    if cc:
+        params.append(cc)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+                fecha::date::text AS fecha,
+                trabajador,
+                labor,
+                SUM(total_tractor) AS monto
+            FROM appsheet.tarjas_pagos
+            WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
+              AND contratista  = %s
+              AND nombre_campo = %s
+              AND fecha::date BETWEEN %s AND %s
+              {cc_filter}
+            GROUP BY fecha::date, trabajador, labor
+            ORDER BY fecha::date, trabajador, labor
+            """,
+            params,
+        )
+        return _rows_to_dicts(cur)
+
+
+def _build_tractorista_pivot(rows: list[dict]) -> dict:
+    """Pivot (fecha, trabajador, labor, monto) rows into fecha x
+    "trabajador — labor", with row/column/grand totals. Dates stay as
+    ISO strings (YYYY-MM-DD) — callers format for display."""
+
+    def _col(r: dict) -> str:
+        return f'{r["trabajador"] or "(sin nombre)"} — {r["labor"] or ""}'
+
+    dates = sorted({r["fecha"] for r in rows})
+    columns = sorted({_col(r) for r in rows})
+    matrix = {d: {c: 0.0 for c in columns} for d in dates}
+    for r in rows:
+        matrix[r["fecha"]][_col(r)] += float(r["monto"] or 0)
+    col_totals = {c: sum(matrix[d][c] for d in dates) for c in columns}
+    date_totals = {d: sum(matrix[d].values()) for d in dates}
+    grand_total = sum(col_totals.values())
+    return {
+        "dates": dates,
+        "columns": columns,
+        "matrix": matrix,
+        "col_totals": col_totals,
+        "date_totals": date_totals,
+        "grand_total": grand_total,
+    }
+
+
+@router.get("/api/tarjas/tractorista/pivot-preview")
+async def preview_tarjas_tractorista_pivot(
+    contratista: str = Query(...),
+    campo: str = Query(...),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+):
+    """JSON pivot (fecha x operador — labor) for the on-screen table rendered
+    below the CC sections in the tractorista purchase order screen."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        rows = _fetch_tractorista_pivot_rows(conn, contratista, campo, fecha_inicio, fecha_termino)
+    finally:
+        conn.close()
+    return _build_tractorista_pivot(rows)
+
+
 @router.get("/api/tarjas/tractorista/pivot-excel")
 async def pivot_tarjas_tractorista_excel(
     contratista: str = Query(...),
@@ -3945,9 +4042,7 @@ async def pivot_tarjas_tractorista_excel(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
 ):
-    """Excel pivot: filas=fecha, columnas=trabajador, valores=total_tractor."""
-    import pandas as pd
-
+    """Excel pivot: filas=fecha, columnas=trabajador — labor, valores=total_tractor."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
     try:
@@ -3956,68 +4051,32 @@ async def pivot_tarjas_tractorista_excel(
         raise HTTPException(status_code=503, detail="Error de conexión")
 
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    fecha::date::text AS fecha,
-                    trabajador,
-                    labor,
-                    SUM(total_tractor) AS monto
-                FROM appsheet.tarjas_pagos
-                WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
-                  AND contratista  = %s
-                  AND nombre_campo = %s
-                  AND fecha::date BETWEEN %s AND %s
-                GROUP BY fecha::date, trabajador, labor
-                ORDER BY fecha::date, trabajador, labor
-                """,
-                (contratista, campo, fecha_inicio, fecha_termino),
-            )
-            rows = cur.fetchall()
+        rows = _fetch_tractorista_pivot_rows(conn, contratista, campo, fecha_inicio, fecha_termino)
     finally:
         conn.close()
 
     if not rows:
         raise HTTPException(status_code=404, detail="Sin datos para los filtros seleccionados")
 
-    df = pd.DataFrame(rows, columns=["fecha", "trabajador", "labor", "monto"])
-    df["monto"] = df["monto"].astype(float)
-    df["fecha"] = pd.to_datetime(df["fecha"]).dt.strftime("%d/%m/%Y")
-
-    # Columna pivot: "Trabajador — Labor"
-    df["operador_labor"] = df["trabajador"].fillna("(sin nombre)") + " — " + df["labor"].fillna("")
-
-    pivot = df.pivot_table(
-        index="fecha",
-        columns="operador_labor",
-        values="monto",
-        aggfunc="sum",
-        fill_value=0,
-    )
-    pivot.index.name = "Fecha"
-    pivot["Suma total"] = pivot.sum(axis=1)
-    totals = pivot.sum(axis=0)
-    totals.name = "Suma total"
-    pivot = pd.concat([pivot, totals.to_frame().T])
+    pivot = _build_tractorista_pivot(rows)
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Por Operador"
 
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Font, PatternFill, Alignment
     header_fill = PatternFill("solid", fgColor="1E3A5F")
     total_fill  = PatternFill("solid", fgColor="E0E7FF")
     header_font = Font(color="FFFFFF", bold=True, size=10)
     bold_font   = Font(bold=True)
-    thin = Side(style="thin", color="CBD5E1")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    all_columns = pivot["columns"] + ["Suma total"]
 
     # Header row
     ws.cell(1, 1, "Fecha").font = header_font
     ws.cell(1, 1).fill = header_fill
     ws.cell(1, 1).alignment = Alignment(horizontal="center")
-    for col_idx, col_name in enumerate(pivot.columns, start=2):
+    for col_idx, col_name in enumerate(all_columns, start=2):
         cell = ws.cell(1, col_idx, col_name)
         cell.font = header_font
         cell.fill = header_fill
@@ -4028,22 +4087,35 @@ async def pivot_tarjas_tractorista_excel(
     ws.row_dimensions[1].height = 40
 
     # Data rows
-    for row_idx, (fecha, row_data) in enumerate(pivot.iterrows(), start=2):
-        is_total_row = (fecha == "Suma total")
-        ws.cell(row_idx, 1, fecha).font = bold_font if is_total_row else Font()
-        if is_total_row:
-            ws.cell(row_idx, 1).fill = total_fill
-        for col_idx, val in enumerate(row_data, start=2):
-            cell = ws.cell(row_idx, col_idx, int(val) if val else 0)
+    row_idx = 2
+    for fecha in pivot["dates"]:
+        fecha_fmt = datetime.date.fromisoformat(fecha).strftime("%d/%m/%Y")
+        ws.cell(row_idx, 1, fecha_fmt)
+        for col_idx, col_name in enumerate(pivot["columns"], start=2):
+            cell = ws.cell(row_idx, col_idx, int(pivot["matrix"][fecha][col_name]))
             cell.number_format = '$#,##0'
             cell.alignment = Alignment(horizontal="right")
-            if is_total_row:
-                cell.fill = total_fill
-                cell.font = bold_font
-            # Highlight "Suma total" column
-            if col_idx == len(pivot.columns) + 1:
-                cell.fill = total_fill
-                cell.font = bold_font
+        total_cell = ws.cell(row_idx, len(all_columns) + 1, int(pivot["date_totals"][fecha]))
+        total_cell.number_format = '$#,##0'
+        total_cell.alignment = Alignment(horizontal="right")
+        total_cell.fill = total_fill
+        total_cell.font = bold_font
+        row_idx += 1
+
+    # Totals row
+    ws.cell(row_idx, 1, "Suma total").font = bold_font
+    ws.cell(row_idx, 1).fill = total_fill
+    for col_idx, col_name in enumerate(pivot["columns"], start=2):
+        cell = ws.cell(row_idx, col_idx, int(pivot["col_totals"][col_name]))
+        cell.number_format = '$#,##0'
+        cell.alignment = Alignment(horizontal="right")
+        cell.fill = total_fill
+        cell.font = bold_font
+    grand_cell = ws.cell(row_idx, len(all_columns) + 1, int(pivot["grand_total"]))
+    grand_cell.number_format = '$#,##0'
+    grand_cell.alignment = Alignment(horizontal="right")
+    grand_cell.fill = total_fill
+    grand_cell.font = bold_font
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -4101,6 +4173,9 @@ async def download_tarjas_tractorista_pdf(
                 params,
             )
             rows = _rows_to_dicts(cur)
+        pivot_rows = _fetch_tractorista_pivot_rows(
+            conn, contratista, campo, fecha_inicio, fecha_termino, cc=cc
+        )
     finally:
         conn.close()
 
@@ -4142,6 +4217,47 @@ async def download_tarjas_tractorista_pdf(
         f'</tr>'
     )
 
+    # Segunda tabla: pivote por operador (fecha x trabajador — labor), misma
+    # fuente que el Excel "Tabla por operador" y el preview en pantalla.
+    pivot = _build_tractorista_pivot(pivot_rows)
+    pivot_html = ""
+    if pivot["dates"]:
+        _check_pivot_date_range(pivot["columns"], "Por operador")
+        widths = _pivot_col_widths({"fecha": 16, "total": 12}, len(pivot["columns"]))
+        pivot_ths = "".join(
+            f'<th class="num" style="{widths["date"]}">{_escape_html(c)}</th>'
+            for c in pivot["columns"]
+        )
+        pivot_body = ""
+        for d in pivot["dates"]:
+            d_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
+            cells = "".join(
+                f'<td class="num" style="{widths["date"]}">{fmt(pivot["matrix"][d][c])}</td>'
+                for c in pivot["columns"]
+            )
+            pivot_body += (
+                f'<tr><td style="{widths["fecha"]}">{d_fmt}</td>{cells}'
+                f'<td class="num" style="{widths["total"]}">{fmt(pivot["date_totals"][d])}</td></tr>'
+            )
+        pivot_totals = "".join(
+            f'<td class="num" style="{widths["date"]};font-weight:bold">{fmt(pivot["col_totals"][c])}</td>'
+            for c in pivot["columns"]
+        )
+        pivot_html = f"""
+        <table class="data" style="width:100%;border-collapse:collapse;font-size:8pt;table-layout:fixed;margin-top:16px">
+          <thead><tr>
+            <th style="{widths["fecha"]}">Fecha</th>{pivot_ths}
+            <th class="num" style="{widths["total"]}">Total</th>
+          </tr></thead>
+          <tbody>{pivot_body}
+            <tr style="background:#1e293b;color:#fff">
+              <td style="{widths["fecha"]};font-weight:bold">TOTAL</td>{pivot_totals}
+              <td class="num" style="{widths["total"]};font-weight:bold">{fmt(pivot["grand_total"])}</td>
+            </tr>
+          </tbody>
+        </table>
+        """
+
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
     fi_fmt = datetime.date.fromisoformat(fecha_inicio).strftime("%d/%m/%Y")
@@ -4161,6 +4277,7 @@ async def download_tarjas_tractorista_pdf(
       table.data td {{ padding: 4px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }}
       table.data tr:nth-child(even) {{ background: #f8fafc; }}
       .num {{ text-align: right; }}
+      .section-title {{ font-size: 10pt; font-weight: 800; margin: 4px 0 6px; }}
     </style>
     </head><body>
     <table class="hdr">
@@ -4178,6 +4295,7 @@ async def download_tarjas_tractorista_pdf(
       <thead><tr><th>Fecha</th><th>Trabajador</th><th>Labor</th><th class="num">Total a pagar</th></tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
+    {'<div class="section-title">Tabla por operador</div>' + pivot_html if pivot_html else ''}
     </body></html>"""
 
     cc_slug = f"_cc{cc.replace(' ', '')}" if cc else ""
