@@ -4197,23 +4197,23 @@ async def download_tarjas_tractorista_pdf(
             monto = float(r["monto"] or 0)
             rows_html += (
                 f'<tr>'
-                f'<td>{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
-                f'<td>{r["trabajador"] or ""}</td>'
-                f'<td>{r["labor"] or ""}</td>'
-                f'<td class="num">{fmt(monto)}</td>'
+                f'<td style="width:12%">{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
+                f'<td style="width:30%">{r["trabajador"] or ""}</td>'
+                f'<td style="width:33%">{r["labor"] or ""}</td>'
+                f'<td class="num" style="width:25%">{fmt(monto)}</td>'
                 f'</tr>'
             )
         rows_html += (
             f'<tr style="background:#e8f0fe">'
             f'<td colspan="3" style="text-align:right;font-weight:bold">Subtotal {fecha_fmt}</td>'
-            f'<td class="num" style="font-weight:bold">{fmt(day_total)}</td>'
+            f'<td class="num" style="width:25%;font-weight:bold">{fmt(day_total)}</td>'
             f'</tr>'
         )
 
     rows_html += (
         f'<tr style="background:#1e293b;color:#fff">'
         f'<td colspan="3" style="text-align:right;font-weight:bold">TOTAL</td>'
-        f'<td class="num" style="font-weight:bold">{fmt(grand_total)}</td>'
+        f'<td class="num" style="width:25%;font-weight:bold">{fmt(grand_total)}</td>'
         f'</tr>'
     )
 
@@ -4272,9 +4272,9 @@ async def download_tarjas_tractorista_pdf(
       .hdr td {{ padding: 10px 14px; color: #fff; vertical-align: middle; }}
       .hdr .title {{ font-size: 13pt; font-weight: 800; }}
       .hdr .sub {{ font-size: 8.5pt; margin-top: 2px; opacity: .85; }}
-      table.data {{ width: 100%; border-collapse: collapse; font-size: 8pt; }}
-      table.data th {{ background: #1e293b; color: #fff; padding: 5px 7px; text-align: left; }}
-      table.data td {{ padding: 4px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }}
+      table.data {{ width: 100%; border-collapse: collapse; font-size: 8pt; table-layout: fixed; }}
+      table.data th {{ background: #1e293b; color: #fff; padding: 5px 7px; text-align: left; word-wrap: break-word; }}
+      table.data td {{ padding: 4px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; word-wrap: break-word; }}
       table.data tr:nth-child(even) {{ background: #f8fafc; }}
       .num {{ text-align: right; }}
       .section-title {{ font-size: 10pt; font-weight: 800; margin: 4px 0 6px; }}
@@ -4292,7 +4292,12 @@ async def download_tarjas_tractorista_pdf(
       </tr>
     </table>
     <table class="data">
-      <thead><tr><th>Fecha</th><th>Trabajador</th><th>Labor</th><th class="num">Total a pagar</th></tr></thead>
+      <thead><tr>
+        <th style="width:12%">Fecha</th>
+        <th style="width:30%">Trabajador</th>
+        <th style="width:33%">Labor</th>
+        <th class="num" style="width:25%">Total a pagar</th>
+      </tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
     {'<div class="section-title">Tabla por operador</div>' + pivot_html if pivot_html else ''}
