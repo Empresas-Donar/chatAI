@@ -88,10 +88,10 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
     if (!data.rows.length) {
       document.getElementById('oc-document').style.display = 'block';
-      document.getElementById('doc-tbody').innerHTML = '';
-      document.getElementById('doc-tfoot').innerHTML = '';
       document.getElementById('empty-state').classList.remove('hidden');
       document.getElementById('btn-odoo-export').disabled = true;
+      document.getElementById('btn-pdf').disabled = true;
+      document.getElementById('btn-pivot').disabled = true;
       return;
     }
 
@@ -148,9 +148,6 @@ function renderDocument(data) {
       <div class="cc-section-header">
         <span class="cc-section-title">CC ${esc(String(g.cc ?? ''))}</span>
         <div class="cc-section-total">${fmtCLP.format(ccTotal)}</div>
-        <button class="btn btn-secondary btn-cc-pdf" data-cc="${esc(String(g.cc ?? ''))}">
-          ↓ Descargar PDF
-        </button>
       </div>
       <div class="oc-table-wrap">
         <table class="oc-table">
@@ -173,24 +170,22 @@ function renderDocument(data) {
     container.appendChild(section);
   }
 
-  // Wire PDF buttons
-  container.querySelectorAll('.btn-cc-pdf').forEach(btn => {
-    btn.addEventListener('click', () => downloadCCPdf(btn.dataset.cc, btn));
-  });
-
   document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('btn-odoo-export').disabled = false;
+  document.getElementById('btn-pdf').disabled = false;
+  document.getElementById('btn-pivot').disabled = false;
   document.getElementById('oc-document').style.display = 'block';
 }
 
-async function downloadCCPdf(cc, btn) {
+// ── PDF (tabla plana, todos los CC) ──────────────────────────────────────
+document.getElementById('btn-pdf').addEventListener('click', async () => {
   if (!_lastParams) return;
+  const btn = document.getElementById('btn-pdf');
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generando…';
+  btn.textContent = 'Generando PDF…';
   try {
-    const params = _lastParams + '&cc=' + encodeURIComponent(cc);
-    const res = await fetch('/api/tarjas/tractorista/download-pdf?' + params);
+    const res = await fetch('/api/tarjas/tractorista/download-pdf?' + _lastParams);
     if (!res.ok) {
       const body = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(body.detail || res.statusText);
@@ -199,7 +194,7 @@ async function downloadCCPdf(cc, btn) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tractorista_cc${cc}_${_lastParams.replace(/[^a-z0-9_]/gi, '_')}.pdf`;
+    a.download = `tractorista_${_lastParams.replace(/[^a-z0-9_]/gi, '_')}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -210,7 +205,40 @@ async function downloadCCPdf(cc, btn) {
     btn.disabled = false;
     btn.textContent = original;
   }
-}
+});
+
+// ── Pivot Excel (tabla por operador × fecha) ──────────────────────────────
+document.getElementById('btn-pivot').addEventListener('click', async () => {
+  if (!_lastParams) return;
+  const btn = document.getElementById('btn-pivot');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generando…';
+  try {
+    const res = await fetch('/api/tarjas/tractorista/pivot-excel?' + _lastParams);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || res.statusText);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : 'tractorista_operadores.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showError('Error al generar tabla: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+});
 
 // ── Export modal ──────────────────────────────────────────────────────────
 const ccModal = {
