@@ -4160,6 +4160,7 @@ async def download_tarjas_tractorista_pdf(
                     fecha::date::text   AS fecha,
                     trabajador,
                     labor,
+                    maquina,
                     SUM(total_tractor)  AS monto
                 FROM appsheet.tarjas_pagos
                 WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
@@ -4167,7 +4168,7 @@ async def download_tarjas_tractorista_pdf(
                   AND nombre_campo  = %s
                   AND fecha::date BETWEEN %s AND %s
                   {cc_filter}
-                GROUP BY fecha::date, trabajador, labor
+                GROUP BY fecha::date, trabajador, labor, maquina
                 ORDER BY fecha::date, trabajador, labor
                 """,
                 params,
@@ -4197,23 +4198,18 @@ async def download_tarjas_tractorista_pdf(
             monto = float(r["monto"] or 0)
             rows_html += (
                 f'<tr>'
-                f'<td style="width:12%">{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
-                f'<td style="width:30%">{r["trabajador"] or ""}</td>'
-                f'<td style="width:33%">{r["labor"] or ""}</td>'
-                f'<td class="num" style="width:25%">{fmt(monto)}</td>'
+                f'<td style="width:10%">{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
+                f'<td style="width:24%">{r["trabajador"] or ""}</td>'
+                f'<td style="width:26%">{r["labor"] or ""}</td>'
+                f'<td style="width:20%">{r["maquina"] or "–"}</td>'
+                f'<td class="num" style="width:20%">{fmt(monto)}</td>'
                 f'</tr>'
             )
-        rows_html += (
-            f'<tr style="background:#e8f0fe">'
-            f'<td colspan="3" style="text-align:right;font-weight:bold">Subtotal {fecha_fmt}</td>'
-            f'<td class="num" style="width:25%;font-weight:bold">{fmt(day_total)}</td>'
-            f'</tr>'
-        )
 
     rows_html += (
         f'<tr style="background:#1e293b;color:#fff">'
-        f'<td colspan="3" style="text-align:right;font-weight:bold">TOTAL</td>'
-        f'<td class="num" style="width:25%;font-weight:bold">{fmt(grand_total)}</td>'
+        f'<td colspan="4" style="text-align:right;font-weight:bold">TOTAL</td>'
+        f'<td class="num" style="width:20%;font-weight:bold">{fmt(grand_total)}</td>'
         f'</tr>'
     )
 
@@ -4293,10 +4289,11 @@ async def download_tarjas_tractorista_pdf(
     </table>
     <table class="data">
       <thead><tr>
-        <th style="width:12%">Fecha</th>
-        <th style="width:30%">Trabajador</th>
-        <th style="width:33%">Labor</th>
-        <th class="num" style="width:25%">Total a pagar</th>
+        <th style="width:10%">Fecha</th>
+        <th style="width:24%">Trabajador</th>
+        <th style="width:26%">Labor</th>
+        <th style="width:20%">Máquina</th>
+        <th class="num" style="width:20%">Total a pagar</th>
       </tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
