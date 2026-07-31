@@ -100,14 +100,7 @@
   padding: 10px 16px; background: #1e3a5f; color: #fff;
 }
 .cc-section-title { font-size: 15px; font-weight: 700; flex: 1; }
-.cc-section-total { font-size: 14px; font-weight: 600; }
-.btn-cc-pdf {
-  font-size: 12px; padding: 4px 12px; background: rgba(255,255,255,0.15);
-  color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 5px;
-  cursor: pointer; white-space: nowrap;
-}
-.btn-cc-pdf:hover { background: rgba(255,255,255,0.25); }
-.btn-cc-pdf:disabled { opacity: 0.6; cursor: default; }
+.cc-section-total { font-size: 14px; font-weight: 600; color: #fff; }
 .cc-section .oc-table-wrap { border-radius: 0; border: none; }
 
 /* Empty / error */

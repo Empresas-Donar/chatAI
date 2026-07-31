@@ -3683,6 +3683,128 @@ async def export_tarjas_tractorista_odoo(
     )
 
 
+@router.get("/api/tarjas/tractorista/pivot-excel")
+async def pivot_tarjas_tractorista_excel(
+    contratista: str = Query(...),
+    campo: str = Query(...),
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+):
+    """Excel pivot: filas=fecha, columnas=trabajador, valores=total_tractor."""
+    import pandas as pd
+
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    fecha::date::text AS fecha,
+                    trabajador,
+                    labor,
+                    SUM(total_tractor) AS monto
+                FROM appsheet.tarjas_pagos
+                WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
+                  AND contratista  = %s
+                  AND nombre_campo = %s
+                  AND fecha::date BETWEEN %s AND %s
+                GROUP BY fecha::date, trabajador, labor
+                ORDER BY fecha::date, trabajador, labor
+                """,
+                (contratista, campo, fecha_inicio, fecha_termino),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sin datos para los filtros seleccionados")
+
+    df = pd.DataFrame(rows, columns=["fecha", "trabajador", "labor", "monto"])
+    df["monto"] = df["monto"].astype(float)
+    df["fecha"] = pd.to_datetime(df["fecha"]).dt.strftime("%d/%m/%Y")
+
+    # Columna pivot: "Trabajador — Labor"
+    df["operador_labor"] = df["trabajador"].fillna("(sin nombre)") + " — " + df["labor"].fillna("")
+
+    pivot = df.pivot_table(
+        index="fecha",
+        columns="operador_labor",
+        values="monto",
+        aggfunc="sum",
+        fill_value=0,
+    )
+    pivot.index.name = "Fecha"
+    pivot["Suma total"] = pivot.sum(axis=1)
+    totals = pivot.sum(axis=0)
+    totals.name = "Suma total"
+    pivot = pd.concat([pivot, totals.to_frame().T])
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Por Operador"
+
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    total_fill  = PatternFill("solid", fgColor="E0E7FF")
+    header_font = Font(color="FFFFFF", bold=True, size=10)
+    bold_font   = Font(bold=True)
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # Header row
+    ws.cell(1, 1, "Fecha").font = header_font
+    ws.cell(1, 1).fill = header_fill
+    ws.cell(1, 1).alignment = Alignment(horizontal="center")
+    for col_idx, col_name in enumerate(pivot.columns, start=2):
+        cell = ws.cell(1, col_idx, col_name)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        ws.column_dimensions[cell.column_letter].width = 22
+
+    ws.column_dimensions["A"].width = 14
+    ws.row_dimensions[1].height = 40
+
+    # Data rows
+    for row_idx, (fecha, row_data) in enumerate(pivot.iterrows(), start=2):
+        is_total_row = (fecha == "Suma total")
+        ws.cell(row_idx, 1, fecha).font = bold_font if is_total_row else Font()
+        if is_total_row:
+            ws.cell(row_idx, 1).fill = total_fill
+        for col_idx, val in enumerate(row_data, start=2):
+            cell = ws.cell(row_idx, col_idx, int(val) if val else 0)
+            cell.number_format = '$#,##0'
+            cell.alignment = Alignment(horizontal="right")
+            if is_total_row:
+                cell.fill = total_fill
+                cell.font = bold_font
+            # Highlight "Suma total" column
+            if col_idx == len(pivot.columns) + 1:
+                cell.fill = total_fill
+                cell.font = bold_font
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = (
+        f"tractorista_operadores_{contratista.replace(' ', '_')}_{campo.replace(' ', '_')}"
+        f"_{fecha_inicio}_{fecha_termino}.xlsx"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/tarjas/tractorista/download-pdf")
 async def download_tarjas_tractorista_pdf(
     contratista: str = Query(...),
