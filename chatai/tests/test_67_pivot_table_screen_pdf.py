@@ -55,7 +55,7 @@ async def _bytes(resp):
     return b"".join([c async for c in resp.body_iterator])
 
 
-CONTRATISTA = "RAMÓN DIAZ"
+CONTRATISTA = "SERVICIOS AGRICOLAS RD SPA"  # renamed from "RAMÓN DIAZ" in issue #75
 CAMPO = "TALAGANTE"
 FECHA_INICIO = "2026-07-01"
 FECHA_TERMINO = "2026-07-31"
