@@ -89,6 +89,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     if (!data.rows.length) {
       document.getElementById('oc-document').style.display = 'block';
       document.getElementById('empty-state').classList.remove('hidden');
+      document.getElementById('pivot-section').innerHTML = '';
       document.getElementById('btn-odoo-export').disabled = true;
       document.getElementById('btn-pdf').disabled = true;
       document.getElementById('btn-pivot').disabled = true;
@@ -96,6 +97,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 
     renderDocument(data);
+    loadPivotTable();
   } catch (err) {
     showError('Error al generar: ' + err.message);
   } finally {
@@ -103,6 +105,60 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     btn.textContent = 'Generar orden';
   }
 });
+
+// ── Tabla por operador (misma data que el Excel "Tabla por operador") ────
+async function loadPivotTable() {
+  const container = document.getElementById('pivot-section');
+  container.innerHTML = '';
+  if (!_lastParams) return;
+  try {
+    const res = await fetch('/api/tarjas/tractorista/pivot-preview?' + _lastParams);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderPivotTable(data);
+  } catch (err) {
+    container.innerHTML = `<div class="error-box">Error al cargar tabla por operador: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderPivotTable(data) {
+  const container = document.getElementById('pivot-section');
+  if (!data.dates.length) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const headCols = data.columns.map(c => `<th class="num">${esc(c)}</th>`).join('');
+  const bodyRows = data.dates.map(d => {
+    const cells = data.columns.map(c => `<td class="num">${fmtCLP.format(data.matrix[d][c] ?? 0)}</td>`).join('');
+    return `<tr>
+      <td>${fmtDate(d)}</td>${cells}
+      <td class="num"><strong>${fmtCLP.format(data.date_totals[d] ?? 0)}</strong></td>
+    </tr>`;
+  }).join('');
+  const totalsRow = data.columns.map(c => `<td class="num"><strong>${fmtCLP.format(data.col_totals[c] ?? 0)}</strong></td>`).join('');
+
+  container.innerHTML = `
+    <div class="cc-section">
+      <div class="cc-section-header">
+        <span class="cc-section-title">Tabla por operador</span>
+        <div class="cc-section-total">${fmtCLP.format(data.grand_total ?? 0)}</div>
+      </div>
+      <div class="oc-table-wrap">
+        <table class="oc-table">
+          <thead><tr>
+            <th>Fecha</th>${headCols}
+            <th class="num">Total</th>
+          </tr></thead>
+          <tbody>${bodyRows}</tbody>
+          <tfoot><tr>
+            <td><strong>Suma total</strong></td>${totalsRow}
+            <td class="num"><strong>${fmtCLP.format(data.grand_total ?? 0)}</strong></td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>`;
+}
 
 // ── Render preview document ───────────────────────────────────────────────
 function renderDocument(data) {
