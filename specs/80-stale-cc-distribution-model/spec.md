@@ -8,7 +8,7 @@ issue: #80 · branch: 80-stale-cc-distribution-model · date: 2026-08-04
 ## Acceptance
 - [x] `sync_distribucion_models()` actualiza `valor_odoo` (y `cultivo`) de los modelos ya existentes cuando el valor en Odoo difiere del guardado, en vez de omitirlos siempre.
 - [x] La corrección no toca la lógica de `sync_tarjas_cc()` para CCs individuales (que sí depende intencionalmente de no pisar reemplazos de códigos archivados).
-- [ ] Se corre el sync corregido y se verifica que `tarjas_cc.valor_odoo` para `id_cc=400` pasa a coincidir con los porcentajes actuales de "Donar 2" en Odoo. **(pendiente — requiere correr `python apps/sync_cc.py` contra `donar_prod`, es un paso de despliegue separado de la aprobación del código, ver Manual QA)**
+- [x] Se corre el sync corregido y se verifica que `tarjas_cc.valor_odoo` para `id_cc=400` pasa a coincidir con los porcentajes actuales de "Donar 2" en Odoo. Ejecutado contra `donar_prod` el 2026-08-04: `id_cc=400` quedó en `{"398": 12.5, "399": 3.13, "400": 9.37, "401": 12.5, "402": 9.37, "403": 3.13, "724": 12.5, "725": 12.5, "730": 12.5, "731": 12.5}` — coincide con Odoo. Log: `insertados: 0, actualizados: 30, sin cambios: 10` — el bug afectaba a 30/40 modelos, no solo a este caso.
 - [x] Test de regresión que reproduce el bug: un modelo ya existente con porcentajes distintos a los de Odoo se actualiza tras correr el sync.
 
 ## Context
