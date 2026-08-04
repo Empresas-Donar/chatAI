@@ -371,3 +371,132 @@ class TestSyncDistribucionModels:
         result = _run_fetch_distribucion_models(rows, by_code)
         ids = {m["id_cc"] for m in result}
         assert ids == {"632", "633", "639", "1500"}
+
+
+def _make_mock_conn(existing_rows: list[tuple]):
+    """existing_rows: list of (id_cc, cultivo, valor_odoo) tuples as returned by the SELECT."""
+    cur = MagicMock()
+    cur.fetchall.return_value = existing_rows
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    return conn, cur
+
+
+def _run_sync_distribucion_models(models: list[dict], existing_rows: list[tuple]):
+    """
+    Import sync_cc (with heavy deps patched) and call sync_distribucion_models
+    against a mock connection pre-seeded with `existing_rows`.
+    Returns the mock cursor so tests can inspect cur.execute.call_args_list.
+    """
+    mock_bq_module = MagicMock()
+    mock_sa_module = MagicMock()
+    with (
+        patch.dict(
+            "sys.modules",
+            {
+                "google": MagicMock(),
+                "google.cloud": MagicMock(),
+                "google.cloud.bigquery": mock_bq_module,
+                "google.oauth2": MagicMock(),
+                "google.oauth2.service_account": mock_sa_module,
+                "psycopg2": MagicMock(),
+                "dotenv": MagicMock(),
+            },
+        ),
+        patch("builtins.open", MagicMock()),
+    ):
+        import importlib
+        import sync_cc
+
+        importlib.reload(sync_cc)
+
+        conn, cur = _make_mock_conn(existing_rows)
+        sync_cc.sync_distribucion_models(models, conn)
+        return cur
+
+
+class TestSyncDistribucionModelsWrite:
+    """
+    Issue #80 regression: an existing distribution model whose Odoo definition
+    changed must have its valor_odoo (and cultivo) refreshed, not skipped.
+    """
+
+    def test_80_stale_model_is_updated_regression(self):
+        """
+        Model "400" already exists in tarjas_cc with stale percentages. Odoo now
+        reports different percentages for the same model — the sync must UPDATE
+        the row, not silently skip it via ON CONFLICT DO NOTHING.
+        """
+        models = [
+            {
+                "id_cc": "400",
+                "cultivo": "LAS VERTIENTES",
+                "id_campo": 1,
+                "valor_odoo": '{"398": 12.5, "399": 3.13, "400": 9.37}',
+            }
+        ]
+        existing_rows = [
+            ("400", "LAS VERTIENTES", {"398": 12.73, "399": 10.96, "400": 1.56}),
+        ]
+        cur = _run_sync_distribucion_models(models, existing_rows)
+
+        update_calls = [
+            c
+            for c in cur.execute.call_args_list
+            if "UPDATE appsheet.tarjas_cc" in c.args[0]
+        ]
+        assert len(update_calls) == 1
+        params = update_calls[0].args[1]
+        assert params[0] == "LAS VERTIENTES"
+        assert params[1] == '{"398": 12.5, "399": 3.13, "400": 9.37}'
+        assert params[2] == "400"
+
+        insert_calls = [
+            c
+            for c in cur.execute.call_args_list
+            if "INSERT INTO appsheet.tarjas_cc" in c.args[0]
+        ]
+        assert len(insert_calls) == 0
+
+    def test_unchanged_model_is_not_updated(self):
+        """A model whose valor_odoo and cultivo already match Odoo must not be touched."""
+        models = [
+            {
+                "id_cc": "270",
+                "cultivo": "Administraciones Donar",
+                "id_campo": 1,
+                "valor_odoo": '{"131": 100.0}',
+            }
+        ]
+        existing_rows = [
+            ("270", "Administraciones Donar", {"131": 100.0}),
+        ]
+        cur = _run_sync_distribucion_models(models, existing_rows)
+
+        write_calls = [
+            c
+            for c in cur.execute.call_args_list
+            if "UPDATE appsheet.tarjas_cc" in c.args[0]
+            or "INSERT INTO appsheet.tarjas_cc" in c.args[0]
+        ]
+        assert len(write_calls) == 0
+
+    def test_new_model_is_still_inserted(self):
+        """A model with an id_cc not yet in tarjas_cc must be inserted, unaffected by the refresh logic."""
+        models = [
+            {
+                "id_cc": "999",
+                "cultivo": "NUEVO MODELO",
+                "id_campo": 1,
+                "valor_odoo": '{"500": 100.0}',
+            }
+        ]
+        cur = _run_sync_distribucion_models(models, existing_rows=[])
+
+        insert_calls = [
+            c
+            for c in cur.execute.call_args_list
+            if "INSERT INTO appsheet.tarjas_cc" in c.args[0]
+        ]
+        assert len(insert_calls) == 1
+        assert insert_calls[0].args[1] == ("999", "NUEVO MODELO", 1, '{"500": 100.0}')
