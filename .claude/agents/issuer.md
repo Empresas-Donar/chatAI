@@ -143,6 +143,14 @@ Return the PR URL to the user.
 
 ---
 
+## Known recurring bugs (tarjas domain)
+
+This repo's actual domain is the Donar/KONTROLAG BI platform (tarjas, despachos, purchase orders — see root `CLAUDE.md`), not irrigation/ETc. The identity section above is a generic template; treat `CLAUDE.md` as the source of truth for domain and conventions, and use this section to avoid re-discovering issues already solved.
+
+- **`appsheet.tarjas_pagos.total_jornada` CEIL/omission bug (issues #62, #82).** AppSheet sometimes computes `total_jornada` for `tipo_pago = 'Al dia'` rows using `horas_extras` rounded up (CEIL) or omits the hora-extra component entirely, even though `horas_extras`/`total_hora_extra` themselves arrive correct. Root cause is in AppSheet's formula, outside this repo, and cannot be fixed at the source. Correct formula: `total_jornada = valor_jornada × horas_trabajadas + total_hora_extra` (cascades to `total_trabajado`, `total_pagar`; leave `contratista_jornada`/`total_contratista` untouched — computed independently by AppSheet and not part of this bug). A permanent trigger `appsheet.fix_total_jornada_bug()` / `trg_fix_total_jornada` (added in #82, `sql/tarjas/21_trigger_fix_total_jornada.sql`) now self-heals this on every INSERT/UPDATE when the discrepancy exceeds $500 — below that threshold is known-harmless ~$1-3 rounding noise from `valor_jornada` being a repeating decimal, and must not be overwritten. If this bug is reported again, first check the trigger is still present (`SELECT tgname FROM pg_trigger WHERE tgname='trg_fix_total_jornada'`) before writing a new one-off data fix.
+- **`appsheet.tarjas_pagos` is a live table.** AppSheet syncs new rows into it continuously (observed directly while fixing #82: a full-table sweep re-run minutes later found new affected rows that hadn't existed in the first pass). Any diagnostic full-table sweep should be re-run immediately before declaring a fix complete, and exact row/ID counts in specs should be treated as a snapshot, not a permanent fact.
+- **`id_Resumen` has no PK/UNIQUE constraint at the DB level**, despite the `TEXT NOT NULL PRIMARY KEY` convention documented in `CLAUDE.md` (verified via `pg_constraint` while debugging #82). `ON CONFLICT ("id_Resumen") DO UPDATE` will fail with `InvalidColumnReference` — use a plain `INSERT`/`UPDATE` or an explicit existence check instead.
+
 ## Hard rules
 
 - **Never** query a model without tenant/farm scoping
