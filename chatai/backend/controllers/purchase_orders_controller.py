@@ -250,10 +250,13 @@ async def get_purchase_order(
     total_trato = sum(
         r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
     )
+    # Catch-all (not an exact "== _PAYMENT_TYPE_AL_DIA" match): tipo_pago values
+    # other than "trato" and "Al dia" (e.g. "Bono") must still count toward the
+    # total, exactly like purchase_order_print_pdf and billing_order_pdf already
+    # do — otherwise the on-screen total silently drops rows that the PDF
+    # includes, producing a mismatch between screen and PDF (issue #88).
     total_al_dia = sum(
-        r["total_labor"] or 0
-        for r in data
-        if r.get("tipo_pago") == _PAYMENT_TYPE_AL_DIA
+        r["total_labor"] or 0 for r in data if r.get("tipo_pago") != _PAYMENT_TYPE_TRATO
     )
     total_pagar = total_trato + total_al_dia
     pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
