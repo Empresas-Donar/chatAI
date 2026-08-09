@@ -6,7 +6,8 @@ Syncs Odoo analytic accounts (CC_analiticos in BigQuery) into:
   - appsheet.despacho_cc: fixes {"": 100} id_odoo
 
 Also syncs Odoo analytic distribution models (Modelos_Distribucion_Analitica in BigQuery) into:
-  - appsheet.tarjas_cc  : inserts distribution models as "virtual CCs" using x_studio_numeracin as id_cc
+  - appsheet.tarjas_cc  : inserts/refreshes distribution models as "virtual CCs" using
+    x_studio_numeracin as id_cc — valor_odoo and cultivo are kept in sync with Odoo
 
 Run manually:
   python apps/sync_cc.py
@@ -412,18 +413,37 @@ def fetch_odoo_distribucion_models(
 
 def sync_distribucion_models(models: list[dict], conn) -> None:
     """
-    Insert analytic distribution models into appsheet.tarjas_cc.
-    Uses ON CONFLICT (id_cc) DO NOTHING — never overwrites existing rows.
+    Insert new analytic distribution models into appsheet.tarjas_cc, and refresh
+    valor_odoo/cultivo for models that already exist but whose definition changed
+    in Odoo (Modelos_Distribucion_Analitica is the source of truth — our copy must
+    always mirror it, unlike sync_tarjas_cc which preserves manual archived-code fixes).
     """
     if not models:
         log.info("Modelos distribución → sin registros para insertar")
         return
 
     with conn.cursor() as cur:
-        cur.execute("SELECT id_cc::text FROM appsheet.tarjas_cc")
-        existing_ids = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT id_cc::text, cultivo, valor_odoo FROM appsheet.tarjas_cc")
+        existing = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
-    to_insert = [m for m in models if m["id_cc"] not in existing_ids]
+    to_insert, to_update = [], []
+    for m in models:
+        if m["id_cc"] not in existing:
+            to_insert.append(m)
+            continue
+
+        current_cultivo, current_valor = existing[m["id_cc"]]
+        current_dict = current_valor if isinstance(current_valor, dict) else {}
+        if isinstance(current_valor, str):
+            try:
+                current_dict = json.loads(current_valor)
+            except json.JSONDecodeError:
+                current_dict = {}
+
+        new_dict = json.loads(m["valor_odoo"])
+
+        if current_dict != new_dict or current_cultivo != m["cultivo"]:
+            to_update.append(m)
 
     with conn.cursor() as cur:
         for m in to_insert:
@@ -435,8 +455,16 @@ def sync_distribucion_models(models: list[dict], conn) -> None:
                 """,
                 (m["id_cc"], m["cultivo"], m["id_campo"], m["valor_odoo"]),
             )
+        for m in to_update:
+            cur.execute(
+                "UPDATE appsheet.tarjas_cc SET cultivo = %s, valor_odoo = %s::jsonb WHERE id_cc = %s",
+                (m["cultivo"], m["valor_odoo"], m["id_cc"]),
+            )
 
-    log.info(f"Modelos distribución → insertados: {len(to_insert)}, omitidos (ya existían): {len(models) - len(to_insert)}")
+    log.info(
+        f"Modelos distribución → insertados: {len(to_insert)}, "
+        f"actualizados: {len(to_update)}, sin cambios: {len(models) - len(to_insert) - len(to_update)}"
+    )
 
 
 def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
