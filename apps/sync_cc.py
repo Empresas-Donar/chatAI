@@ -46,13 +46,16 @@ BQ_KEY_PATH = os.environ.get(
 )
 
 # company_id → id_campo (appsheet.tarjas_campo): 1=TALAGANTE, 2=ISLA DE MAIPO, 3=ZUÑIGA, 4=KONTROLAG
-COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 2, 5: 3, 7: 4}
+# company_id=3's CC are confirmed Zuñiga crop CCs (cerezos Santina/Lapins/Rainier, ciruelos,
+# kiwis — verified against production usage, issue #90 follow-up), not Isla de Maipo — it shares
+# campo 3 with company_id=5. Campo 2 (Isla de Maipo) has no dedicated Odoo company_id today.
+COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 3, 5: 3, 7: 4}
 DEFAULT_CAMPO = 1
 
 # Only sync CC from these Odoo companies (issue #90): Agrícola Donar Uno / Dos and Kontrolag.
 # Confirmed via BigQuery CC_analiticos:
 #   1, 2, 5 → Talagante-side Donar entities (admin + "Campo Talagante" crop CCs)
-#   3       → Isla de Maipo / Zuñiga Donar entity ("Campo Isla de Maipo", "Campo Zuñiga", cerezos/ciruelas)
+#   3       → Zuñiga Donar entity ("Campo Zuñiga", cerezos/ciruelas/kiwis)
 #   7       → Kontrolag (only company_id with K0001-K0147 codes, e.g. K0001="KONTROLAG")
 # company_id 6 looks like Kontrolag at a glance (also mapped to campo 4 historically) but is
 # actually an unrelated equipment/logistics company ("SERVICIOS FB", "GRUA HORQUILLA CLARK", ...)

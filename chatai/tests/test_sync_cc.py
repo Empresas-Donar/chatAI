@@ -435,9 +435,9 @@ class TestSyncDistribucionModels:
             _model_row(100, "501", '{"101": 100.0}', company_id=3),
         ]
         result = _run_fetch_distribucion_models(rows, by_code)
-        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 2, 5: 3, 7: 4}
+        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 3, 5: 3, 7: 4}
         assert result[0]["id_campo"] == 1  # company_id=2 → campo 1
-        assert result[1]["id_campo"] == 2  # company_id=3 → campo 2
+        assert result[1]["id_campo"] == 3  # company_id=3 → campo 3 (Zuñiga)
 
     def test_multiple_models_all_returned(self):
         """All models with valid numeracin must be present in the result."""
