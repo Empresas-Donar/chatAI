@@ -45,8 +45,20 @@ BQ_KEY_PATH = os.environ.get(
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json",
 )
 
-COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 2, 5: 3, 6: 4, 7: 4}
+# company_id → id_campo (appsheet.tarjas_campo): 1=TALAGANTE, 2=ISLA DE MAIPO, 3=ZUÑIGA, 4=KONTROLAG
+COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 2, 5: 3, 7: 4}
 DEFAULT_CAMPO = 1
+
+# Only sync CC from these Odoo companies (issue #90): Agrícola Donar Uno / Dos and Kontrolag.
+# Confirmed via BigQuery CC_analiticos:
+#   1, 2, 5 → Talagante-side Donar entities (admin + "Campo Talagante" crop CCs)
+#   3       → Isla de Maipo / Zuñiga Donar entity ("Campo Isla de Maipo", "Campo Zuñiga", cerezos/ciruelas)
+#   7       → Kontrolag (only company_id with K0001-K0147 codes, e.g. K0001="KONTROLAG")
+# company_id 6 looks like Kontrolag at a glance (also mapped to campo 4 historically) but is
+# actually an unrelated equipment/logistics company ("SERVICIOS FB", "GRUA HORQUILLA CLARK", ...)
+# — it must stay excluded. company_id 9, 11, 12, 15 are unrelated investment/holding shells that
+# were leaking into appsheet.tarjas_cc via the DEFAULT_CAMPO fallback below.
+ALLOWED_COMPANY_IDS = {1, 2, 3, 5, 7}
 
 
 def _bq_client():
@@ -102,12 +114,16 @@ def fetch_odoo_cc(
     """).result()
     )
 
-    # Collect ALL active CCs keyed by (code, company_id) — no silent drops.
+    # Collect ALL active CCs keyed by (code, company_id) — no silent drops due to code
+    # collisions (see ALLOWED_COMPANY_IDS filter above for the only intentional drop).
     active_by_composite: dict[tuple[str, int], dict] = {}
     by_plan: dict[str, list[dict]] = {}
     active_ids: set[str] = set()
 
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         odoo_id = str(r["id"])
         code = str(r["code"]).strip() if r["code"] else None
         plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
@@ -190,6 +206,9 @@ def fetch_odoo_cc(
     # Build archived → replacements map
     archived_to_replacements: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         oid = str(r["id"])
         if r["active"]:
             continue
@@ -377,6 +396,9 @@ def fetch_odoo_distribucion_models(
 
     result: list[dict] = []
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         numeracion = str(r["x_studio_numeracin"]).strip()
         if not numeracion:
             continue

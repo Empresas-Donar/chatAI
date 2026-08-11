@@ -91,36 +91,41 @@ class TestFetchOdooCCDuplicateCodes:
 
     def test_5_sync_cc_duplicate_codes_regression(self):
         """
-        Regression: codes 616 and 619 are shared by company-6 (lower id) and company-2
-        (PIMENTONES 26-27).  Both must appear in by_code with distinct id_cc keys.
+        Regression: codes 616 and 619 are shared by company-3 (Zuñiga) and company-2
+        (PIMENTONES 26-27) — both allowed companies.  Both must appear in by_code with
+        distinct id_cc keys.
+
+        (Originally company-6 stood in for the higher-company_id side of this collision,
+        but issue #90 excludes company-6 from the sync entirely — see
+        TestFetchOdooCCCompanyAllowlist for that regression — so this test now uses
+        company-3, another allowed company, to keep exercising the dedup/suffix logic.)
         """
         rows = [
-            # company-6 CCs that historically held codes 616 and 619
-            _cc(297, "616", 6, "CARRO DE ARRASTRE NEGRO"),
-            _cc(299, "619", 6, "GRUA HORQUILLA CLARK"),
+            # company-3 CCs that share codes 616 and 619 with company-2
+            _cc(297, "616", 3, "CARRO DE ARRASTRE NEGRO"),
+            _cc(299, "619", 3, "GRUA HORQUILLA CLARK"),
             # PIMENTONES 26-27 company-2 CCs that were previously dropped
             _cc(733, "616", 2, "MT PIM.ROJO TEMP 26-27"),
             _cc(736, "619", 2, "AL1 PIM.ROJO TEMP 26-27"),
         ]
         by_code, _ = _run_fetch_odoo_cc(rows)
 
-        # Canonical slots (lower company_id = 2 sorts first, but wait — we sort by company_id ASC,
-        # so company-2 has lower company_id and wins the bare code slot).
-        # company_id 2 < 6, so company-2 CCs get bare codes; company-6 CCs get "-c6" suffix.
+        # Canonical slots: we sort by company_id ASC, so company-2 (lower) wins the bare
+        # code slot and company-3 (higher) gets the "-c3" suffix.
         assert "616" in by_code, (
             "Company-2 CC (lower company_id) must occupy bare code 616"
         )
         assert "619" in by_code, (
             "Company-2 CC (lower company_id) must occupy bare code 619"
         )
-        assert "616-c6" in by_code, "Company-6 CC must get suffixed id_cc 616-c6"
-        assert "619-c6" in by_code, "Company-6 CC must get suffixed id_cc 619-c6"
+        assert "616-c3" in by_code, "Company-3 CC must get suffixed id_cc 616-c3"
+        assert "619-c3" in by_code, "Company-3 CC must get suffixed id_cc 619-c3"
 
         # Verify the right Odoo IDs are assigned
         assert by_code["616"]["id"] == "733"
-        assert by_code["616-c6"]["id"] == "297"
+        assert by_code["616-c3"]["id"] == "297"
         assert by_code["619"]["id"] == "736"
-        assert by_code["619-c6"]["id"] == "299"
+        assert by_code["619-c3"]["id"] == "299"
 
     def test_unique_code_unchanged(self):
         """A CC with a unique code must appear with its bare code as id_cc."""
@@ -179,6 +184,81 @@ class TestFetchOdooCCDuplicateCodes:
         by_code, _ = _run_fetch_odoo_cc(rows)
         assert by_code["100"]["company_id"] == 2
         assert by_code["200"]["company_id"] == 3
+
+
+class TestFetchOdooCCCompanyAllowlist:
+    """
+    Issue #90 regression: only CC from Agrícola Donar Uno/Dos and Kontrolag
+    (company_id in {1, 2, 3, 5, 7}) may be synced into tarjas_cc. CC from any other
+    Odoo company (e.g. company_id 6 "FB", or 9/11/12/15 unrelated holding shells)
+    must never reach `by_code`, regardless of whether their code collides with an
+    allowed company's code.
+    """
+
+    def test_90_cc_sync_company_filter_regression(self):
+        """
+        Regression: company_id=6 (unrelated "FB" equipment company, historically
+        mis-mapped to campo 4/Kontrolag) must be excluded even though company_id=7
+        (the real Kontrolag) is allowed.
+        """
+        rows = [
+            _cc(297, "616", 6, "CARRO DE ARRASTRE NEGRO"),  # excluded company
+            _cc(1, "K0001", 7, "KONTROLAG"),  # real Kontrolag
+        ]
+        by_code, _ = _run_fetch_odoo_cc(rows)
+        assert "616" not in by_code, "company_id=6 CC must be excluded from sync"
+        assert "K0001" in by_code, "company_id=7 (Kontrolag) CC must still sync"
+        assert by_code["K0001"]["company_id"] == 7
+
+    def test_excluded_company_does_not_steal_bare_code(self):
+        """
+        An excluded company must not participate in the (code, company_id) dedup
+        ranking at all — an allowed company sharing the same code must always get
+        the bare code, never a "-cN" suffix caused by a filtered-out competitor.
+        """
+        rows = [
+            _cc(10, "999", 9, "CC empresa 9 (excluida)"),
+            _cc(20, "999", 2, "CC empresa 2 (permitida)"),
+        ]
+        by_code, _ = _run_fetch_odoo_cc(rows)
+        assert by_code["999"]["id"] == "20"
+        assert "999-c9" not in by_code
+        assert len(by_code) == 1
+
+    def test_all_allowed_companies_pass_through(self):
+        """Every company_id in ALLOWED_COMPANY_IDS (1, 2, 3, 5, 7) must sync unaffected."""
+        rows = [
+            _cc(1, "100", 1, "CC empresa 1"),
+            _cc(2, "200", 2, "CC empresa 2"),
+            _cc(3, "300", 3, "CC empresa 3"),
+            _cc(4, "400", 5, "CC empresa 5"),
+            _cc(5, "500", 7, "CC empresa 7"),
+        ]
+        by_code, _ = _run_fetch_odoo_cc(rows)
+        assert set(by_code.keys()) == {"100", "200", "300", "400", "500"}
+
+    def test_disallowed_companies_excluded(self):
+        """Companies 6, 9, 11, 12, 15 (confirmed unrelated to Donar/Kontrolag) are excluded."""
+        rows = [
+            _cc(1, "601", 6, "VENTA REPUESTOS (FB)"),
+            _cc(2, "260", 9, "INVERSIONES DONAR"),
+            _cc(3, "700", 11, "INVERSIONES SAN JUAN"),
+            _cc(4, "201", 12, "FD SPA"),
+            _cc(5, "478", 15, "VIVEROS"),
+        ]
+        by_code, _ = _run_fetch_odoo_cc(rows)
+        assert by_code == {}
+
+    def test_archived_cc_from_excluded_company_ignored(self):
+        """Archived CCs from an excluded company must not generate replacement entries."""
+        rows = [
+            _cc(50, "300", 6, "Old CC empresa 6", active=False),
+            _cc(51, "300", 2, "Active CC empresa 2", active=True),
+        ]
+        by_code, archived_to_replacements = _run_fetch_odoo_cc(rows)
+        assert "300" in by_code
+        assert by_code["300"]["company_id"] == 2
+        assert archived_to_replacements == {}
 
 
 # ---------------------------------------------------------------------------
@@ -355,9 +435,9 @@ class TestSyncDistribucionModels:
             _model_row(100, "501", '{"101": 100.0}', company_id=3),
         ]
         result = _run_fetch_distribucion_models(rows, by_code)
-        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 2, 5: 3, 6: 4, 7: 4}
-        assert result[0]["id_campo"] == 1   # company_id=2 → campo 1
-        assert result[1]["id_campo"] == 2   # company_id=3 → campo 2
+        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 2, 5: 3, 7: 4}
+        assert result[0]["id_campo"] == 1  # company_id=2 → campo 1
+        assert result[1]["id_campo"] == 2  # company_id=3 → campo 2
 
     def test_multiple_models_all_returned(self):
         """All models with valid numeracin must be present in the result."""
@@ -371,3 +451,30 @@ class TestSyncDistribucionModels:
         result = _run_fetch_distribucion_models(rows, by_code)
         ids = {m["id_cc"] for m in result}
         assert ids == {"632", "633", "639", "1500"}
+
+
+class TestFetchDistribucionModelsCompanyAllowlist:
+    """
+    Issue #90 regression: fetch_odoo_distribucion_models must apply the same
+    ALLOWED_COMPANY_IDS filter as fetch_odoo_cc — models from company_id=6 ("FB")
+    or other unrelated companies must never be synced as virtual CCs.
+    """
+
+    def test_90_distribucion_models_company_filter_regression(self):
+        by_code: dict = {}
+        rows = [
+            _model_row(1, "601", '{"1": 100.0}', company_id=6),  # excluded (FB)
+            _model_row(2, "K0050", '{"2": 100.0}', company_id=7),  # allowed (Kontrolag)
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        ids = {m["id_cc"] for m in result}
+        assert ids == {"K0050"}
+
+    def test_disallowed_companies_excluded_from_models(self):
+        by_code: dict = {}
+        rows = [
+            _model_row(1, "260", '{"1": 100.0}', company_id=9),
+            _model_row(2, "700", '{"2": 100.0}', company_id=11),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result == []
