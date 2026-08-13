@@ -40,7 +40,20 @@ logger = logging.getLogger("controllers.purchase_orders")
 
 
 def _get_bq_client():
-    key_path = os.getenv("BQ_KEY_PATH")
+    # Support credentials from env var (base64 JSON, used in Cloud Run) or local file path
+    key_b64 = os.getenv("BIGQUERY_KEY_B64")
+    if key_b64:
+        import base64
+        import tempfile
+
+        key_json = base64.b64decode(key_b64)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        tmp.write(key_json)
+        tmp.close()
+        key_path = tmp.name
+    else:
+        key_path = os.getenv("BQ_KEY_PATH")
+
     project = os.getenv("BQ_PROJECT", "ace-scarab-484515-v1")
     credentials = service_account.Credentials.from_service_account_file(key_path)
     return bigquery.Client(project=project, credentials=credentials)
