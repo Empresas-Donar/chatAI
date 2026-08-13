@@ -45,8 +45,78 @@ BQ_KEY_PATH = os.environ.get(
     "/Users/bedomax/startups/donar/bigquery-odoo-key.json",
 )
 
-COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 2, 5: 3, 6: 4, 7: 4}
+# company_id → id_campo (appsheet.tarjas_campo): 1=TALAGANTE, 2=ISLA DE MAIPO, 3=ZUÑIGA, 4=KONTROLAG
+# company_id=3 ("Agrícola Donar Dos") does NOT map to a single campo: its CC split across
+# Isla de Maipo and Zuñiga, and that split is only resolvable via the `plan_id` sub-field
+# (see COMPANY_3_*_PLAN_IDS + _resolve_campo below, issue #90 follow-up). The `3: 3` entry
+# here is only a documentation/safety-net default — the real per-plan resolution happens in
+# _resolve_campo, which never falls through to this dict for company_id=3.
+COMPANY_TO_CAMPO = {1: 1, 2: 1, 3: 3, 5: 3, 7: 4}
 DEFAULT_CAMPO = 1
+
+# company_id=3 CC further split by `plan_id` (Odoo's leaf analytic plan — NOT root_plan_id,
+# which is the same (272) for every company_id=3 row and therefore useless to disambiguate).
+# Confirmed directly against BigQuery CC_analiticos (issue #90 follow-up):
+#   - Isla de Maipo (id_campo=2): 2023-2025 plantings — Ciruelas D'Agen 2025 (451, 452),
+#     Cerezos Red Pacific 2023 (429, 430), Sweet Aryana 2023 (422), Lapins 2023 (431),
+#     Rainier 2023 (432), Santina 2023 (424), Glow/Treat 2023 (426, 427).
+#   - Zuñiga (id_campo=3): established orchards — Ciruelos Adultos (860), Lapins/Rainier/
+#     Santina 2014-2020 (881-884, 894-896, 862-865), Glow/Nipama/Treat 2024 (871-873), plus
+#     non-crop admin CCs ("Innovación y Desarrollo" 806, "Kiwis 2026" 808).
+# A plan_id under company_id=3 outside both sets is a genuinely new/unseen plan — see
+# _resolve_campo, which refuses to guess and falls back loudly instead of silently
+# misfiling it into either campo.
+COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS = {247, 249, 250, 251, 252, 253}
+COMPANY_3_ZUNIGA_PLAN_IDS = {255, 257, 258, 259, 260, 261, 262}
+
+
+def _resolve_campo(company_id: int, plan_id) -> int:
+    """
+    Map (company_id, plan_id) → id_campo (appsheet.tarjas_campo).
+
+    company_id=3 ("Agrícola Donar Dos") is the one company whose CC split across two
+    campos (Isla de Maipo / Zuñiga); which one depends on `plan_id`
+    (COMPANY_3_*_PLAN_IDS above). Every other company_id uses the flat COMPANY_TO_CAMPO
+    mapping unchanged.
+
+    An unrecognized plan_id under company_id=3 is NOT silently assigned to either campo:
+    it's logged as a warning and mapped to DEFAULT_CAMPO (Talagante) instead, so an
+    obviously-wrong campo shows up in review rather than blending into Isla de Maipo or
+    Zuñiga unnoticed.
+    """
+    if company_id == 3:
+        try:
+            plan = int(plan_id) if plan_id not in (None, "") else None
+        except (TypeError, ValueError):
+            plan = None
+
+        if plan in COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS:
+            return 2
+        if plan in COMPANY_3_ZUNIGA_PLAN_IDS:
+            return 3
+
+        log.warning(
+            f"company_id=3 CC con plan_id={plan_id!r} no reconocido (fuera de "
+            f"COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS y COMPANY_3_ZUNIGA_PLAN_IDS) — usando "
+            f"DEFAULT_CAMPO={DEFAULT_CAMPO} como fallback visible; revisar y agregar el "
+            f"plan_id al cluster correcto"
+        )
+        return DEFAULT_CAMPO
+
+    return COMPANY_TO_CAMPO.get(company_id, DEFAULT_CAMPO)
+
+
+# Only sync CC from these Odoo companies (issue #90): Agrícola Donar Uno / Dos and Kontrolag.
+# Confirmed via BigQuery CC_analiticos:
+#   1, 2, 5 → Talagante-side Donar entities (admin + "Campo Talagante" crop CCs)
+#   3       → "Agrícola Donar Dos" — splits across Isla de Maipo AND Zuñiga by plan_id,
+#             see COMPANY_3_*_PLAN_IDS + _resolve_campo above (issue #90 follow-up)
+#   7       → Kontrolag (only company_id with K0001-K0147 codes, e.g. K0001="KONTROLAG")
+# company_id 6 looks like Kontrolag at a glance (also mapped to campo 4 historically) but is
+# actually an unrelated equipment/logistics company ("SERVICIOS FB", "GRUA HORQUILLA CLARK", ...)
+# — it must stay excluded. company_id 9, 11, 12, 15 are unrelated investment/holding shells that
+# were leaking into appsheet.tarjas_cc via the DEFAULT_CAMPO fallback below.
+ALLOWED_COMPANY_IDS = {1, 2, 3, 5, 7}
 
 
 def _bq_client():
@@ -97,20 +167,26 @@ def fetch_odoo_cc(
           code,
           company_id,
           active,
-          CAST(root_plan_id AS STRING) AS root_plan_id
+          CAST(root_plan_id AS STRING) AS root_plan_id,
+          CAST(plan_id AS STRING) AS plan_id
         FROM `ace-scarab-484515-v1.odoo_data.CC_analiticos`
     """).result()
     )
 
-    # Collect ALL active CCs keyed by (code, company_id) — no silent drops.
+    # Collect ALL active CCs keyed by (code, company_id) — no silent drops due to code
+    # collisions (see ALLOWED_COMPANY_IDS filter above for the only intentional drop).
     active_by_composite: dict[tuple[str, int], dict] = {}
     by_plan: dict[str, list[dict]] = {}
     active_ids: set[str] = set()
 
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         odoo_id = str(r["id"])
         code = str(r["code"]).strip() if r["code"] else None
         plan = str(r["root_plan_id"]) if r["root_plan_id"] else None
+        plan_id = str(r["plan_id"]) if r["plan_id"] else None
 
         if r["active"]:
             active_ids.add(odoo_id)
@@ -121,6 +197,7 @@ def fetch_odoo_cc(
                         "id": odoo_id,
                         "nombre": r["nombre"],
                         "company_id": int(r["company_id"]),
+                        "plan_id": plan_id,
                     }
 
         if plan:
@@ -190,6 +267,9 @@ def fetch_odoo_cc(
     # Build archived → replacements map
     archived_to_replacements: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         oid = str(r["id"])
         if r["active"]:
             continue
@@ -248,7 +328,7 @@ def sync_tarjas_cc(
                 {
                     "id_cc": code,
                     "cultivo": info["nombre"],
-                    "id_campo": COMPANY_TO_CAMPO.get(info["company_id"], DEFAULT_CAMPO),
+                    "id_campo": _resolve_campo(info["company_id"], info.get("plan_id")),
                     "valor_odoo": new_json,
                 }
             )
@@ -354,7 +434,15 @@ def fetch_odoo_distribucion_models(
       - id_cc       = x_studio_numeracin  (the model's Odoo numeración)
       - cultivo     = name from CC_analiticos (first by code match, then by id match,
                       fallback to x_studio_numeracin itself)
-      - id_campo    = derived from company_id via COMPANY_TO_CAMPO
+      - id_campo    = derived from company_id via _resolve_campo. This table has no
+                      plan_id column of its own (distribution models aren't CC rows —
+                      they reference `analytic_distribution_code_id` and a JSON of
+                      target CCs), so for company_id=3 the plan_id needed to pick
+                      Isla de Maipo vs Zuñiga is borrowed from the underlying CC:
+                      first the CC matched by code/id (same lookup used for cultivo),
+                      then — if that CC has no plan_id — from the CC(s) targeted by
+                      analytic_distribution itself, but only when they unambiguously
+                      agree on one plan_id (see _plan_id_from_distribution below).
       - valor_odoo  = analytic_distribution JSON as-is from Odoo
 
     Models with no x_studio_numeracin are skipped.
@@ -372,22 +460,56 @@ def fetch_odoo_distribucion_models(
     """).result()
     )
 
-    # Build reverse lookup: odoo_id → nombre, using all entries in by_code.
-    by_odoo_id: dict[str, str] = {info["id"]: info["nombre"] for info in by_code.values()}
+    # Build reverse lookup: odoo_id → CC info (nombre, plan_id, ...), using all entries in
+    # by_code, which now carries plan_id too (see fetch_odoo_cc).
+    by_odoo_id: dict[str, dict] = {info["id"]: info for info in by_code.values()}
+
+    def _plan_id_from_distribution(analytic_dist_json: str):
+        """
+        Fallback plan_id resolution for company_id=3 models that don't resolve a CC via
+        the code/id match above: inspect the CC(s) targeted by analytic_distribution
+        (the JSON of {odoo_cc_id: pct}) and, if every resolvable target agrees on one
+        plan_id, use it. Disagreement or no resolvable target → None (unresolved).
+        """
+        try:
+            targets = json.loads(analytic_dist_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        plan_ids = {
+            by_odoo_id[cc_id]["plan_id"]
+            for cc_id in targets
+            if cc_id in by_odoo_id and by_odoo_id[cc_id].get("plan_id")
+        }
+        return plan_ids.pop() if len(plan_ids) == 1 else None
 
     result: list[dict] = []
     for r in rows:
+        if int(r["company_id"]) not in ALLOWED_COMPANY_IDS:
+            continue
+
         numeracion = str(r["x_studio_numeracin"]).strip()
         if not numeracion:
             continue
 
-        # Resolve cultivo: code match → id match → fallback to numeracion
+        analytic_dist = r["analytic_distribution"] or "{}"
+
+        # Resolve cultivo + plan_id together: code match → id match → fallback to
+        # numeracion for cultivo; plan_id additionally falls back to the distribution
+        # targets when the matched CC (if any) doesn't carry one itself.
         cultivo = None  # type: Optional[str]
+        plan_id = None  # type: Optional[str]
         if numeracion in by_code:
             cultivo = by_code[numeracion]["nombre"]
+            plan_id = by_code[numeracion].get("plan_id")
         elif r["analytic_distribution_code_id"]:
             cc_id = str(r["analytic_distribution_code_id"])
-            cultivo = by_odoo_id.get(cc_id)
+            match = by_odoo_id.get(cc_id)
+            if match:
+                cultivo = match["nombre"]
+                plan_id = match.get("plan_id")
+
+        if plan_id is None:
+            plan_id = _plan_id_from_distribution(analytic_dist)
 
         if cultivo is None:
             log.warning(
@@ -395,13 +517,11 @@ def fetch_odoo_distribucion_models(
             )
             cultivo = numeracion
 
-        analytic_dist = r["analytic_distribution"] or "{}"
-
         result.append(
             {
                 "id_cc": numeracion,
                 "cultivo": cultivo,
-                "id_campo": COMPANY_TO_CAMPO.get(int(r["company_id"]), DEFAULT_CAMPO),
+                "id_campo": _resolve_campo(int(r["company_id"]), plan_id),
                 "valor_odoo": analytic_dist,
             }
         )
@@ -436,7 +556,9 @@ def sync_distribucion_models(models: list[dict], conn) -> None:
                 (m["id_cc"], m["cultivo"], m["id_campo"], m["valor_odoo"]),
             )
 
-    log.info(f"Modelos distribución → insertados: {len(to_insert)}, omitidos (ya existían): {len(models) - len(to_insert)}")
+    log.info(
+        f"Modelos distribución → insertados: {len(to_insert)}, omitidos (ya existían): {len(models) - len(to_insert)}"
+    )
 
 
 def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
