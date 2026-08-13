@@ -46,36 +46,47 @@ issue: #90 · branch: 90-cc-sync-company-filter · date: 2026-08-11
 - No se modificó `DEFAULT_CAMPO`/su uso en `sync_tarjas_cc` y `fetch_odoo_distribucion_models`: tras el filtro, todo `company_id` que llega a esas líneas ya está garantizado en `ALLOWED_COMPANY_IDS ⊆ COMPANY_TO_CAMPO.keys()`, así que el fallback queda inalcanzable en la práctica pero se deja como red de seguridad, sin refactor adicional.
 - Limpieza de `appsheet.tarjas_cc` en producción (filas de company_id 6/9/11/12/15 ya sincronizadas) queda **deferida**: es un paso separado que requiere mostrar la lista exacta de filas y obtener aprobación explícita antes de cualquier DELETE.
 
+### Follow-up (post-merge de esta rama, mismo issue #90): `company_id=3` no es un solo campo
+
+- **Hallazgo del usuario:** el mapeo `COMPANY_TO_CAMPO[3] = 3` (todo `company_id=3` → Zuñiga) que se agregó en el commit anterior de esta rama era incorrecto. `company_id=3` ("Agrícola Donar Dos") mezcla CC de **dos** campos reales — Isla de Maipo y Zuñiga — y esa mezcla no es determinable por `company_id` solo.
+- **Regla de desambiguación confirmada por el usuario y verificada contra BigQuery `CC_analiticos`:** dentro de `company_id=3`, todas las filas comparten `root_plan_id=272` (por eso es inútil para distinguir), pero el sub-campo `plan_id` (el plan analítico hoja de Odoo, campo distinto de `root_plan_id`) separa limpiamente en dos clusters:
+  - Isla de Maipo (`id_campo=2`): `plan_id ∈ {247, 249, 250, 251, 252, 253}` — plantaciones 2023-2025 (Ciruelas D'Agen 2025 códigos 451/452, Cerezos Red Pacific 2023 429/430, Sweet Aryana 2023 422, Lapins 2023 431, Rainier 2023 432, Santina 2023 424, Glow/Treat 2023 426/427).
+  - Zuñiga (`id_campo=3`): `plan_id ∈ {255, 257, 258, 259, 260, 261, 262}` — huertos establecidos (Ciruelos Adultos 860, Lapins/Rainier/Santina 2014-2020, Glow/Nipama/Treat 2024) + CC administrativos no-cultivo (Innovación y Desarrollo 806, Kiwis 2026 808).
+- **Verificado en Postgres producción:** los 10 códigos del cluster Isla de Maipo (422, 424, 426, 427, 429, 430, 431, 432, 451, 452) ya tienen hoy `id_campo=2` correcto en `appsheet.tarjas_cc` — no requieren fix de datos, solo predatan el cambio `COMPANY_TO_CAMPO[3]=3` del commit anterior y nunca fueron tocados por él. Este follow-up es puramente hacia adelante (evita que futuros syncs de `company_id=3` colapsen todo a campo 3).
+- **`plan_id` vs `root_plan_id` vs `id`:** son namespaces distintos que numéricamente se solapan por coincidencia — p.ej. `plan_id=255` bajo `company_id=3` no tiene relación con `CC_analiticos.id=255` (fila distinta, "LOGISTICA" de `company_id=6`, ya excluida por el allowlist). Cuidado al leer el código de no confundirlos.
+- **No hay tabla de nombres de plan en BigQuery** (`account.analytic.plan` de Odoo no está exportado a `odoo_data`), así que la resolución es necesariamente un lookup hardcodeado `plan_id → campo` (`COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS` / `COMPANY_3_ZUNIGA_PLAN_IDS`), no dinámico por nombre.
+- **Implementación:** se agregó `_resolve_campo(company_id, plan_id)` que reemplaza el uso directo de `COMPANY_TO_CAMPO.get(...)` en los dos call sites (`sync_tarjas_cc` y `fetch_odoo_distribucion_models`). Para `company_id != 3` es un passthrough exacto a `COMPANY_TO_CAMPO.get(company_id, DEFAULT_CAMPO)` (sin cambio de comportamiento). Para `company_id == 3`, resuelve por `plan_id` contra los dos sets; si el `plan_id` no está en ninguno (plan nuevo/no visto), **no adivina**: loguea un `log.warning` explícito con el `plan_id` no reconocido y devuelve `DEFAULT_CAMPO` (Talagante, campo 1) — deliberadamente un campo "obviamente incorrecto" para ese company_id, de modo que una fila así resalte en revisión en vez de mezclarse silenciosamente con Isla de Maipo o Zuñiga.
+- **`fetch_odoo_cc` (BigQuery `CC_analiticos`):** se agregó `CAST(plan_id AS STRING) AS plan_id` al `SELECT` (antes solo traía `root_plan_id`) y se hilvanó `plan_id` en el diccionario `info` de `active_by_composite`/`by_code`, para que `sync_tarjas_cc` pueda llamar `_resolve_campo(info["company_id"], info.get("plan_id"))`.
+- **`fetch_odoo_distribucion_models` (BigQuery `Modelos_Distribucion_Analitica`):** esta tabla no tiene columna `plan_id` propia — un modelo de distribución no es una fila de CC, referencia `analytic_distribution_code_id` (el CC "identidad" del modelo) y un JSON `analytic_distribution` con los CC destino. Se resuelve el `plan_id` con la misma cascada que ya se usaba para `cultivo` (código exacto → `analytic_distribution_code_id`), y si ninguna de las dos resuelve, como último recurso se inspeccionan los CC destino del propio `analytic_distribution`: si **todos** los que sí resuelven coinciden en un único `plan_id`, se usa ese; si hay desacuerdo (algunos Isla de Maipo, otros Zuñiga) o ningún destino resuelve, se trata como no resuelto (mismo camino de `_resolve_campo` → warning + `DEFAULT_CAMPO`). Esto evita adivinar cuando la evidencia es ambigua.
+- **No se agregó test end-to-end de `sync_tarjas_cc`** (requiere mock de cursor Postgres, fuera del patrón actual de tests puramente unitarios sobre `fetch_odoo_cc`/`fetch_odoo_distribucion_models`); en su lugar se testea `_resolve_campo` directamente y se verifica que `plan_id` llega correctamente hilvanado hasta `by_code`, que es exactamente el insumo que `sync_tarjas_cc` consume.
+- Se corrigió `test_id_campo_derived_from_company_id` (en `TestSyncDistribucionModels`, del round anterior): usaba `company_id=3` sin `plan_id` esperando `id_campo=3` por el mapeo plano viejo — ese comportamiento es exactamente el que este follow-up corrige (un `company_id=3` sin `plan_id` resolvible ahora cae en `DEFAULT_CAMPO=1` con warning, no en 3). Se cambió el caso a `company_id=5` (mapeo plano sin ambigüedad) para seguir probando la derivación vía `COMPANY_TO_CAMPO`, y se agregó una clase de tests dedicada para el split de `company_id=3`.
+
 ## Implemented
 ### Script
-- `apps/sync_cc.py` — agrega `ALLOWED_COMPANY_IDS = {1, 2, 3, 5, 7}`; corrige `COMPANY_TO_CAMPO` quitando `6: 4`; filtra por `company_id` en `fetch_odoo_cc()` (CCs activos y archivados) y en `fetch_odoo_distribucion_models()`.
+- `apps/sync_cc.py`:
+  - Round 1 (ya mergeado en este PR): `ALLOWED_COMPANY_IDS = {1, 2, 3, 5, 7}`; `COMPANY_TO_CAMPO` sin `6: 4`; filtro de `company_id` en `fetch_odoo_cc()` (CCs activos y archivados) y en `fetch_odoo_distribucion_models()`.
+  - Follow-up (este cambio): agrega `COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS` y `COMPANY_3_ZUNIGA_PLAN_IDS`; agrega función `_resolve_campo(company_id, plan_id)`; agrega `CAST(plan_id AS STRING) AS plan_id` al `SELECT` de `fetch_odoo_cc` e hilvana `plan_id` en `active_by_composite`/`by_code`; reemplaza `COMPANY_TO_CAMPO.get(...)` por `_resolve_campo(...)` en `sync_tarjas_cc` y en `fetch_odoo_distribucion_models`; agrega resolución de `plan_id` vía `analytic_distribution_code_id`/targets de `analytic_distribution` en `fetch_odoo_distribucion_models` (helper interno `_plan_id_from_distribution`).
 
 ### Tests
-- `chatai/tests/test_sync_cc.py` — actualiza `test_5_sync_cc_duplicate_codes_regression` (usaba company_id=6 para el caso de colisión de código; ahora usa company_id=3, empresa permitida, para no depender de una empresa que el propio fix excluye); agrega clase `TestFetchOdooCCCompanyAllowlist` (5 tests) y clase `TestFetchDistribucionModelsCompanyAllowlist` (2 tests).
+- `chatai/tests/test_sync_cc.py`:
+  - Round 1: ver arriba.
+  - Follow-up: agrega helper `_load_sync_cc()` (importa `sync_cc` con dependencias pesadas mockeadas, sin ejecutar `fetch_*`); agrega `plan_id` al helper `_cc()`; corrige `test_id_campo_derived_from_company_id` (usa `company_id=5` en vez de `3`, ver Decisions); agrega clases `TestResolveCampoCompany3PlanSplit` (5 tests), `TestFetchOdooCCCompany3PlanId` (2 tests) y `TestCompany3PlanSplitDistribucionModels` (5 tests).
 
 ## Tests
 ```
 pytest chatai/tests/test_sync_cc.py -v
-20 passed in 0.19s
+32 passed in 0.34s
 ```
 Cross-farm isolation: ✅ (`test_cross_farm_isolation`, `test_excluded_company_does_not_steal_bare_code`)
+Unresolved plan_id no se asigna silenciosamente: ✅ (`test_company_3_unrecognized_plan_id_does_not_silently_default`, `test_company_3_missing_plan_id_does_not_silently_default`, `test_unresolvable_plan_id_does_not_silently_default`, `test_disagreeing_distribution_targets_do_not_silently_default` — todos verifican `caplog` con el warning explícito además del valor de retorno).
 
 ## Manual QA
 1. `python apps/sync_cc.py` contra un entorno con credenciales BigQuery válidas (`BQ_KEY_PATH`) y `DATABASE_URL`/`DB_*` apuntando a una BD de prueba — confirmar en los logs que ya no se listan inserciones para `company_id` fuera de `{1,2,3,5,7}`.
 2. Tras correr el sync, `SELECT id_cc, cultivo FROM appsheet.tarjas_cc WHERE id_cc IN ('601','260','700')` (códigos conocidos de company_id 6/9/11) debe devolver 0 filas nuevas (las existentes de antes del fix quedan hasta el paso de limpieza aparte).
 3. `SELECT id_cc, cultivo FROM appsheet.tarjas_cc WHERE id_cc LIKE 'K0%'` debe seguir devolviendo los CCs de Kontrolag sin cambios (company_id=7 sigue permitido).
+4. (Follow-up) `SELECT id_cc, cultivo, id_campo FROM appsheet.tarjas_cc WHERE id_cc IN ('451','452','429','430','422','431','432','424','426','427')` (cluster Isla de Maipo de company_id=3) debe mostrar `id_campo=2` para todos.
+5. (Follow-up) `SELECT id_cc, cultivo, id_campo FROM appsheet.tarjas_cc WHERE id_cc IN ('860','806','808')` (cluster Zuñiga de company_id=3) debe mostrar `id_campo=3` para todos.
+6. (Follow-up) Revisar los logs del sync en busca de `"company_id=3 CC con plan_id=... no reconocido"` — cualquier ocurrencia indica un `plan_id` nuevo bajo `company_id=3` que necesita agregarse a `COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS` o `COMPANY_3_ZUNIGA_PLAN_IDS` (y probablemente una fila con `id_campo=1` sospechosa que hay que corregir manualmente).
 
 ## Deferred
 - Limpieza de datos ya existentes en `tarjas_cc` en producción (filas de company_id 6, 9, 11, 12, 15) — se hará como paso separado, explícito, con lista de filas mostrada al usuario antes de cualquier DELETE.
-
-## Implemented
-_(pendiente — no implementado aún, esperando confirmación de `company_id`)_
-
-## Tests
-_(pendiente)_
-
-## Manual QA
-_(pendiente)_
-
-## Deferred
-- Limpieza de datos ya existentes en `tarjas_cc` en producción — se hará como paso separado, explícito, con lista de filas mostrada al usuario antes de cualquier DELETE.

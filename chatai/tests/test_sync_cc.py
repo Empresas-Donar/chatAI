@@ -11,9 +11,7 @@ the in-process functions via direct import.
 
 import sys
 from pathlib import Path
-from typing import Optional
 from unittest.mock import MagicMock, patch
-
 
 # Make the apps/ directory importable without installing the package.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -23,6 +21,37 @@ sys.path.insert(0, str(REPO_ROOT / "apps"))
 def _make_rows(specs: list[dict]) -> list[dict]:
     """Build mock BigQuery row objects from dicts (subscript-accessible like real BQ rows)."""
     return list(specs)
+
+
+def _load_sync_cc():
+    """
+    Import (or reload) sync_cc with heavy deps mocked, returning the module itself.
+    Useful for tests that call plain-Python helpers (e.g. _resolve_campo) directly
+    rather than going through fetch_odoo_cc/fetch_odoo_distribucion_models.
+    """
+    mock_bq_module = MagicMock()
+    mock_sa_module = MagicMock()
+    with (
+        patch.dict(
+            "sys.modules",
+            {
+                "google": MagicMock(),
+                "google.cloud": MagicMock(),
+                "google.cloud.bigquery": mock_bq_module,
+                "google.oauth2": MagicMock(),
+                "google.oauth2.service_account": mock_sa_module,
+                "psycopg2": MagicMock(),
+                "dotenv": MagicMock(),
+            },
+        ),
+        patch("builtins.open", MagicMock()),
+    ):
+        import importlib
+
+        import sync_cc
+
+        importlib.reload(sync_cc)
+        return sync_cc
 
 
 def _run_fetch_odoo_cc(rows: list[dict]):
@@ -49,6 +78,7 @@ def _run_fetch_odoo_cc(rows: list[dict]):
         patch("builtins.open", MagicMock()),
     ):
         import importlib
+
         import sync_cc
 
         importlib.reload(sync_cc)  # ensure fresh module after patching
@@ -66,7 +96,15 @@ def _run_fetch_odoo_cc(rows: list[dict]):
 # ---------------------------------------------------------------------------
 
 
-def _cc(id_, code, company_id, nombre="CC test", active=True, root_plan_id=None):
+def _cc(
+    id_,
+    code,
+    company_id,
+    nombre="CC test",
+    active=True,
+    root_plan_id=None,
+    plan_id=None,
+):
     """Return a dict that mimics a BigQuery row (subscript-accessible)."""
     return {
         "id": id_,
@@ -75,6 +113,7 @@ def _cc(id_, code, company_id, nombre="CC test", active=True, root_plan_id=None)
         "company_id": company_id,
         "active": active,
         "root_plan_id": root_plan_id,
+        "plan_id": plan_id,
     }
 
 
@@ -271,7 +310,7 @@ def _model_row(
     numeracion: str,
     analytic_distribution: str,
     company_id: int,
-    analytic_distribution_code_id: Optional[int] = None,
+    analytic_distribution_code_id: int | None = None,
 ) -> dict:
     """Return a dict mimicking a BigQuery row from Modelos_Distribucion_Analitica."""
     return {
@@ -279,7 +318,9 @@ def _model_row(
         "x_studio_numeracin": numeracion,
         "analytic_distribution": analytic_distribution,
         "company_id": str(company_id),
-        "analytic_distribution_code_id": str(analytic_distribution_code_id) if analytic_distribution_code_id else None,
+        "analytic_distribution_code_id": str(analytic_distribution_code_id)
+        if analytic_distribution_code_id
+        else None,
     }
 
 
@@ -306,6 +347,7 @@ def _run_fetch_distribucion_models(model_rows: list[dict], by_code: dict):
         patch("builtins.open", MagicMock()),
     ):
         import importlib
+
         import sync_cc
 
         importlib.reload(sync_cc)
@@ -334,7 +376,11 @@ class TestSyncDistribucionModels:
         """
         by_code = {
             "735": {"id": "1001", "nombre": "AL1 PIM.ROJO TEMP 26-27", "company_id": 2},
-            "736": {"id": "1002", "nombre": "AL2 PIM.AMARILLO TEMP 26-27", "company_id": 2},
+            "736": {
+                "id": "1002",
+                "nombre": "AL2 PIM.AMARILLO TEMP 26-27",
+                "company_id": 2,
+            },
         }
         rows = [
             _model_row(
@@ -428,16 +474,20 @@ class TestSyncDistribucionModels:
         assert len(result) == 0
 
     def test_id_campo_derived_from_company_id(self):
-        """company_id must be mapped to id_campo via COMPANY_TO_CAMPO."""
+        """
+        company_id must be mapped to id_campo via the flat COMPANY_TO_CAMPO for every
+        company_id other than 3 (which splits by plan_id — see
+        TestCompany3PlanSplitDistribucionModels below, issue #90 follow-up).
+        """
         by_code: dict = {}
         rows = [
             _model_row(99, "500", '{"100": 100.0}', company_id=2),
-            _model_row(100, "501", '{"101": 100.0}', company_id=3),
+            _model_row(100, "501", '{"101": 100.0}', company_id=5),
         ]
         result = _run_fetch_distribucion_models(rows, by_code)
-        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 3, 5: 3, 7: 4}
+        # COMPANY_TO_CAMPO: {1: 1, 2: 1, 3: 3 (superseded for models, see below), 5: 3, 7: 4}
         assert result[0]["id_campo"] == 1  # company_id=2 → campo 1
-        assert result[1]["id_campo"] == 3  # company_id=3 → campo 3 (Zuñiga)
+        assert result[1]["id_campo"] == 3  # company_id=5 → campo 3 (Zuñiga)
 
     def test_multiple_models_all_returned(self):
         """All models with valid numeracin must be present in the result."""
@@ -478,3 +528,256 @@ class TestFetchDistribucionModelsCompanyAllowlist:
         ]
         result = _run_fetch_distribucion_models(rows, by_code)
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #90 follow-up: company_id=3 splits across Isla de Maipo / Zuñiga by plan_id
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCampoCompany3PlanSplit:
+    """
+    Issue #90 follow-up regression: company_id=3 ("Agrícola Donar Dos") CC do not all
+    belong to campo 3 (Zuñiga) — plan_id splits them between Isla de Maipo (campo 2)
+    and Zuñiga (campo 3). An unrecognized plan_id under company_id=3 must not be
+    silently guessed into either campo.
+    """
+
+    def test_company_3_isla_de_maipo_plan_id_maps_to_campo_2(self):
+        sync_cc = _load_sync_cc()
+        # 247 is in COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS
+        assert sync_cc._resolve_campo(3, "247") == 2
+        # Also accepts a bare int, not just a string (BQ CAST(... AS STRING) usually
+        # yields a str, but info dicts may be built with either).
+        assert sync_cc._resolve_campo(3, 251) == 2
+
+    def test_company_3_zuniga_plan_id_maps_to_campo_3(self):
+        sync_cc = _load_sync_cc()
+        # 255 is in COMPANY_3_ZUNIGA_PLAN_IDS
+        assert sync_cc._resolve_campo(3, "255") == 3
+        assert sync_cc._resolve_campo(3, 262) == 3
+
+    def test_company_3_unrecognized_plan_id_does_not_silently_default(self, caplog):
+        """
+        A plan_id under company_id=3 outside both known clusters must NOT be silently
+        assigned to Isla de Maipo (2) or Zuñiga (3) — it falls back to DEFAULT_CAMPO
+        with a visible warning logged, so the gap gets noticed rather than misfiled.
+        """
+        sync_cc = _load_sync_cc()
+        with caplog.at_level("WARNING"):
+            result = sync_cc._resolve_campo(3, "999999")
+        assert result == sync_cc.DEFAULT_CAMPO
+        assert result not in (2, 3), (
+            "unrecognized plan_id under company_id=3 must not resolve to either "
+            "known campo without a trace in the logs"
+        )
+        assert any(
+            "999999" in record.message and "no reconocido" in record.message
+            for record in caplog.records
+        ), "an unresolved company_id=3 plan_id must log a visible warning"
+
+    def test_company_3_missing_plan_id_does_not_silently_default(self, caplog):
+        """A missing/None plan_id under company_id=3 is unresolved, not a default guess."""
+        sync_cc = _load_sync_cc()
+        with caplog.at_level("WARNING"):
+            result = sync_cc._resolve_campo(3, None)
+        assert result == sync_cc.DEFAULT_CAMPO
+        assert any("no reconocido" in record.message for record in caplog.records)
+
+    def test_other_companies_unaffected_by_plan_id(self):
+        """Non-company-3 ids keep using the flat COMPANY_TO_CAMPO regardless of plan_id."""
+        sync_cc = _load_sync_cc()
+        assert (
+            sync_cc._resolve_campo(2, "247") == 1
+        )  # plan_id ignored for company_id != 3
+        assert sync_cc._resolve_campo(7, "255") == 4
+        assert sync_cc._resolve_campo(5, None) == 3
+
+
+class TestFetchOdooCCCompany3PlanId:
+    """
+    Issue #90 follow-up regression: fetch_odoo_cc must select and thread `plan_id`
+    through into by_code, so downstream campo resolution (_resolve_campo) can split
+    company_id=3 CC between Isla de Maipo and Zuñiga.
+    """
+
+    def test_plan_id_threaded_into_by_code(self):
+        rows = [
+            _cc(429, "CER-RP-23", 3, "CEREZOS RED PACIFIC 2023", plan_id=247),
+            _cc(881, "CIR-ADU", 3, "CIRUELOS ADULTOS", plan_id=255),
+        ]
+        by_code, _ = _run_fetch_odoo_cc(rows)
+        assert by_code["CER-RP-23"]["plan_id"] == "247"
+        assert by_code["CIR-ADU"]["plan_id"] == "255"
+
+    def test_resolved_campo_matches_expected_cluster(self):
+        """
+        End-to-end: a CC fetched via fetch_odoo_cc under company_id=3 resolves to the
+        correct campo once run through _resolve_campo (what sync_tarjas_cc does).
+        """
+        sync_cc = _load_sync_cc()
+        rows = [
+            _cc(429, "CER-RP-23", 3, "CEREZOS RED PACIFIC 2023", plan_id=247),  # Isla
+            _cc(881, "CIR-ADU", 3, "CIRUELOS ADULTOS", plan_id=255),  # Zuñiga
+        ]
+        mock_client = MagicMock()
+        mock_query_result = MagicMock()
+        mock_query_result.result.return_value = iter(rows)
+        mock_client.query.return_value = mock_query_result
+        by_code, _ = sync_cc.fetch_odoo_cc(mock_client)
+
+        assert (
+            sync_cc._resolve_campo(
+                by_code["CER-RP-23"]["company_id"], by_code["CER-RP-23"]["plan_id"]
+            )
+            == 2
+        )
+        assert (
+            sync_cc._resolve_campo(
+                by_code["CIR-ADU"]["company_id"], by_code["CIR-ADU"]["plan_id"]
+            )
+            == 3
+        )
+
+
+class TestCompany3PlanSplitDistribucionModels:
+    """
+    Issue #90 follow-up regression: fetch_odoo_distribucion_models must resolve the
+    Isla de Maipo / Zuñiga split for company_id=3 models even though the
+    Modelos_Distribucion_Analitica table has no plan_id column of its own — it must
+    borrow plan_id from the underlying CC (matched by code, by
+    analytic_distribution_code_id, or from the analytic_distribution targets), and
+    must not silently default when none of those resolve.
+    """
+
+    def test_plan_id_resolved_via_code_match(self):
+        """Model whose numeracion matches a by_code entry inherits that CC's plan_id/campo."""
+        by_code = {
+            "451": {
+                "id": "900",
+                "nombre": "CIRUELAS D'AGEN 2025",
+                "company_id": 3,
+                "plan_id": "247",
+            },
+        }
+        rows = [
+            _model_row(
+                1,
+                "451",
+                '{"900": 100.0}',
+                company_id=3,
+                analytic_distribution_code_id=900,
+            ),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["id_campo"] == 2  # plan_id 247 → Isla de Maipo
+
+    def test_plan_id_resolved_via_analytic_distribution_code_id_match(self):
+        """Model resolved via analytic_distribution_code_id (not a direct code match)."""
+        by_code = {
+            "860": {
+                "id": "700",
+                "nombre": "CIRUELOS ADULTOS",
+                "company_id": 3,
+                "plan_id": "255",
+            },
+        }
+        rows = [
+            _model_row(
+                2,
+                "MOD-77",
+                '{"700": 100.0}',
+                company_id=3,
+                analytic_distribution_code_id=700,
+            ),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["id_campo"] == 3  # plan_id 255 → Zuñiga
+
+    def test_plan_id_resolved_via_distribution_targets_when_no_direct_match(self):
+        """
+        When the model doesn't resolve a CC via numeracion/code_id directly, but every
+        target in its analytic_distribution JSON unambiguously belongs to the same
+        plan_id cluster, that plan_id is used.
+        """
+        by_code = {
+            "429": {
+                "id": "429",
+                "nombre": "CEREZOS RED PACIFIC 2023",
+                "company_id": 3,
+                "plan_id": "247",
+            },
+            "430": {
+                "id": "430",
+                "nombre": "CEREZOS RED PACIFIC 2023 SUR",
+                "company_id": 3,
+                "plan_id": "247",
+            },
+        }
+        rows = [
+            _model_row(
+                3,
+                "MOD-99",
+                '{"429": 50.0, "430": 50.0}',
+                company_id=3,
+                analytic_distribution_code_id=None,
+            ),
+        ]
+        result = _run_fetch_distribucion_models(rows, by_code)
+        assert (
+            result[0]["id_campo"] == 2
+        )  # both targets are plan_id 247 → Isla de Maipo
+
+    def test_unresolvable_plan_id_does_not_silently_default(self, caplog):
+        """
+        A company_id=3 model with no code/id match and no resolvable distribution
+        targets must not be silently assigned to Isla de Maipo or Zuñiga — it falls
+        back to DEFAULT_CAMPO with a visible warning.
+        """
+        by_code: dict = {}
+        rows = [
+            _model_row(
+                4,
+                "MOD-UNKNOWN",
+                '{"9999": 100.0}',
+                company_id=3,
+                analytic_distribution_code_id=None,
+            ),
+        ]
+        with caplog.at_level("WARNING"):
+            result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["id_campo"] not in (2, 3)
+        assert any("no reconocido" in record.message for record in caplog.records)
+
+    def test_disagreeing_distribution_targets_do_not_silently_default(self, caplog):
+        """
+        If the distribution targets disagree on plan_id (one Isla, one Zuñiga), that's
+        ambiguous — must not silently pick one, falls back with a warning instead.
+        """
+        by_code = {
+            "429": {
+                "id": "429",
+                "nombre": "CEREZOS RED PACIFIC 2023",
+                "company_id": 3,
+                "plan_id": "247",
+            },
+            "860": {
+                "id": "860",
+                "nombre": "CIRUELOS ADULTOS",
+                "company_id": 3,
+                "plan_id": "255",
+            },
+        }
+        rows = [
+            _model_row(
+                5,
+                "MOD-AMBIGUOUS",
+                '{"429": 50.0, "860": 50.0}',
+                company_id=3,
+                analytic_distribution_code_id=None,
+            ),
+        ]
+        with caplog.at_level("WARNING"):
+            result = _run_fetch_distribucion_models(rows, by_code)
+        assert result[0]["id_campo"] not in (2, 3)
+        assert any("no reconocido" in record.message for record in caplog.records)
