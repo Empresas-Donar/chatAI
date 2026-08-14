@@ -4045,20 +4045,39 @@ def _build_bono_mensual_html(
     rows = _query_bono_mensual_rows(cur, where, params)
 
     total = sum(float(r["monto"] or 0) for r in rows)
+
+    # Explicit per-column widths (sum to 100%). Without these, reportlab's
+    # auto column-width algorithm collapses several columns to near-zero
+    # width and overlaps their text once the table has this many columns —
+    # reproduced with real data and confirmed fixed by declaring widths on
+    # every <th>/<td>, including the footer row (see specs/117-*).
+    W = {
+        "trabajador": "width:16%",
+        "rut": "width:11%",
+        "contratista": "width:20%",
+        "campo": "width:14%",
+        "cc": "width:7%",
+        "fecha": "width:9%",
+        "monto": "width:11%",
+        "estado": "width:12%",
+    }
     rows_html = "".join(
-        f'<tr><td>{_escape_html(r["trabajador"] or "")}</td>'
-        f'<td>{_escape_html(r["rut_trabajador"] or "")}</td>'
-        f'<td>{_escape_html(r["contratista"] or "")}</td>'
-        f'<td>{_escape_html(r["nombre_campo"] or "")}</td>'
-        f'<td>{_escape_html(str(r["cc"] or ""))}</td>'
-        f'<td>{_fmt_date_display(str(r["fecha"]))}</td>'
-        f'<td class="num">{_fmt_clp(r["monto"])}</td>'
-        f'<td>{_escape_html(r["estado"] or "")}</td></tr>'
+        f'<tr><td style="{W["trabajador"]}">{_escape_html(r["trabajador"] or "")}</td>'
+        f'<td style="{W["rut"]}">{_escape_html(r["rut_trabajador"] or "")}</td>'
+        f'<td style="{W["contratista"]}">{_escape_html(r["contratista"] or "")}</td>'
+        f'<td style="{W["campo"]}">{_escape_html(r["nombre_campo"] or "")}</td>'
+        f'<td style="{W["cc"]}">{_escape_html(str(r["cc"] or ""))}</td>'
+        f'<td style="{W["fecha"]}">{_fmt_date_display(str(r["fecha"]))}</td>'
+        f'<td class="num" style="{W["monto"]}">{_fmt_clp(r["monto"])}</td>'
+        f'<td style="{W["estado"]}">{_escape_html(r["estado"] or "")}</td></tr>'
         for r in rows
     )
     rows_html += (
-        f'<tr class="total-row"><td><b>Suma total</b></td><td></td><td></td><td></td>'
-        f'<td></td><td></td><td class="num"><b>{_fmt_clp(total)}</b></td><td></td></tr>'
+        f'<tr class="total-row"><td style="{W["trabajador"]}"><b>Suma total</b></td>'
+        f'<td style="{W["rut"]}"></td><td style="{W["contratista"]}"></td>'
+        f'<td style="{W["campo"]}"></td><td style="{W["cc"]}"></td><td style="{W["fecha"]}"></td>'
+        f'<td class="num" style="{W["monto"]}"><b>{_fmt_clp(total)}</b></td>'
+        f'<td style="{W["estado"]}"></td></tr>'
     )
 
     header = _pdf_header(
@@ -4070,8 +4089,10 @@ def _build_bono_mensual_html(
     return f"""
     {header}
     <table><thead>
-      <tr><th>Trabajador</th><th>RUT</th><th>Contratista</th><th>Empresa/Campo</th>
-      <th>CC</th><th>Fecha</th><th class="num">Monto</th><th>Estado</th></tr>
+      <tr><th style="{W["trabajador"]}">Trabajador</th><th style="{W["rut"]}">RUT</th>
+      <th style="{W["contratista"]}">Contratista</th><th style="{W["campo"]}">Empresa/Campo</th>
+      <th style="{W["cc"]}">CC</th><th style="{W["fecha"]}">Fecha</th>
+      <th class="num" style="{W["monto"]}">Monto</th><th style="{W["estado"]}">Estado</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
