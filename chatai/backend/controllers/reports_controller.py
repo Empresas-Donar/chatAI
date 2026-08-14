@@ -69,6 +69,18 @@ AVAILABLE_REPORTS = [
         "description": "Conteo de jornadas (días distintos) por trabajador",
         "category": "Tarjas — Contratistas",
     },
+    {
+        "id": "bono-mensual",
+        "label": "Bonos mensuales",
+        "description": "Bonos mensuales pagados por trabajador",
+        "category": "Tarjas — Contratistas",
+    },
+    {
+        "id": "hora-ponderada-9h",
+        "label": "Hora ponderada 9h",
+        "description": "Costo por hora proyectado a jornada de 9 horas, por labor y CC",
+        "category": "Tarjas — Contratistas",
+    },
     # ── Tractoristas — same order as the navigation menu ─────────────────────
     {
         "id": "detalle-tractorista",
@@ -844,6 +856,164 @@ def _html_jornadas_trabajador(
     """
 
 
+_BONO_MENSUAL_LABOR = "Bono mensual"
+
+
+def _html_bono_mensual(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
+    # The standalone /tarjas/bono-mensual page filters by a whole calendar
+    # month; here we use the date range the /reportes page already applies
+    # to every other report instead of forcing a month-locked selection.
+    where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
+    where += " AND labor = %s"
+    params = params + [_BONO_MENSUAL_LABOR]
+    cur.execute(
+        f"""
+        SELECT trabajador, rut_trabajador, contratista, nombre_campo,
+               cuartel_cc AS cc, fecha::date::text AS fecha,
+               total_pagar AS monto, estado
+        FROM appsheet.tarjas_pagos {where}
+        ORDER BY contratista, trabajador, fecha::date
+    """,
+        params,
+    )
+    rows = _rows_to_dicts(cur)
+
+    fmtCLP = _fmt_clp
+    total = sum(float(r["monto"] or 0) for r in rows)
+    rows_html = "".join(
+        f"<tr><td>{r['trabajador'] or ''}</td><td>{r['rut_trabajador'] or ''}</td>"
+        f"<td>{r['contratista'] or ''}</td><td>{r['nombre_campo'] or ''}</td>"
+        f"<td>{r['cc'] or ''}</td><td>{_fmt_date_display(r['fecha'])}</td>"
+        f'<td class="total">{fmtCLP(r["monto"])}</td><td>{r["estado"] or ""}</td></tr>'
+        for r in rows
+    )
+    rows_html += (
+        '<tr class="total-row"><td><b>Suma total</b></td><td></td><td></td><td></td>'
+        f'<td></td><td></td><td class="num"><b>{fmtCLP(total)}</b></td><td></td></tr>'
+    )
+
+    header = _pdf_header(
+        "Bonos mensuales — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
+    return f"""
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>RUT</th><th>Contratista</th><th>Empresa/Campo</th>
+      <th>CC</th><th>Fecha</th><th class="num">Monto</th><th>Estado</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+def _hora_ponderada_9h(total_trabajado, horas_trabajadas) -> int | None:
+    """Mirrors tarjas_controller._hora_ponderada_9h: ROUND(costo_hora * 9, 0),
+    costo_hora = total/horas. Returns None (rendered as '-') when
+    horas_trabajadas is 0/NULL for the aggregate being projected."""
+    if not horas_trabajadas:
+        return None
+    return round(total_trabajado / horas_trabajadas * 9)
+
+
+def _html_hora_ponderada(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None,
+    contratista: str | None = None,
+) -> str:
+    where, params = _base_where_pagos(fecha_inicio, fecha_termino, empresa, contratista)
+    cur.execute(
+        f"""
+        SELECT labor, cuartel_cc AS centro_costo, fecha::date::text AS fecha,
+               COALESCE(SUM(total_trabajado), 0) AS total_trabajado,
+               COALESCE(SUM(horas_trabajadas), 0) AS horas_trabajadas
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY labor, cuartel_cc, fecha::date
+        ORDER BY labor, cuartel_cc, fecha::date
+    """,
+        params,
+    )
+    rows = _rows_to_dicts(cur)
+
+    dates = sorted({r["fecha"] for r in rows})
+    groups: dict = {}
+    grand_total = 0.0
+    grand_horas = 0.0
+    for r in rows:
+        key = (r["labor"] or "", r["centro_costo"] or "")
+        if key not in groups:
+            groups[key] = {"total_trabajado": 0.0, "total_horas": 0.0, "by_date": {}}
+        g = groups[key]
+        total = float(r["total_trabajado"] or 0)
+        horas = float(r["horas_trabajadas"] or 0)
+        g["total_trabajado"] += total
+        g["total_horas"] += horas
+        g["by_date"][r["fecha"]] = (total, horas)
+        grand_total += total
+        grand_horas += horas
+
+    n_dates = len(dates)
+    date_pct = f"{int(63 / max(n_dates, 1))}%" if n_dates else "5%"
+    date_headers = "".join(
+        f'<th class="num" style="width:{date_pct}">{datetime.date.fromisoformat(d).day}</th>'
+        for d in dates
+    )
+
+    def cell_val(cell):
+        v = _hora_ponderada_9h(*cell) if cell else None
+        return _fmt_clp(v) if v is not None else "-"
+
+    rows_html = ""
+    prev_labor = None
+    for (labor_, cc), g in groups.items():
+        is_first = labor_ != prev_labor
+        prev_labor = labor_
+        cls = "worker-first" if is_first else ""
+        rows_html += (
+            f'<tr class="{cls}"><td class="col-worker">{labor_ if is_first else ""}</td>'
+            f'<td class="col-tipo">{cc}</td>'
+        )
+        for d in dates:
+            rows_html += f'<td class="num" style="width:{date_pct}">{cell_val(g["by_date"].get(d))}</td>'
+        row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
+        rows_html += (
+            f'<td class="col-total">'
+            f'{_fmt_clp(row_total) if row_total is not None else "-"}</td></tr>'
+        )
+
+    footer_val = _hora_ponderada_9h(grand_total, grand_horas)
+    rows_html += (
+        '<tr class="total-row"><td><b>Hora ponderada 9h global</b></td><td></td>'
+        + "<td></td>" * n_dates
+        + '<td class="col-total"><b>'
+        + (_fmt_clp(footer_val) if footer_val is not None else "-")
+        + "</b></td></tr>"
+    )
+
+    header = _pdf_header(
+        "Hora ponderada 9h — Tarjas Contratistas",
+        fecha_inicio,
+        fecha_termino,
+        empresa,
+        contratista,
+    )
+    return f"""
+    {header}
+    <table class="pivot-table"><thead>
+      <tr><th class="col-worker">Labor</th><th class="col-tipo">CC</th>{date_headers}<th class="col-total">Hora ponderada 9h</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
 _REPORT_GENERATORS = {
     "detalle": _html_detalle,
     "contratista": _html_contratista,
@@ -851,6 +1021,8 @@ _REPORT_GENERATORS = {
     "resumen-persona": _html_resumen_persona,
     "resumen-horas": _html_resumen_horas,
     "jornadas-trabajador": _html_jornadas_trabajador,
+    "bono-mensual": _html_bono_mensual,
+    "hora-ponderada-9h": _html_hora_ponderada,
     "detalle-tractorista": _html_detalle_tractorista,
     "general-tractorista": _html_general_tractorista,
     "resumen-tractorista": _html_resumen_tractorista,
