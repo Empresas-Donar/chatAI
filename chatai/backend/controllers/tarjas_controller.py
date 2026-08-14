@@ -99,6 +99,19 @@ def _fmt_date_display(iso: str) -> str:
         return iso
 
 
+def _fmt_date_slash(iso: str) -> str:
+    """DD/MM/YYYY — the project's date-display convention (CLAUDE.md: "sin
+    excepciones"). Used in PDF headers (_pdf_header's Desde/Hasta chips and
+    resumen-persona's custom header); kept separate from _fmt_date_display()
+    above, which uses a different "1 jul 2026" style already relied on for
+    table body date cells across several PDFs."""
+    try:
+        d = datetime.date.fromisoformat(iso)
+        return f"{d.day:02d}/{d.month:02d}/{d.year}"
+    except Exception:
+        return iso
+
+
 def _empresa_to_campo(empresa: str | None) -> str | None:
     return empresa or None
 
@@ -418,8 +431,8 @@ def _pdf_header(
       </tr>
     </table>
     <div class="ph-chips">
-      <span class="chip"><b>Desde:</b> {fecha_inicio}</span>
-      <span class="chip"><b>Hasta:</b> {fecha_termino}</span>
+      <span class="chip"><b>Desde:</b> {_fmt_date_slash(fecha_inicio)}</span>
+      <span class="chip"><b>Hasta:</b> {_fmt_date_slash(fecha_termino)}</span>
       {chips}
     </div>
     """
@@ -2367,23 +2380,18 @@ async def download_tarjas_detalle_tractorista_excel(
 
 
 @router.get("/api/tarjas/detalle-tractorista/download-pdf")
-async def download_tarjas_detalle_tractorista_pdf(
-    fecha_inicio: str = Query(...),
-    fecha_termino: str = Query(...),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-    centro_costo: str = Query(None),
-    labor: str = Query(None),
-    campo: str = Query(None),
-):
-    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(
-            status_code=503, detail="Error de conexión a la base de datos"
-        )
+def _build_detalle_tractorista_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    empresa: str | None = None,
+    centro_costo: str | None = None,
+    labor: str | None = None,
+    campo: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
@@ -2402,26 +2410,22 @@ async def download_tarjas_detalle_tractorista_pdf(
         filters.append("nombre_campo = %s")
         params.append(campo)
     where = "WHERE " + " AND ".join(filters)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
-                       SUM(jornadas) AS jornadas,
-                       CASE WHEN SUM(jornadas) > 0
-                            THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
-                            ELSE NULL END AS total_unitario,
-                       SUM(total_labor) AS costo_total,
-                       contratista, nombre_campo
-                FROM appsheet.tarjas_reporte {where}
-                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
-                ORDER BY contratista, "CC", "Nombre Labor"
-            """,
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"""
+        SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
+               SUM(jornadas) AS jornadas,
+               CASE WHEN SUM(jornadas) > 0
+                    THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+                    ELSE NULL END AS total_unitario,
+               SUM(total_labor) AS costo_total,
+               contratista, nombre_campo
+        FROM appsheet.tarjas_reporte {where}
+        GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
+        ORDER BY contratista, "CC", "Nombre Labor"
+    """,
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".") if v else "—"
@@ -2445,14 +2449,50 @@ async def download_tarjas_detalle_tractorista_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     <table><thead>
       <tr><th>Tipo pago</th><th>CC</th><th>Labor</th>
       <th class="num">Jornadas</th><th class="num">Unitario</th>
       <th class="num">Total</th><th>Contratista</th><th>Campo</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_detalle_tractorista_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            body = _build_detalle_tractorista_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                centro_costo,
+                labor,
+                campo,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(
         html, f"detalle_tractorista_{fecha_inicio}_{fecha_termino}.pdf"
@@ -2532,22 +2572,17 @@ async def download_tarjas_general_tractorista_excel(
 
 
 @router.get("/api/tarjas/general-tractorista/download-pdf")
-async def download_tarjas_general_tractorista_pdf(
-    fecha_inicio: str = Query(...),
-    fecha_termino: str = Query(...),
-    centro_costo: str = Query(None),
-    labor: str = Query(None),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-):
-    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(
-            status_code=503, detail="Error de conexión a la base de datos"
-        )
+def _build_general_tractorista_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    centro_costo: str | None = None,
+    labor: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
     params: list = [fecha_inicio, fecha_termino]
     if centro_costo:
@@ -2563,22 +2598,18 @@ async def download_tarjas_general_tractorista_pdf(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT trabajador, contratista, labor, tipo_pago,
-                       ROUND(AVG(total_tractor)::numeric,2) AS promedio,
-                       COALESCE(SUM(total_tractor),0) AS total
-                FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago
-                ORDER BY total DESC
-            """,
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"""
+        SELECT trabajador, contratista, labor, tipo_pago,
+               ROUND(AVG(total_tractor)::numeric,2) AS promedio,
+               COALESCE(SUM(total_tractor),0) AS total
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY trabajador, contratista, labor, tipo_pago
+        ORDER BY total DESC
+    """,
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".") if v else "—"
@@ -2601,13 +2632,47 @@ async def download_tarjas_general_tractorista_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     <table><thead>
       <tr><th>Trabajador</th><th>Contratista</th><th>Labor</th><th>Tipo de pago</th>
       <th class="num">Promedio</th><th class="num">Total</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_general_tractorista_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            body = _build_general_tractorista_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                centro_costo,
+                labor,
+                contratista,
+                empresa,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(
         html, f"general_tractorista_{fecha_inicio}_{fecha_termino}.pdf"
@@ -2809,20 +2874,17 @@ async def download_tarjas_resumen_persona_tractorista_excel(
 
 
 @router.get("/api/tarjas/resumen-persona/download-pdf")
-async def download_tarjas_resumen_persona_pdf(
-    fecha_inicio: str = Query(...),
-    fecha_termino: str = Query(...),
-    trabajador: str = Query(None),
-    tipo_pago: str = Query(None),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-):
-    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión")
+def _build_resumen_persona_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    trabajador: str | None = None,
+    tipo_pago: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
@@ -2838,18 +2900,14 @@ async def download_tarjas_resumen_persona_pdf(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(total_trabajado),0) AS total "
-                f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+        f"COALESCE(SUM(total_trabajado),0) AS total "
+        f"FROM appsheet.tarjas_pagos {where} "
+        "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
@@ -2900,13 +2958,13 @@ async def download_tarjas_resumen_persona_pdf(
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
     title = _pdf_title("Resumen Por Persona", contratista)
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+    return f"""
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e293b;margin-bottom:12px">
       <tr>
         <td style="padding:10px 16px">{logo_html}</td>
         <td style="padding:10px 16px;color:#ffffff">
           <b style="font-size:14pt">{title}</b><br/>
-          <span style="font-size:9pt">Desde: {fecha_inicio} &nbsp; Hasta: {fecha_termino}</span>
+          <span style="font-size:9pt">Desde: {_fmt_date_slash(fecha_inicio)} &nbsp; Hasta: {_fmt_date_slash(fecha_termino)}</span>
         </td>
       </tr>
     </table>
@@ -2914,17 +2972,14 @@ async def download_tarjas_resumen_persona_pdf(
       <thead><tr><th>Trabajador</th><th>Tipo de pago</th><th>Fecha</th><th>Monto</th></tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
-    </body></html>"""
-    return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
+    """
 
 
-@router.get("/api/tarjas/general/download-pdf")
-async def download_tarjas_general_pdf(
+async def download_tarjas_resumen_persona_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
-    centro_costo: str = Query(None),
+    trabajador: str = Query(None),
     tipo_pago: str = Query(None),
-    labor: str = Query(None),
     contratista: str = Query(None),
     empresa: str = Query(None),
 ):
@@ -2934,6 +2989,32 @@ async def download_tarjas_general_pdf(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_resumen_persona_html(
+                cur, fecha_inicio, fecha_termino, trabajador, tipo_pago, contratista, empresa
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+    {body}
+    </body></html>"""
+    return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/general/download-pdf")
+def _build_general_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    centro_costo: str | None = None,
+    tipo_pago: str | None = None,
+    labor: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     where, params = _build_pagos_where(
         fecha_inicio,
         fecha_termino,
@@ -2944,37 +3025,33 @@ async def download_tarjas_general_pdf(
         nombre_campo=_empresa_to_campo(empresa),
     )
     _horas_expr = "NULLIF(SUM(horas_trabajadas), 0)"
-    _horas_sum  = "COALESCE(SUM(horas_trabajadas), 0)"
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT labor,
-                       ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
-                       ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
-                       ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
-                       COALESCE(SUM(total_trabajado), 0)                 AS total
-                FROM appsheet.tarjas_pagos {where}
-                GROUP BY labor ORDER BY total DESC
-            """,
-                params,
-            )
-            labor_rows = _rows_to_dicts(cur)
-            cur.execute(
-                f"""
-                SELECT trabajador, contratista,
-                       ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
-                       ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
-                       ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
-                       COALESCE(SUM(total_trabajado), 0)                 AS total
-                FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista ORDER BY total DESC
-            """,
-                params,
-            )
-            ranking_rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
+    cur.execute(
+        f"""
+        SELECT labor,
+               ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
+               ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
+               ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
+               COALESCE(SUM(total_trabajado), 0)                 AS total
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY labor ORDER BY total DESC
+    """,
+        params,
+    )
+    labor_rows = _rows_to_dicts(cur)
+    cur.execute(
+        f"""
+        SELECT trabajador, contratista,
+               ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
+               ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
+               ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
+               COALESCE(SUM(total_trabajado), 0)                 AS total
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY trabajador, contratista ORDER BY total DESC
+    """,
+        params,
+    )
+    ranking_rows = _rows_to_dicts(cur)
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v is not None else "—"
     fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
@@ -3007,8 +3084,7 @@ async def download_tarjas_general_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     <p class="section-title">Ganancia promedio por labor</p>
     <table><thead>
@@ -3020,19 +3096,16 @@ async def download_tarjas_general_pdf(
       <tr><th>Trabajador</th><th>Contratista</th><th class="num">Promedio diario</th>
       <th class="num">Ganancia por hora</th><th class="num">Horas</th><th class="num">Total</th></tr>
     </thead><tbody>{ranking_html}</tbody></table>
-    </body></html>"""
-    return _render_pdf(html, f"general_{fecha_inicio}_{fecha_termino}.pdf")
+    """
 
 
-@router.get("/api/tarjas/detalle/download-pdf")
-async def download_tarjas_detalle_pdf(
+async def download_tarjas_general_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
-    contratista: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
-    campo: str = Query(None),
+    contratista: str = Query(None),
     empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -3041,6 +3114,41 @@ async def download_tarjas_detalle_pdf(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_general_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                centro_costo,
+                tipo_pago,
+                labor,
+                contratista,
+                empresa,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
+    </body></html>"""
+    return _render_pdf(html, f"general_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/detalle/download-pdf")
+def _build_detalle_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    centro_costo: str | None = None,
+    tipo_pago: str | None = None,
+    labor: str | None = None,
+    campo: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     where, params = _build_detalle_filters(
         fecha_inicio,
         fecha_termino,
@@ -3051,12 +3159,8 @@ async def download_tarjas_detalle_pdf(
         labor,
         campo,
     )
-    try:
-        with conn.cursor() as cur:
-            resumen = _query_detalle_resumen(cur, where, params)
-            rows = _query_detalle_rows(cur, where, params)
-    finally:
-        conn.close()
+    resumen = _query_detalle_resumen(cur, where, params)
+    rows = _query_detalle_rows(cur, where, params)
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
@@ -3108,8 +3212,7 @@ async def download_tarjas_detalle_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     {summary_section}
     <p class="section-title">Detalle</p>
@@ -3119,18 +3222,17 @@ async def download_tarjas_detalle_pdf(
       <th class="num">Horas</th><th class="num">Unitario</th>
       <th class="num">Total</th><th class="num">% pago</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
-    </body></html>"""
-    return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
+    """
 
 
-@router.get("/api/tarjas/contratista/download-pdf")
-async def download_tarjas_contratista_pdf(
+async def download_tarjas_detalle_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
     contratista: str = Query(None),
     centro_costo: str = Query(None),
     tipo_pago: str = Query(None),
     labor: str = Query(None),
+    campo: str = Query(None),
     empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -3139,6 +3241,41 @@ async def download_tarjas_contratista_pdf(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_detalle_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                centro_costo,
+                tipo_pago,
+                labor,
+                campo,
+                empresa,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
+    </body></html>"""
+    return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/contratista/download-pdf")
+def _build_contratista_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    centro_costo: str | None = None,
+    tipo_pago: str | None = None,
+    labor: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
@@ -3158,23 +3295,19 @@ async def download_tarjas_contratista_pdf(
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT trabajador, contratista, labor, tipo_pago,
-                       fecha::date::text AS fecha,
-                       COALESCE(SUM(total_trabajado), 0) AS total,
-                       {_horas_sum} AS horas
-                FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
-                ORDER BY contratista, trabajador, labor, fecha::date
-                """,
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"""
+        SELECT trabajador, contratista, labor, tipo_pago,
+               fecha::date::text AS fecha,
+               COALESCE(SUM(total_trabajado), 0) AS total,
+               {_horas_sum} AS horas
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
+        ORDER BY contratista, trabajador, labor, fecha::date
+        """,
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".")
@@ -3244,8 +3377,7 @@ async def download_tarjas_contratista_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     <table class="pivot-wide"><thead>
       <tr>
@@ -3257,17 +3389,16 @@ async def download_tarjas_contratista_pdf(
         <th class="num" style="{w['total']}">Total</th>
       </tr>
     </thead><tbody>{rows_html}</tbody></table>
-    </body></html>"""
-    return _render_pdf(html, f"contratista_{fecha_inicio}_{fecha_termino}.pdf")
+    """
 
 
-@router.get("/api/tarjas/resumen-horas/download-pdf")
-async def download_tarjas_resumen_horas_pdf(
+async def download_tarjas_contratista_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
-    trabajador: str = Query(None),
-    tipo_pago: str = Query(None),
     contratista: str = Query(None),
+    centro_costo: str = Query(None),
+    tipo_pago: str = Query(None),
+    labor: str = Query(None),
     empresa: str = Query(None),
 ):
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
@@ -3276,6 +3407,39 @@ async def download_tarjas_resumen_horas_pdf(
         conn = get_connection()
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_contratista_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                centro_costo,
+                tipo_pago,
+                labor,
+                empresa,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
+    </body></html>"""
+    return _render_pdf(html, f"contratista_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+@router.get("/api/tarjas/resumen-horas/download-pdf")
+def _build_resumen_horas_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    trabajador: str | None = None,
+    tipo_pago: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
@@ -3291,19 +3455,15 @@ async def download_tarjas_resumen_horas_pdf(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas, "
-                f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto "
-                f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+        f"COALESCE(SUM(horas_extras), 0)::numeric AS horas, "
+        f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto "
+        f"FROM appsheet.tarjas_pagos {where} "
+        "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
@@ -3376,14 +3536,40 @@ async def download_tarjas_resumen_horas_pdf(
         f'<td>Total a pagar<b>{_fmt_clp(resumen_monto)}</b></td>'
         "</tr></table>"
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}</style></head><body>
+    return f"""
     {header}
     <p class="pdf-note">*Sólo se muestran aquellos trabajadores que cuentan con horas extras en el periodo especificado.</p>
     {summary_html}
     <table class="pivot-wide"><thead>
       <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th><th class="num" style="{w['monto']}">Monto</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_resumen_horas_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    trabajador: str = Query(None),
+    tipo_pago: str = Query(None),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_resumen_horas_html(
+                cur, fecha_inicio, fecha_termino, trabajador, tipo_pago, contratista, empresa
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(html, f"horas_{fecha_inicio}_{fecha_termino}.pdf")
 
@@ -3557,18 +3743,15 @@ async def download_tarjas_jornadas_trabajador_excel(
 
 
 @router.get("/api/tarjas/jornadas-trabajador/download-pdf")
-async def download_tarjas_jornadas_trabajador_pdf(
-    fecha_inicio: str = Query(...),
-    fecha_termino: str = Query(...),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-):
-    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión")
+def _build_jornadas_trabajador_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     filters = ["fecha::date BETWEEN %s AND %s"]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
@@ -3578,17 +3761,13 @@ async def download_tarjas_jornadas_trabajador_pdf(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
-                f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
-                params,
-            )
-            rows = _rows_to_dicts(cur)
-    finally:
-        conn.close()
+    cur.execute(
+        f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+        f"FROM appsheet.tarjas_pagos {where} "
+        "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+        params,
+    )
+    rows = _rows_to_dicts(cur)
 
     total = sum(int(r["jornadas"] or 0) for r in rows)
     rows_html = "".join(
@@ -3608,14 +3787,38 @@ async def download_tarjas_jornadas_trabajador_pdf(
         fecha_termino,
         {"Empresa": empresa, "Contratista": contratista},
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}
-    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
-    </style></head><body>
+    return f"""
     {header}
     <table><thead>
       <tr><th>Trabajador</th><th>Contratista</th><th class="num">Jornadas</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_jornadas_trabajador_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_jornadas_trabajador_html(
+                cur, fecha_inicio, fecha_termino, contratista, empresa
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(html, f"jornadas_trabajador_{fecha_inicio}_{fecha_termino}.pdf")
 
@@ -3812,24 +4015,34 @@ async def download_tarjas_bono_mensual_excel(
 
 
 @router.get("/api/tarjas/bono-mensual/download-pdf")
-async def download_tarjas_bono_mensual_pdf(
-    mes: str = Query(...),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-    campo: str = Query(None),
-):
-    if not _MES_RE.match(mes):
-        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión")
-    where, params = _build_bono_mensual_filters(mes, contratista, empresa, campo)
-    try:
-        with conn.cursor() as cur:
-            rows = _query_bono_mensual_rows(cur, where, params)
-    finally:
-        conn.close()
+def _build_bono_mensual_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None = None,
+    contratista: str | None = None,
+    campo: str | None = None,
+    mes: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical. The
+    standalone page filters by a whole calendar month (mes=YYYY-MM,
+    resolved to fecha_inicio/fecha_termino by the caller); the bulk PDF
+    passes an arbitrary date range instead. `mes` is only used for the
+    header's "Mes" chip, shown when the caller has one."""
+    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s"]
+    params: list = [_BONO_MENSUAL_LABOR, fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+    where = "WHERE " + " AND ".join(filters)
+    rows = _query_bono_mensual_rows(cur, where, params)
 
     total = sum(float(r["monto"] or 0) for r in rows)
     rows_html = "".join(
@@ -3848,22 +4061,46 @@ async def download_tarjas_bono_mensual_pdf(
         f'<td></td><td></td><td class="num"><b>{_fmt_clp(total)}</b></td><td></td></tr>'
     )
 
-    fecha_inicio, fecha_termino = _mes_range(mes)
     header = _pdf_header(
         _pdf_title("Bonos Mensuales", contratista),
         fecha_inicio,
         fecha_termino,
         {"Mes": mes, "Empresa": empresa, "Campo": campo, "Contratista": contratista},
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}
-    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
-    </style></head><body>
+    return f"""
     {header}
     <table><thead>
       <tr><th>Trabajador</th><th>RUT</th><th>Contratista</th><th>Empresa/Campo</th>
       <th>CC</th><th>Fecha</th><th class="num">Monto</th><th>Estado</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_bono_mensual_pdf(
+    mes: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _MES_RE.match(mes):
+        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    fecha_inicio, fecha_termino = _mes_range(mes)
+    try:
+        with conn.cursor() as cur:
+            body = _build_bono_mensual_html(
+                cur, fecha_inicio, fecha_termino, empresa, contratista, campo, mes
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(html, f"bonos_mensuales_{mes}.pdf")
 
@@ -4129,28 +4366,21 @@ async def download_tarjas_hora_ponderada_excel(
 
 
 @router.get("/api/tarjas/hora-ponderada-9h/download-pdf")
-async def download_tarjas_hora_ponderada_pdf(
-    fecha_inicio: str = Query(...),
-    fecha_termino: str = Query(...),
-    contratista: str = Query(None),
-    empresa: str = Query(None),
-    centro_costo: str = Query(None),
-    labor: str = Query(None),
-):
-    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    try:
-        conn = get_connection()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Error de conexión")
+def _build_hora_ponderada_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    empresa: str | None = None,
+    centro_costo: str | None = None,
+    labor: str | None = None,
+) -> str:
+    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
+    (issue #116) — a single source of truth so both stay identical."""
     where, params = _build_hora_ponderada_filters(
         fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
     )
-    try:
-        with conn.cursor() as cur:
-            rows = _query_hora_ponderada_rows(cur, where, params)
-    finally:
-        conn.close()
+    rows = _query_hora_ponderada_rows(cur, where, params)
 
     # Same per-date pivot as download_tarjas_hora_ponderada_excel — one
     # column per date, matching what the on-screen pivot table shows.
@@ -4242,10 +4472,7 @@ async def download_tarjas_hora_ponderada_pdf(
             "Labor": labor,
         },
     )
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_PDF_CSS}
-    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
-    </style></head><body>
+    return f"""
     {header}
     <table class="pivot-wide"><thead>
       <tr>
@@ -4255,6 +4482,35 @@ async def download_tarjas_hora_ponderada_pdf(
         <th class="num" style="{w['total']}">Hora ponderada 9h</th>
       </tr>
     </thead><tbody>{rows_html}</tbody></table>
+    """
+
+
+async def download_tarjas_hora_ponderada_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    try:
+        with conn.cursor() as cur:
+            body = _build_hora_ponderada_html(
+                cur, fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {body}
     </body></html>"""
     return _render_pdf(
         html, f"hora_ponderada_9h_{fecha_inicio}_{fecha_termino}.pdf"

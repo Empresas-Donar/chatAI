@@ -2,19 +2,17 @@
 Regression tests for issue #112: the "Hora ponderada 9h" section of the
 bulk /reportes PDF (added in issue #109) was written before issue #108
 fixed the standalone /tarjas/hora-ponderada-9h/download-pdf, so the two
-diverged:
+diverged (missing highlighting, missing date-range cap, footer cells
+missing the width style that caused #108's broken-layout bug).
 
-- The standalone PDF highlights daily cells above
-  HORA_PONDERADA_HIGHLIGHT_THRESHOLD ($30.000); the bulk version didn't.
-- The standalone PDF caps the date range at MAX_PIVOT_DATES_HORA_PONDERADA
-  (23 days) with a friendly error suggesting Excel, and gives every footer
-  cell an explicit width style (the #108 bug was a footer row missing that
-  style, which breaks xhtml2pdf's fixed-table layout for the WHOLE table).
-  The bulk version had neither.
-
-This file locks the bulk generator (_html_hora_ponderada in
-reports_controller.py) to the same behavior, values, and safety guards as
-tarjas_controller.download_tarjas_hora_ponderada_pdf.
+Superseded by issue #116: reports_controller.py no longer keeps a
+duplicated _html_hora_ponderada / _HORA_PONDERADA_HIGHLIGHT_THRESHOLD /
+_MAX_PIVOT_DATES_HORA_PONDERADA of its own — the bulk section is produced
+by tarjas_controller._build_hora_ponderada_html directly (via
+rc._REPORT_GENERATORS["hora-ponderada-9h"]), the exact same function the
+standalone PDF endpoint calls. This file's checks now hold true by
+construction, but are kept as a regression net against someone
+reintroducing a local, divergent copy in reports_controller.py.
 """
 
 import os
@@ -51,35 +49,30 @@ def conn():
 
 @pytest.fixture(autouse=True)
 def stub_pdf_header():
-    orig_rc = rc._pdf_header
     orig_tc = tc._pdf_header
-    rc._pdf_header = (
-        lambda title, fi, ft, empresa, contratista=None: f"<h1>{title}</h1>"
-    )
     tc._pdf_header = lambda title, fi, ft, filtros, *a, **kw: f"<h1>{title}</h1>"
     yield
-    rc._pdf_header = orig_rc
     tc._pdf_header = orig_tc
+
+
+def _hora_ponderada_bulk(cur, fecha_inicio, fecha_termino, empresa, contratista=None):
+    return rc._REPORT_GENERATORS["hora-ponderada-9h"](
+        cur, fecha_inicio, fecha_termino, empresa, contratista
+    )
 
 
 class TestDateRangeCapMatchesStandalone:
     def test_112_bulk_caps_at_23_days_same_as_standalone_regression(self, conn):
-        assert rc._MAX_PIVOT_DATES_HORA_PONDERADA == tc.MAX_PIVOT_DATES_HORA_PONDERADA
-
         with conn.cursor() as cur, pytest.raises(HTTPException) as exc:
-            rc._html_hora_ponderada(cur, "2026-07-01", "2026-08-10", None, None)
+            _hora_ponderada_bulk(cur, "2026-07-01", "2026-08-10", None, None)
         assert exc.value.status_code == 400
         assert "23 días" in exc.value.detail
 
 
 class TestHighlightMatchesStandalone:
     def test_112_bulk_highlights_values_above_threshold_regression(self, conn):
-        assert (
-            rc._HORA_PONDERADA_HIGHLIGHT_THRESHOLD
-            == tc.HORA_PONDERADA_HIGHLIGHT_THRESHOLD
-        )
         with conn.cursor() as cur:
-            html = rc._html_hora_ponderada(
+            html = _hora_ponderada_bulk(
                 cur, FECHA_INICIO, FECHA_TERMINO, None, CONTRATISTA_HIGH
             )
         assert "background:#ffedd5;color:#c2410c;font-weight:bold;" in html
@@ -90,7 +83,7 @@ class TestHighlightMatchesStandalone:
         layout for the whole table. Every date cell in the footer must
         carry the same style="width:...%" as the header/body date cells."""
         with conn.cursor() as cur:
-            html = rc._html_hora_ponderada(
+            html = _hora_ponderada_bulk(
                 cur, FECHA_INICIO, FECHA_TERMINO, None, CONTRATISTA_HIGH
             )
         footer_start = html.index("Hora ponderada 9h global")
@@ -109,7 +102,7 @@ class TestValuesMatchStandalonePdf:
         hora_ponderada_9h numbers for the same filters — the whole point
         of a 'unified' report is that it doesn't silently diverge."""
         with conn.cursor() as cur:
-            bulk_html = rc._html_hora_ponderada(
+            bulk_html = _hora_ponderada_bulk(
                 cur, FECHA_INICIO, FECHA_TERMINO, None, CONTRATISTA_HIGH
             )
 
