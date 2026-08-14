@@ -311,14 +311,18 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .summary-wrap td { border: none; vertical-align: top; padding: 0; }
 .summary-cell { width: 65%; padding-right: 12px; }
 .summary-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
-.summary-table th { background: #eeeeee; color: #111111; padding: 5px 6px; text-align: left; border: 1px solid #aaaaaa; font-weight: bold; }
+.summary-table th { background: #ea8c1e; color: #ffffff; padding: 6px 8px; text-align: left; border: 1px solid #ea8c1e; font-weight: bold; }
 .summary-table th.num { text-align: right; }
-.summary-table td { padding: 4px 6px; border: 1px solid #cccccc; }
+.summary-table td { padding: 5px 6px; border: 1px solid #cccccc; }
+.summary-table tbody tr:nth-child(even) td { background: #fdf3d0; }
 .summary-table tfoot td { border-top: 1.5px solid #888888; font-weight: bold; }
-.badge-trato { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #dbeafe; color: #1d4ed8; font-weight: bold; }
-.badge-aldia { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #ffedd5; color: #c2410c; font-weight: bold; }
+.badge-trato { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-weight: bold; }
+.badge-aldia { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #ffedd5; color: #c2410c; font-weight: bold; }
 .chart-cell { width: 35%; text-align: center; }
 .chart-cell img { width: 190px; height: auto; }
+table.detalle-table th { background: #1a1a1a; color: #f5d87a; padding: 6px 8px; text-align: left; border: 1px solid #1a1a1a; font-weight: bold; }
+table.detalle-table th.num { text-align: right; }
+table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
 """
 
 
@@ -3043,7 +3047,9 @@ async def download_tarjas_detalle_pdf(
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
     fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
     rows_html = "".join(
-        f"<tr><td>{r['tipo_pago']}</td><td>{r['labor']}</td><td>{r['centro_costo']}</td>"
+        f'<tr><td><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
+        f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
+        f"<td>{r['labor']}</td><td>{r['centro_costo']}</td>"
         f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
         f'<td class="num">{r["jornadas"]}</td>'
         f'<td class="num">{fmtHrs(r["horas_trabajadas"])}</td>'
@@ -3092,7 +3098,7 @@ async def download_tarjas_detalle_pdf(
     {header}
     {summary_section}
     <p class="section-title">Detalle</p>
-    <table><thead>
+    <table class="detalle-table"><thead>
       <tr><th>Tipo pago</th><th>Labor</th><th>CC</th>
       <th class="num">Costo/hora</th><th class="num">Jornadas</th>
       <th class="num">Horas</th><th class="num">Unitario</th>
