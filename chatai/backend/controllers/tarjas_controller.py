@@ -196,6 +196,7 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 .section-title { font-size: 9pt; font-weight: bold; margin: 12px 0 5px 0; color: #111111; }
 table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
 table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
+.pdf-note { font-size: 7pt; font-style: italic; color: #666666; margin: 0 0 8px 0; }
 """
 
 
@@ -1446,6 +1447,16 @@ async def get_tarjas_resumen_horas(
     finally:
         conn.close()
 
+    # Only show workers with a non-zero horas_extras total across the whole
+    # period — a row-by-row filter would also drop the zero days of a
+    # worker who did have overtime on other dates, which must stay visible.
+    totals_by_worker: dict = {}
+    for r in rows:
+        totals_by_worker[r["trabajador"]] = totals_by_worker.get(
+            r["trabajador"], 0
+        ) + (r["horas_trabajadas"] or 0)
+    rows = [r for r in rows if totals_by_worker.get(r["trabajador"], 0) > 0]
+
     return {
         "rows": rows,
         "count": len(rows),
@@ -2488,6 +2499,16 @@ async def download_tarjas_resumen_horas_excel(
             r["fecha"], 0
         ) + (r["horas"] or 0)
         workers[key]["total"] += r["horas"] or 0
+
+    # Only keep workers whose horas_extras total for the whole period (across
+    # every contratista/tipo_pago combination) is greater than zero.
+    totals_by_worker: dict = {}
+    for (trab, _cont, _tipo), entry in workers.items():
+        totals_by_worker[trab] = totals_by_worker.get(trab, 0) + entry["total"]
+    workers = {
+        k: v for k, v in workers.items() if totals_by_worker.get(k[0], 0) > 0
+    }
+
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -3094,6 +3115,16 @@ async def download_tarjas_resumen_horas_pdf(
             r["horas"] or 0
         )
         workers[k]["total"] += r["horas"] or 0
+
+    # Only keep workers whose horas_extras total for the whole period (across
+    # every tipo_pago) is greater than zero.
+    totals_by_worker: dict = {}
+    for (trab, _tipo), entry in workers.items():
+        totals_by_worker[trab] = totals_by_worker.get(trab, 0) + entry["total"]
+    workers = {
+        k: v for k, v in workers.items() if totals_by_worker.get(k[0], 0) > 0
+    }
+
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
     _check_pivot_date_range(dates, "Horas extra por persona")
@@ -3133,6 +3164,7 @@ async def download_tarjas_resumen_horas_pdf(
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
+    <p class="pdf-note">*Sólo se muestran aquellos trabajadores que cuentan con horas extras en el periodo especificado.</p>
     <table class="pivot-wide"><thead>
       <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
