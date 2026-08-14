@@ -116,14 +116,14 @@ class TestGeneratorsProduceHtml:
         try:
             with conn.cursor() as cur:
                 html = rc._html_hora_ponderada(
-                    cur, "2026-07-01", "2026-08-10", None, "HERBI ML SPA"
+                    cur, "2026-07-01", "2026-07-15", None, "HERBI ML SPA"
                 )
         finally:
             conn.rollback()
             conn.close()
 
         assert "Hora ponderada 9h" in html
-        assert "col-worker" in html
+        assert "pivot-wide" in html
         assert "Hora ponderada 9h global" in html
 
 
@@ -162,7 +162,7 @@ class TestBulkPdfEndpointIntegration:
             rc.bulk_pdf_download(
                 reports="hora-ponderada-9h",
                 fecha_inicio="2026-07-01",
-                fecha_termino="2026-08-10",
+                fecha_termino="2026-07-15",
                 empresa=None,
                 contratista="HERBI ML SPA",
             )
@@ -177,7 +177,7 @@ class TestBulkPdfEndpointIntegration:
             rc.bulk_pdf_download(
                 reports="resumen-horas,bono-mensual,hora-ponderada-9h",
                 fecha_inicio="2026-07-01",
-                fecha_termino="2026-08-10",
+                fecha_termino="2026-07-15",
                 empresa=None,
                 contratista="HERBI ML SPA",
             )

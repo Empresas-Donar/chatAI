@@ -170,6 +170,32 @@ def _fmt_date_display(iso: str) -> str:
         return iso
 
 
+def _pivot_col_widths(fixed_pct: dict[str, float], n_dates: int) -> dict[str, str]:
+    """Mirrors tarjas_controller._pivot_col_widths: inline width styles for a
+    wide date-pivot PDF table so xhtml2pdf's table-layout:fixed always fits
+    the page (without explicit widths, reportlab raises 'negative availWidth'
+    once there are enough date columns). Fixed columns keep their given %;
+    the remainder is split evenly across dates."""
+    remaining = max(0.0, 100.0 - sum(fixed_pct.values()))
+    date_pct = (remaining / n_dates) if n_dates else 0.0
+    widths = {k: f"width:{v}%" for k, v in fixed_pct.items()}
+    widths["date"] = f"width:{date_pct}%"
+    return widths
+
+
+def _check_pivot_date_range(dates: list[str], report_label: str, max_dates: int) -> None:
+    """Mirrors tarjas_controller._check_pivot_date_range."""
+    if len(dates) > max_dates:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El rango de fechas es demasiado amplio para el PDF de "
+                f"'{report_label}' ({len(dates)} días). Reduce el rango a "
+                f"{max_dates} días o menos, o usa la descarga en Excel."
+            ),
+        )
+
+
 _PDF_CSS = """
 @page { size: A4 landscape; margin: 12mm 10mm; }
 body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111111; margin: 0; }
@@ -201,6 +227,8 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 .jornadas-table .col-worker { width: 45%; }
 .jornadas-table .col-contratista { width: 40%; }
 .jornadas-table .col-jornadas { width: 15%; text-align: right; }
+table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
+table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 """
 
 
@@ -923,6 +951,13 @@ def _hora_ponderada_9h(total_trabajado, horas_trabajadas) -> int | None:
     return round(total_trabajado / horas_trabajadas * 9)
 
 
+# Kept identical to tarjas_controller.HORA_PONDERADA_HIGHLIGHT_THRESHOLD /
+# MAX_PIVOT_DATES_HORA_PONDERADA so the bulk PDF section matches the
+# standalone /tarjas/hora-ponderada-9h/download-pdf exactly (issue #112).
+_HORA_PONDERADA_HIGHLIGHT_THRESHOLD = 30000
+_MAX_PIVOT_DATES_HORA_PONDERADA = 23
+
+
 def _html_hora_ponderada(
     cur,
     fecha_inicio: str,
@@ -945,6 +980,9 @@ def _html_hora_ponderada(
     rows = _rows_to_dicts(cur)
 
     dates = sorted({r["fecha"] for r in rows})
+    _check_pivot_date_range(
+        dates, "Hora ponderada 9h", _MAX_PIVOT_DATES_HORA_PONDERADA
+    )
     groups: dict = {}
     grand_total = 0.0
     grand_horas = 0.0
@@ -961,16 +999,24 @@ def _html_hora_ponderada(
         grand_total += total
         grand_horas += horas
 
-    n_dates = len(dates)
-    date_pct = f"{int(63 / max(n_dates, 1))}%" if n_dates else "5%"
+    w = _pivot_col_widths({"labor": 16, "cc": 10, "total": 12}, len(dates))
     date_headers = "".join(
-        f'<th class="num" style="width:{date_pct}">{datetime.date.fromisoformat(d).day}</th>'
+        f'<th class="num" style="{w["date"]}">'
+        f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
         for d in dates
     )
 
-    def cell_val(cell):
+    # Daily cells above the threshold get a highlighted style, matching the
+    # on-screen pivot, the Excel export, and the standalone PDF.
+    _HIGHLIGHT_STYLE = "background:#ffedd5;color:#c2410c;font-weight:bold;"
+
+    def cell_html(cell, style):
         v = _hora_ponderada_9h(*cell) if cell else None
-        return _fmt_clp(v) if v is not None else "-"
+        text = _fmt_clp(v) if v is not None else "-"
+        cell_style = style + ";"
+        if v is not None and v > _HORA_PONDERADA_HIGHLIGHT_THRESHOLD:
+            cell_style += _HIGHLIGHT_STYLE
+        return f'<td class="num" style="{cell_style}">{text}</td>'
 
     rows_html = ""
     prev_labor = None
@@ -978,25 +1024,30 @@ def _html_hora_ponderada(
         is_first = labor_ != prev_labor
         prev_labor = labor_
         cls = "worker-first" if is_first else ""
-        rows_html += (
-            f'<tr class="{cls}"><td class="col-worker">{labor_ if is_first else ""}</td>'
-            f'<td class="col-tipo">{cc}</td>'
+        date_cells = "".join(
+            cell_html(g["by_date"].get(d), w["date"]) for d in dates
         )
-        for d in dates:
-            rows_html += f'<td class="num" style="width:{date_pct}">{cell_val(g["by_date"].get(d))}</td>'
         row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
         rows_html += (
-            f'<td class="col-total">'
-            f'{_fmt_clp(row_total) if row_total is not None else "-"}</td></tr>'
+            f"<tr class='{cls}'>"
+            f"<td style='{w['labor']}'>{labor_ if is_first else ''}</td>"
+            f"<td style='{w['cc']}'>{cc or ''}</td>"
+            f"{date_cells}"
+            f"<td class='total' style='{w['total']}'>"
+            f"{_fmt_clp(row_total) if row_total is not None else '-'}</td></tr>"
         )
 
+    # Footer: every cell must carry the same inline width style as the rest
+    # of the table's cells (w[...]) — xhtml2pdf's table-layout:fixed
+    # column-width computation breaks for the WHOLE table if even one row's
+    # cells omit it (root cause of issue #108's "everything overlaps" bug).
     footer_val = _hora_ponderada_9h(grand_total, grand_horas)
     rows_html += (
-        '<tr class="total-row"><td><b>Hora ponderada 9h global</b></td><td></td>'
-        + "<td></td>" * n_dates
-        + '<td class="col-total"><b>'
-        + (_fmt_clp(footer_val) if footer_val is not None else "-")
-        + "</b></td></tr>"
+        f"<tr class='total-row'><td style='{w['labor']}'><b>Hora ponderada 9h global</b></td>"
+        f"<td style='{w['cc']}'></td>"
+        + f'<td class="num" style="{w["date"]}"></td>' * len(dates)
+        + f"<td class='total' style='{w['total']}'><b>"
+        f"{_fmt_clp(footer_val) if footer_val is not None else '-'}</b></td></tr>"
     )
 
     header = _pdf_header(
@@ -1008,8 +1059,13 @@ def _html_hora_ponderada(
     )
     return f"""
     {header}
-    <table class="pivot-table"><thead>
-      <tr><th class="col-worker">Labor</th><th class="col-tipo">CC</th>{date_headers}<th class="col-total">Hora ponderada 9h</th></tr>
+    <table class="pivot-wide"><thead>
+      <tr>
+        <th style="{w['labor']}">Labor</th>
+        <th style="{w['cc']}">CC</th>
+        {date_headers}
+        <th class="num" style="{w['total']}">Hora ponderada 9h</th>
+      </tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
