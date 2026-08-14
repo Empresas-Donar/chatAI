@@ -340,14 +340,16 @@ table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
 MAX_PIVOT_DATES = 45
 
 
-def _check_pivot_date_range(dates: list[str], report_label: str) -> None:
-    if len(dates) > MAX_PIVOT_DATES:
+def _check_pivot_date_range(
+    dates: list[str], report_label: str, max_dates: int = MAX_PIVOT_DATES
+) -> None:
+    if len(dates) > max_dates:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"El rango de fechas es demasiado amplio para el PDF de "
                 f"'{report_label}' ({len(dates)} días). Reduce el rango a "
-                f"{MAX_PIVOT_DATES} días o menos, o usa la descarga en Excel."
+                f"{max_dates} días o menos, o usa la descarga en Excel."
             ),
         )
 
@@ -3870,6 +3872,17 @@ async def download_tarjas_bono_mensual_pdf(
 # Hora ponderada 9h — Labor x CC pivot, hourly rate projected to a 9h day
 # ===========================================================================
 
+# Any daily cell above this amount is highlighted on screen, Excel and PDF.
+HORA_PONDERADA_HIGHLIGHT_THRESHOLD = 30000
+
+# This pivot has 3 fixed columns (Labor/CC/Total) plus large currency values
+# (can run into the millions), so it needs wider date columns than the
+# 2-fixed-column pivots elsewhere in this file. Capped at roughly a full
+# calendar month of working days (verified legible up to 23 date columns at
+# the widths below); wider ranges are redirected to Excel instead of a PDF
+# that would be uncomfortably cramped.
+MAX_PIVOT_DATES_HORA_PONDERADA = 23
+
 
 def _build_hora_ponderada_filters(
     fecha_inicio,
@@ -4067,6 +4080,8 @@ async def download_tarjas_hora_ponderada_excel(
     ws.cell(1, total_col_idx).alignment = align_hdr
 
     money = "#,##0"
+    highlight_fill = PatternFill("solid", fgColor="FFEDD5")
+    highlight_font = Font(bold=True, color="C2410C")
     for i, ((labor_, cc), g) in enumerate(groups.items(), 2):
         ws.cell(i, 1, labor_)
         ws.cell(i, 2, cc)
@@ -4077,6 +4092,9 @@ async def download_tarjas_hora_ponderada_excel(
                 if val is not None:
                     dc = ws.cell(i, j, val)
                     dc.number_format = money
+                    if val > HORA_PONDERADA_HIGHLIGHT_THRESHOLD:
+                        dc.fill = highlight_fill
+                        dc.font = highlight_font
         row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
         tc = ws.cell(i, total_col_idx, row_total)
         if row_total is not None:
@@ -4139,7 +4157,9 @@ async def download_tarjas_hora_ponderada_pdf(
     from collections import OrderedDict
 
     dates = sorted({r["fecha"] for r in rows})
-    _check_pivot_date_range(dates, "Hora ponderada 9h")
+    _check_pivot_date_range(
+        dates, "Hora ponderada 9h", MAX_PIVOT_DATES_HORA_PONDERADA
+    )
     groups: "OrderedDict" = OrderedDict()
     grand_total = 0.0
     grand_horas = 0.0
@@ -4156,16 +4176,24 @@ async def download_tarjas_hora_ponderada_pdf(
         grand_total += total
         grand_horas += horas
 
-    w = _pivot_col_widths({"labor": 26, "cc": 16, "total": 14}, len(dates))
+    w = _pivot_col_widths({"labor": 16, "cc": 10, "total": 12}, len(dates))
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
         f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
         for d in dates
     )
 
-    def cell_val(cell):
+    # Daily cells above HORA_PONDERADA_HIGHLIGHT_THRESHOLD get a highlighted
+    # style, matching the on-screen pivot and the Excel export.
+    _HIGHLIGHT_STYLE = "background:#ffedd5;color:#c2410c;font-weight:bold;"
+
+    def cell_html(cell, style):
         v = _hora_ponderada_9h(*cell) if cell else None
-        return _fmt_clp(v) if v is not None else "-"
+        text = _fmt_clp(v) if v is not None else "-"
+        cell_style = style + ";"
+        if v is not None and v > HORA_PONDERADA_HIGHLIGHT_THRESHOLD:
+            cell_style += _HIGHLIGHT_STYLE
+        return f'<td class="num" style="{cell_style}">{text}</td>'
 
     rows_html = ""
     prev_labor = None
@@ -4176,8 +4204,7 @@ async def download_tarjas_hora_ponderada_pdf(
         labor_cell = labor_ if is_new_labor else ""
         prev_labor = labor_
         date_cells = "".join(
-            f'<td class="num" style="{w["date"]}">{cell_val(g["by_date"].get(d))}</td>'
-            for d in dates
+            cell_html(g["by_date"].get(d), w["date"]) for d in dates
         )
         row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
         rows_html += (
@@ -4190,11 +4217,18 @@ async def download_tarjas_hora_ponderada_pdf(
         )
 
     # Footer: same blended-rate approach as the Excel export (see Decisions).
+    # Every cell here must carry the same inline width style as the rest of
+    # the table's cells (w[...]) — xhtml2pdf's table-layout:fixed column-width
+    # computation breaks for the WHOLE table (columns overlap/bleed into each
+    # other) if even one row's cells omit it, which was the root cause of the
+    # "everything overlaps" PDF bug.
     footer_val = _hora_ponderada_9h(grand_total, grand_horas)
     rows_html += (
-        "<tr class='total-row'><td><b>Hora ponderada 9h global</b></td><td></td>"
-        + "<td></td>" * len(dates)
-        + f"<td class='num'><b>{_fmt_clp(footer_val) if footer_val is not None else '-'}</b></td></tr>"
+        f"<tr class='total-row'><td style='{w['labor']}'><b>Hora ponderada 9h global</b></td>"
+        f"<td style='{w['cc']}'></td>"
+        + f'<td class="num" style="{w["date"]}"></td>' * len(dates)
+        + f"<td class='total' style='{w['total']}'><b>"
+        f"{_fmt_clp(footer_val) if footer_val is not None else '-'}</b></td></tr>"
     )
 
     header = _pdf_header(

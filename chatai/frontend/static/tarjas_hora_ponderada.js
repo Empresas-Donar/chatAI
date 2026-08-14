@@ -24,6 +24,10 @@ function horaPonderada9h(total, horas) {
   return horas > 0 ? Math.round((total / horas) * 9) : null;
 }
 
+// Mirrors HORA_PONDERADA_HIGHLIGHT_THRESHOLD in tarjas_controller.py — daily
+// cells above this get flagged the same way on screen, Excel and PDF.
+const HIGHLIGHT_THRESHOLD = 30000;
+
 // ── Init dates (current week) ─────────────────────────────────────────
 function initDates() {
   const now = new Date();
@@ -195,7 +199,8 @@ function renderPivot(rows) {
       }
       const val = cell ? horaPonderada9h(cell.total, cell.horas) : null;
       if (val != null) {
-        html += `<td class="cell-value">${fmtCLP.format(val)}</td>`;
+        const cls = val > HIGHLIGHT_THRESHOLD ? 'cell-value cell-highlight' : 'cell-value';
+        html += `<td class="${cls}">${fmtCLP.format(val)}</td>`;
       } else {
         html += `<td class="cell-value"><span class="cell-dash">-</span></td>`;
       }

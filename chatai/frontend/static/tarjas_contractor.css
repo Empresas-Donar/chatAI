@@ -131,6 +131,13 @@
   font-size: 12px;
 }
 
+/* Daily value above the highlight threshold (Hora ponderada 9h report) */
+.tc-pivot .cell-value.cell-highlight {
+  background: #ffedd5;
+  color: #c2410c;
+  font-weight: 700;
+}
+
 /* Tipo de pago badges */
 .tc-tipo-trato {
   display: inline-block;
