@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Hora Ponderada 9h — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_contractor.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Hora ponderada estandarizada a 9 horas</h1>
+      <p>Proyección de costo/hora por Labor y CC si la jornada hubiese sido de 9 horas completas</p>
+    </div>
+  </div>
+
+  <!-- Print header (filled by JS, visible only when printing) -->
+  <div id="print-header"></div>
+
+  <!-- Filters -->
+  <div class="filter-bar tc-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input lang="es-CL" type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input lang="es-CL" type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Empresa</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Centro costo</label>
+      <select id="fil-cc"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+    </div>
+  </div>
+
+  <!-- Pivot table -->
+  <div class="tc-pivot-section" id="pivot-section" style="display:none">
+    <div class="tc-section-title">Hora ponderada 9h por Labor / CC</div>
+    <div class="tc-pivot-scroll">
+      <table class="tc-pivot" id="pivot-table">
+        <thead id="pivot-thead"></thead>
+        <tbody id="pivot-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="tc-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_hora_ponderada.js?v={{ static_v }}"></script>
+{% endblock %}
