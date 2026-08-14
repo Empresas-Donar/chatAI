@@ -1,5 +1,7 @@
 // tarjas_resumen_horas.js — Worker extra-hours summary pivot table
 
+const fmtCLP = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
+
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -93,6 +95,7 @@ async function queryData() {
     }
 
     document.getElementById('empty-state').style.display = 'none';
+    renderSummary(data.resumen);
     renderPivot(data.rows);
     document.getElementById('pivot-section').style.display = '';
     _hasData = true;
@@ -105,6 +108,13 @@ async function queryData() {
   }
 }
 
+// ── Summary box ──────────────────────────────────────────────────────
+function renderSummary(resumen) {
+  document.getElementById('sum-horas').textContent = resumen.total_horas;
+  document.getElementById('sum-trabajadores').textContent = resumen.total_trabajadores;
+  document.getElementById('sum-monto').textContent = fmtCLP.format(resumen.total_monto);
+}
+
 // ── Pivot table ───────────────────────────────────────────────────────
 function renderPivot(rows) {
   const dates = [...new Set(rows.map(r => r.fecha))].sort();
@@ -114,11 +124,12 @@ function renderPivot(rows) {
     const w = r.trabajador ?? '(sin nombre)';
     if (!workers.has(w)) workers.set(w, new Map());
     const tipos = workers.get(w);
-    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0 });
+    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0, monto: 0 });
     const entry = tipos.get(r.tipo_pago);
     const hrs = Number(r.horas_trabajadas) || 0;  // API alias → horas_extras
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + hrs;
     entry.total += hrs;
+    entry.monto += Number(r.monto_hora_extra) || 0;
   });
 
   const sortedWorkers = [...workers.entries()]
@@ -134,7 +145,7 @@ function renderPivot(rows) {
   let superHdr = '<tr class="trp-superheader">';
   superHdr += '<th class="th-empty" colspan="2"></th>';
   superHdr += `<th colspan="${dates.length}">Fecha / Horas extra</th>`;
-  superHdr += '<th class="th-empty"></th>';
+  superHdr += '<th class="th-empty" colspan="2"></th>';
   superHdr += '</tr>';
 
   let hdr = '<tr>';
@@ -142,6 +153,7 @@ function renderPivot(rows) {
   hdr += '<th class="th-fixed">tipo_pago</th>';
   dates.forEach(d => { hdr += `<th class="th-date">${formatShortDate(d)}</th>`; });
   hdr += '<th class="th-total">Total</th>';
+  hdr += '<th class="th-total">Monto</th>';
   hdr += '</tr>';
 
   thead.innerHTML = superHdr + hdr;
@@ -173,6 +185,7 @@ function renderPivot(rows) {
       });
 
       html += `<td class="cell-total">${entry.total}</td>`;
+      html += `<td class="cell-total">${fmtCLP.format(entry.monto)}</td>`;
       html += '</tr>';
     });
   });
