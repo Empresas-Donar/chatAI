@@ -1,5 +1,12 @@
 /* tarjas_resumen_persona.css — Worker summary pivot */
 
+.trp-note {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin: 2px 0 0 0;
+}
+
 .trp-filter-bar { flex-wrap: wrap; }
 
 .trp-section-title {
