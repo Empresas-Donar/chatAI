@@ -2379,7 +2379,6 @@ async def download_tarjas_detalle_tractorista_excel(
     )
 
 
-@router.get("/api/tarjas/detalle-tractorista/download-pdf")
 def _build_detalle_tractorista_html(
     cur,
     fecha_inicio: str,
@@ -2459,6 +2458,7 @@ def _build_detalle_tractorista_html(
     """
 
 
+@router.get("/api/tarjas/detalle-tractorista/download-pdf")
 async def download_tarjas_detalle_tractorista_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -2571,7 +2571,6 @@ async def download_tarjas_general_tractorista_excel(
     )
 
 
-@router.get("/api/tarjas/general-tractorista/download-pdf")
 def _build_general_tractorista_html(
     cur,
     fecha_inicio: str,
@@ -2641,6 +2640,7 @@ def _build_general_tractorista_html(
     """
 
 
+@router.get("/api/tarjas/general-tractorista/download-pdf")
 async def download_tarjas_general_tractorista_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -2873,7 +2873,6 @@ async def download_tarjas_resumen_persona_tractorista_excel(
 # ===========================================================================
 
 
-@router.get("/api/tarjas/resumen-persona/download-pdf")
 def _build_resumen_persona_html(
     cur,
     fecha_inicio: str,
@@ -2975,6 +2974,7 @@ def _build_resumen_persona_html(
     """
 
 
+@router.get("/api/tarjas/resumen-persona/download-pdf")
 async def download_tarjas_resumen_persona_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -3002,7 +3002,6 @@ async def download_tarjas_resumen_persona_pdf(
     return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
 
 
-@router.get("/api/tarjas/general/download-pdf")
 def _build_general_html(
     cur,
     fecha_inicio: str,
@@ -3099,6 +3098,7 @@ def _build_general_html(
     """
 
 
+@router.get("/api/tarjas/general/download-pdf")
 async def download_tarjas_general_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -3135,7 +3135,6 @@ async def download_tarjas_general_pdf(
     return _render_pdf(html, f"general_{fecha_inicio}_{fecha_termino}.pdf")
 
 
-@router.get("/api/tarjas/detalle/download-pdf")
 def _build_detalle_html(
     cur,
     fecha_inicio: str,
@@ -3225,6 +3224,7 @@ def _build_detalle_html(
     """
 
 
+@router.get("/api/tarjas/detalle/download-pdf")
 async def download_tarjas_detalle_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -3263,7 +3263,6 @@ async def download_tarjas_detalle_pdf(
     return _render_pdf(html, f"detalle_{fecha_inicio}_{fecha_termino}.pdf")
 
 
-@router.get("/api/tarjas/contratista/download-pdf")
 def _build_contratista_html(
     cur,
     fecha_inicio: str,
@@ -3392,6 +3391,7 @@ def _build_contratista_html(
     """
 
 
+@router.get("/api/tarjas/contratista/download-pdf")
 async def download_tarjas_contratista_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -3428,7 +3428,6 @@ async def download_tarjas_contratista_pdf(
     return _render_pdf(html, f"contratista_{fecha_inicio}_{fecha_termino}.pdf")
 
 
-@router.get("/api/tarjas/resumen-horas/download-pdf")
 def _build_resumen_horas_html(
     cur,
     fecha_inicio: str,
@@ -3546,6 +3545,7 @@ def _build_resumen_horas_html(
     """
 
 
+@router.get("/api/tarjas/resumen-horas/download-pdf")
 async def download_tarjas_resumen_horas_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -3742,7 +3742,6 @@ async def download_tarjas_jornadas_trabajador_excel(
     )
 
 
-@router.get("/api/tarjas/jornadas-trabajador/download-pdf")
 def _build_jornadas_trabajador_html(
     cur,
     fecha_inicio: str,
@@ -3795,6 +3794,7 @@ def _build_jornadas_trabajador_html(
     """
 
 
+@router.get("/api/tarjas/jornadas-trabajador/download-pdf")
 async def download_tarjas_jornadas_trabajador_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
@@ -4014,7 +4014,6 @@ async def download_tarjas_bono_mensual_excel(
     return _excel_response(wb, f"bonos_mensuales_{mes}.xlsx")
 
 
-@router.get("/api/tarjas/bono-mensual/download-pdf")
 def _build_bono_mensual_html(
     cur,
     fecha_inicio: str,
@@ -4097,6 +4096,7 @@ def _build_bono_mensual_html(
     """
 
 
+@router.get("/api/tarjas/bono-mensual/download-pdf")
 async def download_tarjas_bono_mensual_pdf(
     mes: str = Query(...),
     contratista: str = Query(None),
@@ -4386,7 +4386,6 @@ async def download_tarjas_hora_ponderada_excel(
     )
 
 
-@router.get("/api/tarjas/hora-ponderada-9h/download-pdf")
 def _build_hora_ponderada_html(
     cur,
     fecha_inicio: str,
@@ -4506,6 +4505,7 @@ def _build_hora_ponderada_html(
     """
 
 
+@router.get("/api/tarjas/hora-ponderada-9h/download-pdf")
 async def download_tarjas_hora_ponderada_pdf(
     fecha_inicio: str = Query(...),
     fecha_termino: str = Query(...),
