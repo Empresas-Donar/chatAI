@@ -27,6 +27,10 @@ Routes:
   GET  /tarjas/notas                    → Notas de crédito page (contractor payment report)
   GET  /api/tarjas/notas/filters        → Filter options (notas)
   GET  /api/tarjas/notas                → Report data
+
+  GET  /tarjas/bono-mensual             → Bonos mensuales page
+  GET  /api/tarjas/bono-mensual/filters → Filter options (bono mensual)
+  GET  /api/tarjas/bono-mensual         → Report data (bonos mensuales del mes)
 """
 
 import base64
@@ -3544,6 +3548,254 @@ async def download_tarjas_jornadas_trabajador_pdf(
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"jornadas_trabajador_{fecha_inicio}_{fecha_termino}.pdf")
+
+
+# ===========================================================================
+# Bonos mensuales — monthly bonus payments recorded in tarjas_pagos
+# ===========================================================================
+
+_MES_RE = re.compile(r"^\d{4}-\d{2}$")
+_BONO_MENSUAL_LABOR = "Bono mensual"
+
+
+def _mes_range(mes: str) -> tuple[str, str]:
+    """First and last ISO day of a YYYY-MM month string."""
+    year, month = (int(p) for p in mes.split("-"))
+    first = datetime.date(year, month, 1)
+    next_month = datetime.date(
+        year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1
+    )
+    return first.isoformat(), (next_month - datetime.timedelta(days=1)).isoformat()
+
+
+def _build_bono_mensual_filters(mes, contratista=None, empresa=None, campo=None):
+    fecha_inicio, fecha_termino = _mes_range(mes)
+    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s"]
+    params: list = [_BONO_MENSUAL_LABOR, fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _query_bono_mensual_rows(cur, where, params):
+    cur.execute(
+        f"""
+        SELECT
+            trabajador,
+            rut_trabajador,
+            contratista,
+            nombre_campo,
+            cuartel_cc AS cc,
+            fecha::date AS fecha,
+            total_pagar AS monto,
+            estado
+        FROM appsheet.tarjas_pagos
+        {where}
+        ORDER BY contratista, trabajador, fecha
+        """,
+        params,
+    )
+    return _rows_to_dicts(cur)
+
+
+@router.get("/tarjas/bono-mensual", response_class=HTMLResponse)
+async def tarjas_bono_mensual_page(request: Request):
+    return _templates.TemplateResponse(request, "tarjas_bono_mensual.html")
+
+
+@router.get("/api/tarjas/bono-mensual/filters")
+async def get_tarjas_bono_mensual_filters():
+    """Distinct contratistas, empresas and campos among bonos mensuales."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE labor = %s AND contratista IS NOT NULL ORDER BY contratista",
+                (_BONO_MENSUAL_LABOR,),
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
+                "WHERE labor = %s AND nombre_campo IS NOT NULL ORDER BY nombre_campo",
+                (_BONO_MENSUAL_LABOR,),
+            )
+            campos = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where="labor = 'Bono mensual'"
+            )
+    finally:
+        conn.close()
+
+    return {"contratistas": contratistas, "empresas": empresas, "campos": campos}
+
+
+@router.get("/api/tarjas/bono-mensual")
+async def get_tarjas_bono_mensual(
+    mes: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    campo: str = Query(None),
+):
+    """Bonos mensuales registrados en tarjas_pagos para el mes seleccionado."""
+    if not _MES_RE.match(mes):
+        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    where, params = _build_bono_mensual_filters(mes, contratista, empresa, campo)
+    try:
+        with conn.cursor() as cur:
+            rows = _query_bono_mensual_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    total = sum(float(r["monto"] or 0) for r in rows)
+    return {"rows": rows, "count": len(rows), "total": total}
+
+
+@router.get("/api/tarjas/bono-mensual/download-excel")
+async def download_tarjas_bono_mensual_excel(
+    mes: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _MES_RE.match(mes):
+        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    where, params = _build_bono_mensual_filters(mes, contratista, empresa, campo)
+    try:
+        with conn.cursor() as cur:
+            rows = _query_bono_mensual_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bonos mensuales"
+    _apply_header(
+        ws,
+        [
+            "Trabajador",
+            "RUT",
+            "Contratista",
+            "Empresa/Campo",
+            "CC",
+            "Fecha",
+            "Monto",
+            "Estado",
+        ],
+    )
+    money = "#,##0"
+    total = 0.0
+    for i, r in enumerate(rows, 2):
+        ws.cell(i, 1, r["trabajador"])
+        ws.cell(i, 2, r["rut_trabajador"])
+        ws.cell(i, 3, r["contratista"])
+        ws.cell(i, 4, r["nombre_campo"])
+        ws.cell(i, 5, r["cc"])
+        ws.cell(i, 6, r["fecha"])
+        monto = float(r["monto"] or 0)
+        total += monto
+        c = ws.cell(i, 7, monto)
+        c.number_format = money
+        ws.cell(i, 8, r["estado"])
+
+    total_row = len(rows) + 2
+    fill = PatternFill("solid", fgColor="D6E4F0")
+    tcell = ws.cell(total_row, 1, "Suma total")
+    tcell.font = Font(bold=True)
+    for col in range(1, 9):
+        ws.cell(total_row, col).fill = fill
+    t = ws.cell(total_row, 7, total)
+    t.font = Font(bold=True)
+    t.number_format = money
+
+    for col, w in zip("ABCDEFGH", [26, 14, 28, 20, 10, 12, 14, 14]):
+        ws.column_dimensions[col].width = w
+
+    return _excel_response(wb, f"bonos_mensuales_{mes}.xlsx")
+
+
+@router.get("/api/tarjas/bono-mensual/download-pdf")
+async def download_tarjas_bono_mensual_pdf(
+    mes: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    campo: str = Query(None),
+):
+    if not _MES_RE.match(mes):
+        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    where, params = _build_bono_mensual_filters(mes, contratista, empresa, campo)
+    try:
+        with conn.cursor() as cur:
+            rows = _query_bono_mensual_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    total = sum(float(r["monto"] or 0) for r in rows)
+    rows_html = "".join(
+        f'<tr><td>{_escape_html(r["trabajador"] or "")}</td>'
+        f'<td>{_escape_html(r["rut_trabajador"] or "")}</td>'
+        f'<td>{_escape_html(r["contratista"] or "")}</td>'
+        f'<td>{_escape_html(r["nombre_campo"] or "")}</td>'
+        f'<td>{_escape_html(str(r["cc"] or ""))}</td>'
+        f'<td>{_fmt_date_display(str(r["fecha"]))}</td>'
+        f'<td class="num">{_fmt_clp(r["monto"])}</td>'
+        f'<td>{_escape_html(r["estado"] or "")}</td></tr>'
+        for r in rows
+    )
+    rows_html += (
+        f'<tr class="total-row"><td><b>Suma total</b></td><td></td><td></td><td></td>'
+        f'<td></td><td></td><td class="num"><b>{_fmt_clp(total)}</b></td><td></td></tr>'
+    )
+
+    fecha_inicio, fecha_termino = _mes_range(mes)
+    header = _pdf_header(
+        _pdf_title("Bonos Mensuales", contratista),
+        fecha_inicio,
+        fecha_termino,
+        {"Mes": mes, "Empresa": empresa, "Campo": campo, "Contratista": contratista},
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {header}
+    <table><thead>
+      <tr><th>Trabajador</th><th>RUT</th><th>Contratista</th><th>Empresa/Campo</th>
+      <th>CC</th><th>Fecha</th><th class="num">Monto</th><th>Estado</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(html, f"bonos_mensuales_{mes}.pdf")
 
 
 # ===========================================================================

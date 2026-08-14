@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Bonos Mensuales — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
+<style>
+  .bm-empty { text-align: center; padding: 48px 16px; color: var(--text-muted); }
+  .bm-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+  .filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Bonos mensuales</h1>
+      <p>Bonificaciones mensuales registradas en tarjas pagos</p>
+    </div>
+  </div>
+
+  <!-- Print header (filled by JS, visible only when printing) -->
+  <div id="print-header"></div>
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <div>
+      <label>Mes</label>
+      <input lang="es-CL" type="month" id="fil-mes" />
+    </div>
+    <div>
+      <label>Empresa</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Campo</label>
+      <select id="fil-campo"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card" id="table-section" style="display:none">
+    <div class="table-header">
+      <span>Bonos mensuales</span>
+      <span class="count" id="row-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Trabajador</th>
+            <th>RUT</th>
+            <th>Contratista</th>
+            <th>Empresa/Campo</th>
+            <th>CC</th>
+            <th>Fecha</th>
+            <th class="num">Monto</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="data-tbody"></tbody>
+        <tfoot id="data-tfoot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="bm-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay bonos mensuales para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_bono_mensual.js?v={{ static_v }}"></script>
+{% endblock %}
