@@ -31,6 +31,10 @@ Routes:
   GET  /tarjas/bono-mensual             → Bonos mensuales page
   GET  /api/tarjas/bono-mensual/filters → Filter options (bono mensual)
   GET  /api/tarjas/bono-mensual         → Report data (bonos mensuales del mes)
+
+  GET  /tarjas/hora-ponderada-9h              → Hora ponderada 9h page (Labor x CC pivot)
+  GET  /api/tarjas/hora-ponderada-9h/filters  → Filter options (hora ponderada 9h)
+  GET  /api/tarjas/hora-ponderada-9h          → Report data, one row per Labor+CC+Fecha cell
 """
 
 import base64
@@ -3860,6 +3864,367 @@ async def download_tarjas_bono_mensual_pdf(
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"bonos_mensuales_{mes}.pdf")
+
+
+# ===========================================================================
+# Hora ponderada 9h — Labor x CC pivot, hourly rate projected to a 9h day
+# ===========================================================================
+
+
+def _build_hora_ponderada_filters(
+    fecha_inicio,
+    fecha_termino,
+    contratista=None,
+    empresa=None,
+    centro_costo=None,
+    labor=None,
+):
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if centro_costo:
+        filters.append("cuartel_cc = %s")
+        params.append(centro_costo)
+    if labor:
+        filters.append("labor = %s")
+        params.append(labor)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _query_hora_ponderada_rows(cur, where, params):
+    """One row per Labor+CC+Fecha cell — same costo_hora formula as Detalle
+    Operacional (_query_detalle_rows: SUM(total_labor)/SUM(horas_trabajadas)),
+    aggregated at the pivot's own cell granularity (Labor+CC+Fecha) instead of
+    trabajador level, since this report's rows are Labor -> CC, not workers."""
+    cur.execute(
+        f"""
+        SELECT
+            labor,
+            cuartel_cc                               AS centro_costo,
+            fecha::date::text                        AS fecha,
+            COALESCE(SUM(total_trabajado), 0)        AS total_trabajado,
+            COALESCE(SUM(horas_trabajadas), 0)       AS horas_trabajadas
+        FROM appsheet.tarjas_pagos
+        {where}
+        GROUP BY labor, cuartel_cc, fecha::date
+        ORDER BY labor, cuartel_cc, fecha::date
+    """,
+        params,
+    )
+    return _rows_to_dicts(cur)
+
+
+def _hora_ponderada_9h(total_trabajado, horas_trabajadas) -> int | None:
+    """hora_ponderada_9h = ROUND(costo_hora * 9, 0), costo_hora = total/horas.
+    Returns None (rendered as '-') when horas_trabajadas is 0/NULL for the
+    aggregate being projected."""
+    if not horas_trabajadas:
+        return None
+    return round(total_trabajado / horas_trabajadas * 9)
+
+
+@router.get("/tarjas/hora-ponderada-9h", response_class=HTMLResponse)
+async def tarjas_hora_ponderada_page(request: Request):
+    return _templates.TemplateResponse(request, "tarjas_hora_ponderada.html")
+
+
+@router.get("/api/tarjas/hora-ponderada-9h/filters")
+async def get_tarjas_hora_ponderada_filters():
+    """Distinct values for each filter dropdown (from tarjas_pagos directly)."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
+                "WHERE cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
+            )
+            centros_costo = [r[0] for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
+                "WHERE labor IS NOT NULL ORDER BY labor"
+            )
+            labores = [r[0] for r in cur.fetchall()]
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+    finally:
+        conn.close()
+
+    return {
+        "contratistas": contratistas,
+        "empresas": empresas,
+        "centros_costo": centros_costo,
+        "labores": labores,
+    }
+
+
+@router.get("/api/tarjas/hora-ponderada-9h")
+async def get_tarjas_hora_ponderada_data(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+):
+    """One row per Labor+CC+Fecha cell; the client pivots them into a
+    Labor -> CC row grouping with one column per date."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    where, params = _build_hora_ponderada_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+    )
+    try:
+        with conn.cursor() as cur:
+            rows = _query_hora_ponderada_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    return {"rows": rows, "count": len(rows)}
+
+
+@router.get("/api/tarjas/hora-ponderada-9h/download-excel")
+async def download_tarjas_hora_ponderada_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    where, params = _build_hora_ponderada_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+    )
+    try:
+        with conn.cursor() as cur:
+            rows = _query_hora_ponderada_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    # Pivot in Python: rows = Labor -> CC, columns = one per date, cell =
+    # hora_ponderada_9h for that Labor+CC+Fecha combo (mirrors the per-date
+    # pivot built in download_tarjas_contratista_excel).
+    from collections import OrderedDict
+    from openpyxl.utils import get_column_letter
+
+    dates = sorted({r["fecha"] for r in rows})
+    groups: "OrderedDict" = OrderedDict()
+    grand_total = 0.0
+    grand_horas = 0.0
+    for r in rows:
+        key = (r["labor"], r["centro_costo"])
+        if key not in groups:
+            groups[key] = {"total_trabajado": 0.0, "total_horas": 0.0, "by_date": {}}
+        g = groups[key]
+        total = float(r["total_trabajado"] or 0)
+        horas = float(r["horas_trabajadas"] or 0)
+        g["total_trabajado"] += total
+        g["total_horas"] += horas
+        g["by_date"][r["fecha"]] = (total, horas)
+        grand_total += total
+        grand_horas += horas
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hora ponderada 9h"
+    fixed_headers = ["Labor", "CC"]
+    date_headers = [d[5:] for d in dates]  # MM-DD
+    _apply_header(ws, fixed_headers + date_headers + ["Hora ponderada 9h"])
+
+    fill_hdr, font_hdr, align_hdr = _excel_header_style()
+    total_col_idx = len(fixed_headers) + len(dates) + 1
+    ws.cell(1, total_col_idx).fill = fill_hdr
+    ws.cell(1, total_col_idx).font = font_hdr
+    ws.cell(1, total_col_idx).alignment = align_hdr
+
+    money = "#,##0"
+    for i, ((labor_, cc), g) in enumerate(groups.items(), 2):
+        ws.cell(i, 1, labor_)
+        ws.cell(i, 2, cc)
+        for j, d in enumerate(dates, 3):
+            cell = g["by_date"].get(d)
+            if cell:
+                val = _hora_ponderada_9h(*cell)
+                if val is not None:
+                    dc = ws.cell(i, j, val)
+                    dc.number_format = money
+        row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
+        tc = ws.cell(i, total_col_idx, row_total)
+        if row_total is not None:
+            tc.number_format = money
+        tc.font = Font(bold=True)
+
+    # Footer: blended hora_ponderada_9h across ALL Labor+CC rows — NOT a sum
+    # of the per-row projected values (see spec Decisions: summing an
+    # hourly-rate projection across independent Labor/CC rows is not
+    # economically meaningful; instead the same formula is recomputed over
+    # the grand totals, same approach as the "Costo/hr" column elsewhere).
+    footer_row = len(groups) + 2
+    fill = PatternFill("solid", fgColor="D6E4F0")
+    tcell = ws.cell(footer_row, 1, "Hora ponderada 9h global")
+    tcell.font = Font(bold=True)
+    for col in range(1, total_col_idx + 1):
+        ws.cell(footer_row, col).fill = fill
+    footer_val = _hora_ponderada_9h(grand_total, grand_horas)
+    fcell = ws.cell(footer_row, total_col_idx, footer_val)
+    fcell.font = Font(bold=True)
+    if footer_val is not None:
+        fcell.number_format = money
+
+    fixed_widths = [28, 14]
+    date_widths = [10] * len(dates)
+    for idx, w in enumerate(fixed_widths + date_widths + [18], start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
+
+    return _excel_response(
+        wb, f"tarjas_hora_ponderada_9h_{fecha_inicio}_{fecha_termino}.xlsx"
+    )
+
+
+@router.get("/api/tarjas/hora-ponderada-9h/download-pdf")
+async def download_tarjas_hora_ponderada_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+    centro_costo: str = Query(None),
+    labor: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Error de conexión")
+    where, params = _build_hora_ponderada_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+    )
+    try:
+        with conn.cursor() as cur:
+            rows = _query_hora_ponderada_rows(cur, where, params)
+    finally:
+        conn.close()
+
+    # Same per-date pivot as download_tarjas_hora_ponderada_excel — one
+    # column per date, matching what the on-screen pivot table shows.
+    from collections import OrderedDict
+
+    dates = sorted({r["fecha"] for r in rows})
+    _check_pivot_date_range(dates, "Hora ponderada 9h")
+    groups: "OrderedDict" = OrderedDict()
+    grand_total = 0.0
+    grand_horas = 0.0
+    for r in rows:
+        key = (r["labor"], r["centro_costo"])
+        if key not in groups:
+            groups[key] = {"total_trabajado": 0.0, "total_horas": 0.0, "by_date": {}}
+        g = groups[key]
+        total = float(r["total_trabajado"] or 0)
+        horas = float(r["horas_trabajadas"] or 0)
+        g["total_trabajado"] += total
+        g["total_horas"] += horas
+        g["by_date"][r["fecha"]] = (total, horas)
+        grand_total += total
+        grand_horas += horas
+
+    w = _pivot_col_widths({"labor": 26, "cc": 16, "total": 14}, len(dates))
+    date_headers = "".join(
+        f'<th class="num" style="{w["date"]}">'
+        f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
+        for d in dates
+    )
+
+    def cell_val(cell):
+        v = _hora_ponderada_9h(*cell) if cell else None
+        return _fmt_clp(v) if v is not None else "-"
+
+    rows_html = ""
+    prev_labor = None
+    for (labor_, cc), g in groups.items():
+        labor_ = labor_ or ""
+        is_new_labor = labor_ != prev_labor
+        row_cls = "worker-first" if is_new_labor else ""
+        labor_cell = labor_ if is_new_labor else ""
+        prev_labor = labor_
+        date_cells = "".join(
+            f'<td class="num" style="{w["date"]}">{cell_val(g["by_date"].get(d))}</td>'
+            for d in dates
+        )
+        row_total = _hora_ponderada_9h(g["total_trabajado"], g["total_horas"])
+        rows_html += (
+            f"<tr class='{row_cls}'>"
+            f"<td style='{w['labor']}'>{_escape_html(labor_cell)}</td>"
+            f"<td style='{w['cc']}'>{_escape_html(cc or '')}</td>"
+            f"{date_cells}"
+            f"<td class='total' style='{w['total']}'>"
+            f"{_fmt_clp(row_total) if row_total is not None else '-'}</td></tr>"
+        )
+
+    # Footer: same blended-rate approach as the Excel export (see Decisions).
+    footer_val = _hora_ponderada_9h(grand_total, grand_horas)
+    rows_html += (
+        "<tr class='total-row'><td><b>Hora ponderada 9h global</b></td><td></td>"
+        + "<td></td>" * len(dates)
+        + f"<td class='num'><b>{_fmt_clp(footer_val) if footer_val is not None else '-'}</b></td></tr>"
+    )
+
+    header = _pdf_header(
+        _pdf_title("Hora Ponderada 9h", contratista),
+        fecha_inicio,
+        fecha_termino,
+        {
+            "Empresa": empresa,
+            "Contratista": contratista,
+            "CC": centro_costo,
+            "Labor": labor,
+        },
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}
+    .total-row td {{ background:#D6E4F0; font-weight:bold; }}
+    </style></head><body>
+    {header}
+    <table class="pivot-wide"><thead>
+      <tr>
+        <th style="{w['labor']}">Labor</th>
+        <th style="{w['cc']}">CC</th>
+        {date_headers}
+        <th class="num" style="{w['total']}">Hora ponderada 9h</th>
+      </tr>
+    </thead><tbody>{rows_html}</tbody></table>
+    </body></html>"""
+    return _render_pdf(
+        html, f"hora_ponderada_9h_{fecha_inicio}_{fecha_termino}.pdf"
+    )
 
 
 # ===========================================================================
