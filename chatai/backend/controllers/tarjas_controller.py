@@ -41,8 +41,6 @@ import base64
 import datetime
 import decimal
 import io
-import math
-import unicodedata
 from pathlib import Path
 import logging
 import re
@@ -199,106 +197,27 @@ def _logo_b64() -> str:
         return ""
 
 
-def _ascii_fold(s: str) -> str:
-    """Strip accents (e.g. 'Día' -> 'Dia'). PIL's bundled default font (used
-    to draw the pie chart legend) doesn't have glyphs for accented Spanish
-    vowels and renders them as a tofu box — this keeps the PNG legend
-    legible. Only used for text drawn directly onto the chart image; the
-    HTML summary table keeps the accented label as-is."""
-    return "".join(
-        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
-    )
-
-
-def _pie_chart_b64(resumen: list[dict]) -> str:
-    """Render the tipo_pago pie chart as a static PNG (base64), matching the
-    on-screen Chart.js pie in tarjas_detail.js: same colors (#3b82f6 trato /
-    #f97316 other) and, unlike the screen version's hover-only tooltip, the
-    percentage is drawn directly on each slice plus a small legend below —
-    xhtml2pdf/pisa renders static HTML only, it cannot execute the <canvas>
-    that draws the on-screen chart, so this has to be a flat image (same
-    approach as the logo in _logo_b64()).
-    """
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except Exception:
-        return ""
-
-    slices = [r for r in resumen if float(r["total_pagar"] or 0) > 0]
-    total = sum(float(r["total_pagar"] or 0) for r in slices)
-    if total <= 0:
-        return ""
-
-    width, diameter, pad = 260, 220, 16
-    height = pad + diameter + 18 + 22 * len(slices) + 10
-    cx, cy, radius = width // 2, pad + diameter // 2, diameter // 2
-    box = [cx - radius, cy - radius, cx + radius, cy + radius]
-
-    img = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(img)
-    try:
-        font_pct = ImageFont.load_default(size=15)
-        font_legend = ImageFont.load_default(size=12)
-    except TypeError:
-        # Older Pillow: load_default() takes no `size` kwarg.
-        font_pct = font_legend = ImageFont.load_default()
-
-    legend_y = pad + diameter + 14
-    start_angle = -90.0
-    for r in slices:
-        value = float(r["total_pagar"] or 0)
-        frac = value / total
-        end_angle = start_angle + 360 * frac
-        color = _tipo_pago_color(r["tipo_pago"])
-
-        draw.pieslice(box, start_angle, end_angle, fill=color, outline="white", width=2)
-
-        mid_rad = math.radians((start_angle + end_angle) / 2)
-        lx = cx + radius * 0.62 * math.cos(mid_rad)
-        ly = cy + radius * 0.62 * math.sin(mid_rad)
-        pct_txt = f"{frac * 100:.1f}%"
-        draw.text(
-            (lx, ly),
-            pct_txt,
-            font=font_pct,
-            fill="white",
-            stroke_width=2,
-            stroke_fill="black",
-            anchor="mm",
-        )
-
-        draw.rectangle([pad, legend_y, pad + 12, legend_y + 12], fill=color)
-        label = _ascii_fold(_tipo_pago_label(r["tipo_pago"]))
-        draw.text(
-            (pad + 18, legend_y + 6),
-            f"{label} ({pct_txt})",
-            font=font_legend,
-            fill="#111111",
-            anchor="lm",
-        )
-        legend_y += 22
-        start_angle = end_angle
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return base64.b64encode(buf.getvalue()).decode()
-
-
 def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
     """Build the Resumen table HTML for the Detalle PDF — same columns,
-    currency format, and Total row as the on-screen td-summary-table."""
+    currency format, and Total row as the on-screen td-summary-table, plus
+    a "%" column with each row's share of the grand total."""
+
+    def _pct(value):
+        return f"{(float(value or 0) / total * 100):.1f} %" if total > 0 else "—"
+
     rows_html = "".join(
         f'<tr><td><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
         f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
         f'<td class="num">{_fmt_clp(r["total_pagar"])}</td>'
-        f'<td class="num">{r["jornadas"]}</td></tr>'
+        f'<td class="num">{r["jornadas"]}</td>'
+        f'<td class="num">{_pct(r["total_pagar"])}</td></tr>'
         for r in resumen
     )
     return f"""
     <table class="summary-table">
-      <thead><tr><th>Tipo de pago</th><th class="num">Total a pagar</th><th class="num">Jornadas</th></tr></thead>
+      <thead><tr><th>Tipo de pago</th><th class="num">Total a pagar</th><th class="num">Jornadas</th><th class="num">%</th></tr></thead>
       <tbody>{rows_html}</tbody>
-      <tfoot><tr><td>Total</td><td class="num">{_fmt_clp(total)}</td><td class="num">{jornadas}</td></tr></tfoot>
+      <tfoot><tr><td>Total</td><td class="num">{_fmt_clp(total)}</td><td class="num">{jornadas}</td><td class="num">{"100.0 %" if total > 0 else "—"}</td></tr></tfoot>
     </table>
     """
 
@@ -327,10 +246,7 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .pdf-summary { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; }
 .pdf-summary td { width: 33.33%; border: 1px solid #cccccc; background: #f7f7f7; padding: 6px 10px; font-size: 8pt; text-align: center; }
 .pdf-summary b { display: block; font-size: 11pt; color: #111111; }
-.summary-wrap { width: 100%; border: none; margin-bottom: 4px; }
-.summary-wrap td { border: none; vertical-align: top; padding: 0; }
-.summary-cell { width: 65%; padding-right: 12px; }
-.summary-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+.summary-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; margin-bottom: 4px; }
 .summary-table th { background: #ea8c1e; color: #ffffff; padding: 6px 8px; text-align: left; border: 1px solid #ea8c1e; font-weight: bold; }
 .summary-table th.num { text-align: right; }
 .summary-table td { padding: 5px 6px; border: 1px solid #cccccc; }
@@ -338,8 +254,6 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .summary-table tfoot td { border-top: 1.5px solid #888888; font-weight: bold; }
 .badge-trato { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-weight: bold; }
 .badge-aldia { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #ffedd5; color: #c2410c; font-weight: bold; }
-.chart-cell { width: 35%; text-align: center; }
-.chart-cell img { width: 190px; height: auto; }
 table.detalle-table th { background: #1a1a1a; color: #f5d87a; padding: 6px 8px; text-align: left; border: 1px solid #1a1a1a; font-weight: bold; }
 table.detalle-table th.num { text-align: right; }
 table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
@@ -752,6 +666,7 @@ def _query_detalle_rows(cur, where, params):
             tipo_pago,
             "Nombre Labor"                                            AS labor,
             "CC"                                                      AS centro_costo,
+            cc.cultivo                                                AS centro_costo_nombre,
             SUM(jornadas)                                             AS jornadas,
             SUM(horas_trabajadas)                                     AS horas_trabajadas,
             CASE WHEN SUM(jornadas) > 0
@@ -763,13 +678,19 @@ def _query_detalle_rows(cur, where, params):
                  ELSE NULL END                                        AS costo_hora,
             ROUND(
                 SUM(total_labor)::numeric
-                / NULLIF(SUM(SUM(total_labor)) OVER (PARTITION BY tipo_pago), 0) * 100,
+                / NULLIF(
+                    SUM(SUM(total_labor)) FILTER (
+                        WHERE tipo_pago IN ('trato', 'Al dia', 'Al día')
+                    ) OVER (),
+                    0
+                  ) * 100,
                 2
             )                                                         AS pct_pago,
             nombre_campo
         FROM appsheet.tarjas_reporte
+        LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = "CC"::text
         {where}
-        GROUP BY tipo_pago, "Nombre Labor", "CC", nombre_campo
+        GROUP BY tipo_pago, "Nombre Labor", "CC", cc.cultivo, nombre_campo
         ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
     """,
         params,
@@ -811,10 +732,6 @@ def _tipo_pago_label(tipo_pago: str) -> str:
 
 def _tipo_pago_badge_class(tipo_pago: str) -> str:
     return _TIPO_PAGO_BADGE_CLASS.get(tipo_pago, "")
-
-
-def _tipo_pago_color(tipo_pago: str) -> str:
-    return "#3b82f6" if tipo_pago == "trato" else "#f97316"
 
 
 @router.get("/api/tarjas/detalle")
@@ -3163,40 +3080,29 @@ def _build_detalle_html(
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
-    fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
     rows_html = "".join(
         f'<tr><td><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
         f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
         f"<td>{r['labor']}</td><td>{r['centro_costo']}</td>"
+        f"<td>{_escape_html(r['centro_costo_nombre'] or '—')}</td>"
         f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
         f'<td class="num">{r["jornadas"]}</td>'
-        f'<td class="num">{fmtHrs(r["horas_trabajadas"])}</td>'
-        f'<td class="num">{fmtCLP(r["total_unitario"])}</td>'
         f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
         f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
     )
 
-    # Resumen + gráfico de torta — mismos datos y colores que la pantalla
-    # (issue #96): la pantalla ya calculaba esto vía /api/tarjas/detalle,
-    # el PDF no lo incluía.
+    # Resumen — mismos datos y colores que la pantalla (issue #96): la
+    # pantalla ya calculaba esto vía /api/tarjas/detalle, el PDF no lo
+    # incluía. Sin gráfico (issue #122): solo la tabla, ahora con % por fila.
     summary_section = ""
     if resumen:
         total_general = sum(float(r["total_pagar"] or 0) for r in resumen)
         jornadas_general = sum(r["jornadas"] or 0 for r in resumen)
         summary_html = _summary_table_html(resumen, total_general, jornadas_general)
-        chart_b64 = _pie_chart_b64(resumen)
-        chart_cell = (
-            f'<td class="chart-cell"><img src="data:image/png;base64,{chart_b64}" /></td>'
-            if chart_b64
-            else ""
-        )
         summary_section = f"""
         <p class="section-title">Resumen</p>
-        <table class="summary-wrap"><tr>
-          <td class="summary-cell">{summary_html}</td>
-          {chart_cell}
-        </tr></table>
+        {summary_html}
         """
 
     header = _pdf_header(
@@ -3216,9 +3122,8 @@ def _build_detalle_html(
     {summary_section}
     <p class="section-title">Detalle</p>
     <table class="detalle-table"><thead>
-      <tr><th>Tipo pago</th><th>Labor</th><th>CC</th>
+      <tr><th>Tipo pago</th><th>Labor</th><th>CC</th><th>Nombre CC</th>
       <th class="num">Costo/hora</th><th class="num">Jornadas</th>
-      <th class="num">Horas</th><th class="num">Unitario</th>
       <th class="num">Total</th><th class="num">% pago</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
