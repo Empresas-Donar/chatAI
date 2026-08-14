@@ -18,3 +18,4 @@ pgvector>=0.3.0
 openpyxl>=3.1.0
 xhtml2pdf>=0.2.17
 gspread>=6.0.0
+Pillow>=10.1.0
