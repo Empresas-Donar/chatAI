@@ -14,7 +14,20 @@ steps:
       - DATABASE_URL
       - SECRET_KEY
 
-  # ── Step 2: Build Docker image ──────────────────────────────────────────
+  # ── Step 2: Build Docker image (verification only — NOT pushed/deployed) ─
+  # Deploys to Cloud Run are handled exclusively by GitHub Actions
+  # (.github/workflows/deploy.yml), which pushes the image tagged by the
+  # immutable commit SHA and deploys that exact digest. This pipeline used
+  # to also push `:latest` and run `gcloud run deploy --image=...:latest`
+  # in parallel with GitHub Actions on every push to main. Because the
+  # image push only happened via the `images:` field *after* the deploy
+  # step ran, each pipeline's own deploy step actually deployed whatever
+  # `:latest` happened to be in the registry at that instant — often a
+  # different, unrelated build's image. Under concurrent pushes this raced
+  # with GitHub Actions and silently redeployed stale code even after the
+  # correct fix had already gone live (see specs/113-cloudbuild-latest-tag-race).
+  # Kept as a build-only smoke check so `role-security-tests` + Dockerfile
+  # correctness are still validated by this trigger without touching prod.
   - name: 'gcr.io/cloud-builders/docker'
     id: 'docker-build'
     waitFor: ['role-security-tests']
@@ -23,22 +36,8 @@ steps:
       - -f
       - chatai/Dockerfile
       - -t
-      - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
+      - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:cloudbuild-verify
       - .
-
-  # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'cloud-run-deploy'
-    waitFor: ['docker-build']
-    entrypoint: gcloud
-    args:
-      - run
-      - deploy
-      - chatai
-      - --image=southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
-      - --region=southamerica-west1
-      - --project=integraciones-484915
-      - --platform=managed
 
 availableSecrets:
   secretManager:
@@ -46,9 +45,6 @@ availableSecrets:
       env: DATABASE_URL
     - versionName: projects/integraciones-484915/secrets/SECRET_KEY/versions/latest
       env: SECRET_KEY
-
-images:
-  - southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/chatai:latest
 
 options:
   logging: CLOUD_LOGGING_ONLY
