@@ -45,18 +45,26 @@ class TestPdfTitleHelper:
         for label, title in cases.items():
             assert title == f"Tarjas-Reporte {label}-Herbi Ml Spa"
 
-    def test_54_cross_report_isolation_bulk_pdf_titles_unchanged(self):
-        """Isolation check: issue #54 only scoped the per-page PDF downloads
-        in tarjas_controller.py. The bulk multi-report PDF generator in
-        reports_controller.py (/reportes page) is a separate feature and
-        must keep its own static titles untouched."""
-        path = os.path.join(
-            os.path.dirname(__file__), "..", "backend", "controllers", "reports_controller.py"
-        )
-        with open(path, encoding="utf-8") as f:
-            source = f.read()
-        assert '"General — Tarjas Contratistas"' in source
-        assert '"Por persona operacional — Tarjas Contratistas"' in source
+    def test_54_bulk_pdf_titles_now_match_standalone_via_shared_builders(self):
+        """Superseded by issue #116: the bulk multi-report PDF (/reportes)
+        used to keep its own static titles, deliberately isolated from this
+        issue's _pdf_title() convention. #116 removed that duplication —
+        reports_controller.py now imports tarjas_controller.py's builder
+        functions directly, so every bulk section's title is produced by
+        the exact same _pdf_title() call as its standalone PDF. This test
+        used to assert the opposite (static titles); it now asserts the
+        bulk generator dict resolves to the shared builders."""
+        import inspect
+
+        import controllers.reports_controller as rc
+
+        # Directly verifies the "general" and "contratista" bulk sections
+        # delegate to tarjas_controller's shared builders, not a local copy.
+
+        general_src = inspect.getsource(rc._REPORT_GENERATORS["general"])
+        assert "tc._build_general_html" in general_src
+        contratista_src = inspect.getsource(rc._REPORT_GENERATORS["contratista"])
+        assert "tc._build_contratista_html" in contratista_src
 
 
 class TestPdfTitleIntegration:
