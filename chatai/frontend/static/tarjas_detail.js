@@ -16,6 +16,39 @@ function toISO(d) { return d.toISOString().slice(0, 10); }
 
 let chartTipo = null;
 
+// Draws the % value centered on each pie slice. The screen chart previously
+// only showed the percentage inside the tooltip on hover; the PDF export
+// can't reproduce hover state, so both now show it as a fixed label drawn
+// directly on the slice via the Canvas API (no extra dependency).
+const percentLabelPlugin = {
+  id: 'percentLabel',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const data = chart.data.datasets[0].data;
+    const total = data.reduce((a, b) => a + (Number(b) || 0), 0);
+    if (total <= 0) return;
+
+    ctx.save();
+    ctx.font = 'bold 12px Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.lineWidth = 3;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    meta.data.forEach((arc, i) => {
+      const value = Number(data[i]) || 0;
+      if (value <= 0) return;
+      const pct = (value / total * 100).toFixed(1) + '%';
+      const { x, y } = arc.tooltipPosition();
+      ctx.strokeText(pct, x, y);
+      ctx.fillText(pct, x, y);
+    });
+    ctx.restore();
+  }
+};
+
 // ── Init dates (current week: Monday to Sunday) ─────────────────────
 function initDates() {
   const now = new Date();
@@ -146,6 +179,7 @@ function renderChart(resumen, total) {
       labels,
       datasets: [{ data: values, backgroundColor: colors, borderWidth: 2 }]
     },
+    plugins: [percentLabelPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: true,
