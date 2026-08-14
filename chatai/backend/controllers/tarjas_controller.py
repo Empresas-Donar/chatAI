@@ -307,6 +307,9 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
 table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .pdf-note { font-size: 7pt; font-style: italic; color: #666666; margin: 0 0 8px 0; }
+.pdf-summary { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; }
+.pdf-summary td { width: 33.33%; border: 1px solid #cccccc; background: #f7f7f7; padding: 6px 10px; font-size: 8pt; text-align: center; }
+.pdf-summary b { display: block; font-size: 11pt; color: #111111; }
 .summary-wrap { width: 100%; border: none; margin-bottom: 4px; }
 .summary-wrap td { border: none; vertical-align: top; padding: 0; }
 .summary-cell { width: 65%; padding-right: 12px; }
@@ -1593,7 +1596,8 @@ async def get_tarjas_resumen_horas(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas_trabajadas "
+                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas_trabajadas, "
+                f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto_hora_extra "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
@@ -1616,6 +1620,11 @@ async def get_tarjas_resumen_horas(
     return {
         "rows": rows,
         "count": len(rows),
+        "resumen": {
+            "total_horas": sum(float(r["horas_trabajadas"] or 0) for r in rows),
+            "total_trabajadores": len({r["trabajador"] for r in rows}),
+            "total_monto": sum(float(r["monto_hora_extra"] or 0) for r in rows),
+        },
     }
 
 
@@ -3280,7 +3289,8 @@ async def download_tarjas_resumen_horas_pdf(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas "
+                f"COALESCE(SUM(horas_extras), 0)::numeric AS horas, "
+                f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto "
                 f"FROM appsheet.tarjas_pagos {where} "
                 "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
@@ -3294,11 +3304,12 @@ async def download_tarjas_resumen_horas_pdf(
     for r in rows:
         k = (r["trabajador"] or "", r["tipo_pago"] or "")
         if k not in workers:
-            workers[k] = {"by_date": {}, "total": 0}
+            workers[k] = {"by_date": {}, "total": 0, "monto": 0}
         workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + (
             r["horas"] or 0
         )
         workers[k]["total"] += r["horas"] or 0
+        workers[k]["monto"] += r["monto"] or 0
 
     # Only keep workers whose horas_extras total for the whole period (across
     # every tipo_pago) is greater than zero.
@@ -3311,8 +3322,12 @@ async def download_tarjas_resumen_horas_pdf(
 
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
+    resumen_horas = sum(e["total"] for _, e in sorted_workers)
+    resumen_trabajadores = len({k[0] for k in workers})
+    resumen_monto = sum(e["monto"] for _, e in sorted_workers)
+
     _check_pivot_date_range(dates, "Horas extra por persona")
-    w = _pivot_col_widths({"worker": 22, "tipo": 14, "total": 12}, len(dates))
+    w = _pivot_col_widths({"worker": 20, "tipo": 12, "total": 10, "monto": 14}, len(dates))
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
         f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
@@ -3332,7 +3347,10 @@ async def download_tarjas_resumen_horas_pdf(
         for d in dates:
             v = entry["by_date"].get(d, 0)
             rows_html += f'<td class="num" style="{w["date"]}">{v if v else ""}</td>'
-        rows_html += f'<td class="total" style="{w["total"]}">{entry["total"]}</td></tr>'
+        rows_html += (
+            f'<td class="total" style="{w["total"]}">{entry["total"]}</td>'
+            f'<td class="total" style="{w["monto"]}">{_fmt_clp(entry["monto"])}</td></tr>'
+        )
 
     header = _pdf_header(
         _pdf_title("Horas Extra", contratista),
@@ -3345,12 +3363,20 @@ async def download_tarjas_resumen_horas_pdf(
             "Tipo de pago": tipo_pago,
         },
     )
+    summary_html = (
+        '<table class="pdf-summary"><tr>'
+        f'<td>Total horas extra<b>{resumen_horas}</b></td>'
+        f'<td>Trabajadores con horas extra<b>{resumen_trabajadores}</b></td>'
+        f'<td>Total a pagar<b>{_fmt_clp(resumen_monto)}</b></td>'
+        "</tr></table>"
+    )
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>{_PDF_CSS}</style></head><body>
     {header}
     <p class="pdf-note">*Sólo se muestran aquellos trabajadores que cuentan con horas extras en el periodo especificado.</p>
+    {summary_html}
     <table class="pivot-wide"><thead>
-      <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th></tr>
+      <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th><th class="num" style="{w['monto']}">Monto</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     </body></html>"""
     return _render_pdf(html, f"horas_{fecha_inicio}_{fecha_termino}.pdf")
