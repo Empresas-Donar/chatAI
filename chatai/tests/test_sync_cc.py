@@ -503,6 +503,107 @@ class TestSyncDistribucionModels:
         assert ids == {"632", "633", "639", "1500"}
 
 
+class TestSyncDistribucionModelsRefresh:
+    """
+    Issue #126 regression: sync_distribucion_models must refresh (UPDATE) an existing
+    tarjas_cc row whose stored valor_odoo still references an archived CC id, instead
+    of silently skipping it via ON CONFLICT (id_cc) DO NOTHING. Under the old
+    insert-only behavior, a row created once from an Odoo distribution model never
+    picked up later changes (including CCs being archived), so archived CC ids
+    accumulated in tarjas_cc indefinitely until someone clicked "Sync CC" manually —
+    and even then only individual ids with a confident fuzzy replacement got fixed.
+    """
+
+    def _mock_conn(self, existing_rows: list[tuple[str, dict]]):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = existing_rows
+        return mock_conn, mock_cursor
+
+    def _update_calls(self, mock_cursor):
+        return [
+            c
+            for c in mock_cursor.execute.call_args_list
+            if "UPDATE appsheet.tarjas_cc" in c.args[0]
+        ]
+
+    def _insert_calls(self, mock_cursor):
+        return [
+            c
+            for c in mock_cursor.execute.call_args_list
+            if "INSERT INTO appsheet.tarjas_cc" in c.args[0]
+        ]
+
+    def test_126_stale_archived_row_gets_refreshed_regression(self):
+        """
+        id_cc "210" currently stores {"604": 50.0, "395": 50.0}; 604 is archived.
+        The matching model's fresh Odoo distribution must overwrite valor_odoo.
+        """
+        sync_cc = _load_sync_cc()
+        mock_conn, mock_cursor = self._mock_conn([("210", {"604": 50.0, "395": 50.0})])
+        models = [
+            {
+                "id_cc": "210",
+                "cultivo": "210",
+                "id_campo": 1,
+                "valor_odoo": '{"395": 100.0, "759": 9.09}',
+            }
+        ]
+        sync_cc.sync_distribucion_models(models, {"395", "759"}, mock_conn)
+
+        updates = self._update_calls(mock_cursor)
+        assert len(updates) == 1
+        _sql, params = updates[0].args
+        assert params == ('{"395": 100.0, "759": 9.09}', "210")
+
+    def test_row_without_archived_reference_is_left_untouched(self):
+        """An existing row whose CC ids are all still active must not be rewritten."""
+        sync_cc = _load_sync_cc()
+        mock_conn, mock_cursor = self._mock_conn([("639", {"733": 100.0})])
+        models = [
+            {
+                "id_cc": "639",
+                "cultivo": "639",
+                "id_campo": 1,
+                "valor_odoo": '{"733": 100.0}',
+            }
+        ]
+        sync_cc.sync_distribucion_models(models, {"733"}, mock_conn)
+        assert self._update_calls(mock_cursor) == []
+
+    def test_new_id_cc_still_inserted(self):
+        """A model with no existing tarjas_cc row must still be inserted, as before."""
+        sync_cc = _load_sync_cc()
+        mock_conn, mock_cursor = self._mock_conn([])
+        models = [
+            {
+                "id_cc": "999",
+                "cultivo": "Nuevo cultivo",
+                "id_campo": 1,
+                "valor_odoo": '{"100": 100.0}',
+            }
+        ]
+        sync_cc.sync_distribucion_models(models, {"100"}, mock_conn)
+        assert len(self._insert_calls(mock_cursor)) == 1
+        assert self._update_calls(mock_cursor) == []
+
+    def test_empty_stored_distribution_is_not_treated_as_archived(self):
+        """A row whose valor_odoo has no keys (empty {}) must not trigger a refresh."""
+        sync_cc = _load_sync_cc()
+        mock_conn, mock_cursor = self._mock_conn([("210", {})])
+        models = [
+            {
+                "id_cc": "210",
+                "cultivo": "210",
+                "id_campo": 1,
+                "valor_odoo": '{"395": 100.0}',
+            }
+        ]
+        sync_cc.sync_distribucion_models(models, {"395"}, mock_conn)
+        assert self._update_calls(mock_cursor) == []
+
+
 class TestFetchDistribucionModelsCompanyAllowlist:
     """
     Issue #90 regression: fetch_odoo_distribucion_models must apply the same

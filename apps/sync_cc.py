@@ -530,20 +530,41 @@ def fetch_odoo_distribucion_models(
     return result
 
 
-def sync_distribucion_models(models: list[dict], conn) -> None:
+def sync_distribucion_models(models: list[dict], active_ids: set[str], conn) -> None:
     """
     Insert analytic distribution models into appsheet.tarjas_cc.
-    Uses ON CONFLICT (id_cc) DO NOTHING — never overwrites existing rows.
+
+    New id_cc → inserted as-is. Existing id_cc whose stored valor_odoo still
+    references a CC id no longer in active_ids → refreshed from Odoo's current
+    model distribution. This is what actually clears an archived CC out of
+    tarjas_cc when the per-id fuzzy replacement in sync_tarjas_cc can't find a
+    confident successor for it (issue #126 — e.g. a whole season's CC set gets
+    archived with no 1:1 or name-sibling match, so the row stayed stale
+    indefinitely under the old ON CONFLICT DO NOTHING behavior). Existing id_cc
+    with no archived reference are left untouched, so manual tarjas_cc edits
+    that don't involve an archived CC survive the sync.
     """
     if not models:
         log.info("Modelos distribución → sin registros para insertar")
         return
 
     with conn.cursor() as cur:
-        cur.execute("SELECT id_cc::text FROM appsheet.tarjas_cc")
-        existing_ids = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT id_cc::text, valor_odoo FROM appsheet.tarjas_cc")
+        existing = {r[0]: r[1] for r in cur.fetchall()}
 
-    to_insert = [m for m in models if m["id_cc"] not in existing_ids]
+    to_insert, to_refresh = [], []
+    for m in models:
+        id_cc = m["id_cc"]
+        if id_cc not in existing:
+            to_insert.append(m)
+            continue
+
+        current = existing[id_cc] or {}
+        stored_keys = (
+            [k for k in current if k != ""] if isinstance(current, dict) else []
+        )
+        if stored_keys and any(k not in active_ids for k in stored_keys):
+            to_refresh.append(m)
 
     with conn.cursor() as cur:
         for m in to_insert:
@@ -555,9 +576,16 @@ def sync_distribucion_models(models: list[dict], conn) -> None:
                 """,
                 (m["id_cc"], m["cultivo"], m["id_campo"], m["valor_odoo"]),
             )
+        for m in to_refresh:
+            cur.execute(
+                "UPDATE appsheet.tarjas_cc SET valor_odoo = %s::jsonb WHERE id_cc = %s",
+                (m["valor_odoo"], m["id_cc"]),
+            )
 
     log.info(
-        f"Modelos distribución → insertados: {len(to_insert)}, omitidos (ya existían): {len(models) - len(to_insert)}"
+        f"Modelos distribución → insertados: {len(to_insert)}, "
+        f"refrescados (archivados detectados): {len(to_refresh)}, "
+        f"omitidos (ya vigentes): {len(models) - len(to_insert) - len(to_refresh)}"
     )
 
 
@@ -601,11 +629,12 @@ def run() -> None:
     bq = _bq_client()
     odoo, archived_to_active = fetch_odoo_cc(bq)
     distribucion_models = fetch_odoo_distribucion_models(bq, odoo)
+    active_ids = {info["id"] for info in odoo.values()}
 
     conn = _pg_conn()
     try:
         sync_tarjas_cc(odoo, archived_to_active, conn)
-        sync_distribucion_models(distribucion_models, conn)
+        sync_distribucion_models(distribucion_models, active_ids, conn)
         sync_despacho_cc(odoo, conn)
         conn.commit()
     except Exception:
