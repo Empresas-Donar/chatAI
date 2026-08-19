@@ -13,6 +13,15 @@
 --   l1 → nombre exacto normalizado (espacios múltiples colapsados) — fallback
 --   l2 → prefijo [X.Y] en el nombre: "[2.1]AMARRA" → "2.1"             — fallback
 --   l3 → prefijo X.Y- en el nombre:  "1.3-REPLANTE" → "1.3"            — fallback
+--
+-- Cada join l0-l3 usa LATERAL ... LIMIT 1 (issue #130): tarjas_labores no tiene
+-- restricción de unicidad sobre id_labor, y de hecho tiene varias filas
+-- legítimamente duplicadas (mismo codigo_labor, distintas variantes de texto/
+-- puntuación para la misma labor real — ver issues #32, #124). Un LEFT JOIN
+-- plano contra esas filas multiplica ("fan-out") cada jornada una vez por cada
+-- fila que matchea, duplicando jornadas y montos en el export a Odoo aunque el
+-- codigo_labor resultante sea el mismo. LIMIT 1 garantiza como máximo una fila
+-- por labor sin importar cuántas variantes de texto compartan codigo_labor.
 -- =============================================================================
 CREATE OR REPLACE VIEW appsheet.tarjas_reporte_odoo AS
 SELECT
@@ -38,31 +47,41 @@ SELECT
 FROM appsheet.tarjas_reporte r
 
 -- join l0: id_labor directo (robusto) — resuelve sin comparar texto
-LEFT JOIN appsheet.tarjas_labores l0
-       ON r.id_labor IS NOT NULL
-      AND l0.id_labor = r.id_labor
+LEFT JOIN LATERAL (
+    SELECT codigo_labor
+    FROM appsheet.tarjas_labores
+    WHERE id_labor = r.id_labor
+    LIMIT 1
+) l0 ON r.id_labor IS NOT NULL
 
 -- join l1: nombre exacto, colapsando espacios múltiples y espacios adyacentes a paréntesis
 --   ej. "CONSTRUCCIÓN INFRAESTRUCTURA ( caminos...)" → "construcción infraestructura (caminos...)"
 --   Fallback para filas con id_labor aún NULL
-LEFT JOIN appsheet.tarjas_labores l1
-       ON r.id_labor IS NULL
-      AND TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(l1.labor), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
+LEFT JOIN LATERAL (
+    SELECT codigo_labor
+    FROM appsheet.tarjas_labores
+    WHERE TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(labor), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
         = TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(r."Nombre Labor"), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
+    LIMIT 1
+) l1 ON r.id_labor IS NULL
 
 -- join l2: prefijo [X.Y] en el nombre — ej. "[2.1]AMARRA" → "2.1"
 --   Fallback para filas con id_labor aún NULL
-LEFT JOIN appsheet.tarjas_labores l2
-       ON r.id_labor IS NULL
-      AND r."Nombre Labor" ~ '^\[[\d.]+\]'
-      AND l2.codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^\[([\d.]+)\]'))
+LEFT JOIN LATERAL (
+    SELECT codigo_labor
+    FROM appsheet.tarjas_labores
+    WHERE codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^\[([\d.]+)\]'))
+    LIMIT 1
+) l2 ON r.id_labor IS NULL AND r."Nombre Labor" ~ '^\[[\d.]+\]'
 
 -- join l3: prefijo X.Y- en el nombre — ej. "1.3-REPLANTE" → "1.3"
 --   Fallback para filas con id_labor aún NULL
-LEFT JOIN appsheet.tarjas_labores l3
-       ON r.id_labor IS NULL
-      AND r."Nombre Labor" ~ '^[\d]+\.[\d]+-'
-      AND l3.codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^([\d]+\.[\d]+)-'))
+LEFT JOIN LATERAL (
+    SELECT codigo_labor
+    FROM appsheet.tarjas_labores
+    WHERE codigo_labor = TRIM(SUBSTRING(r."Nombre Labor" FROM '^([\d]+\.[\d]+)-'))
+    LIMIT 1
+) l3 ON r.id_labor IS NULL AND r."Nombre Labor" ~ '^[\d]+\.[\d]+-'
 
 -- join a tarjas_cc para obtener distribución analítica Odoo (valor_odoo)
 LEFT JOIN appsheet.tarjas_cc cc
