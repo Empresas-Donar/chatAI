@@ -34,7 +34,9 @@ class TestSummaryTableHtmlPercentColumn:
             {"tipo_pago": "Al dia", "total_pagar": 500000, "jornadas": 5},
         ]
         html = tc._summary_table_html(resumen, 1500000, 15)
-        assert "<th class=\"num\">%</th>" in html
+        # issue #132 added an explicit width style to this <th>; match the
+        # header text loosely instead of the exact (now wider) tag.
+        assert ">%</th>" in html
         assert "66.7 %" in html  # 1,000,000 / 1,500,000
         assert "33.3 %" in html  # 500,000 / 1,500,000
         assert "100.0 %" in html  # Total row

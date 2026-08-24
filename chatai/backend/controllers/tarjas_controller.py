@@ -205,19 +205,33 @@ def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
     def _pct(value):
         return f"{(float(value or 0) / total * 100):.1f} %" if total > 0 else "—"
 
+    # Column widths are % of this table's own (now narrower-than-100%) box
+    # — without them "Jornadas"/"%" stretched much wider than their short
+    # values need, across the full page (issue #132).
+    W = {"tipo": "width:34%", "total": "width:32%", "jornadas": "width:17%", "pct": "width:17%"}
     rows_html = "".join(
-        f'<tr><td><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
+        f'<tr><td style="{W["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
         f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
-        f'<td class="num">{_fmt_clp(r["total_pagar"])}</td>'
-        f'<td class="num">{r["jornadas"]}</td>'
-        f'<td class="num">{_pct(r["total_pagar"])}</td></tr>'
+        f'<td class="num" style="{W["total"]}">{_fmt_clp(r["total_pagar"])}</td>'
+        f'<td class="num" style="{W["jornadas"]}">{r["jornadas"]}</td>'
+        f'<td class="num" style="{W["pct"]}">{_pct(r["total_pagar"])}</td></tr>'
         for r in resumen
     )
     return f"""
-    <table class="summary-table">
-      <thead><tr><th>Tipo de pago</th><th class="num">Total a pagar</th><th class="num">Jornadas</th><th class="num">%</th></tr></thead>
+    <table class="summary-table" style="width:45%;table-layout:fixed">
+      <thead><tr>
+        <th style="{W["tipo"]}">Tipo de pago</th>
+        <th class="num" style="{W["total"]}">Total a pagar</th>
+        <th class="num" style="{W["jornadas"]}">Jornadas</th>
+        <th class="num" style="{W["pct"]}">%</th>
+      </tr></thead>
       <tbody>{rows_html}</tbody>
-      <tfoot><tr><td>Total</td><td class="num">{_fmt_clp(total)}</td><td class="num">{jornadas}</td><td class="num">{"100.0 %" if total > 0 else "—"}</td></tr></tfoot>
+      <tfoot><tr>
+        <td style="{W["tipo"]}">Total</td>
+        <td class="num" style="{W["total"]}">{_fmt_clp(total)}</td>
+        <td class="num" style="{W["jornadas"]}">{jornadas}</td>
+        <td class="num" style="{W["pct"]}">{"100.0 %" if total > 0 else "—"}</td>
+      </tr></tfoot>
     </table>
     """
 
@@ -301,17 +315,39 @@ def _escape_html(s: str) -> str:
     )
 
 
-def _pivot_col_widths(fixed_pct: dict[str, float], n_dates: int) -> dict[str, str]:
+def _pivot_col_widths(
+    fixed_pct: dict[str, float], n_dates: int, date_pct: float = 3.5
+) -> dict[str, str]:
     """Compute inline width styles for a wide date-pivot PDF table so xhtml2pdf's
     table-layout:fixed always fits the page — without explicit widths, reportlab
     raises 'negative availWidth' once there are enough date columns to overflow
     the page (e.g. a single week already crashes it: 7 dates + 5 fixed columns).
-    Fixed columns keep their given %; the remainder is split evenly across dates.
+
+    Each date column gets a fixed percent-of-page width (enough for a DD/MM
+    header or a short money/hours value) instead of always stretching to
+    fill 100% — a range with only a handful of dates renders as a narrower
+    table instead of one stretched edge-to-edge with mostly empty columns
+    (issue #132). `widths["table"]` carries the resulting overall table
+    width; callers must apply it to the <table> tag itself, since the
+    other returned widths are percentages OF THAT (possibly narrower)
+    table width, not of the page. Once enough dates would overflow 100%,
+    falls back to the old behavior: fixed columns keep their given %, the
+    remainder is split evenly across dates, table stays full width.
     """
-    remaining = max(0.0, 100.0 - sum(fixed_pct.values()))
-    date_pct = (remaining / n_dates) if n_dates else 0.0
-    widths = {k: f"width:{v}%" for k, v in fixed_pct.items()}
-    widths["date"] = f"width:{date_pct}%"
+    fixed_total = sum(fixed_pct.values())
+    natural_total = fixed_total + date_pct * n_dates
+    if n_dates and natural_total <= 100.0:
+        table_pct = natural_total
+        scale = 100.0 / table_pct
+        widths = {k: f"width:{v * scale}%" for k, v in fixed_pct.items()}
+        widths["date"] = f"width:{date_pct * scale}%"
+    else:
+        table_pct = 100.0 if n_dates else fixed_total
+        remaining = max(0.0, 100.0 - fixed_total)
+        dpct = (remaining / n_dates) if n_dates else 0.0
+        widths = {k: f"width:{v}%" for k, v in fixed_pct.items()}
+        widths["date"] = f"width:{dpct}%"
+    widths["table"] = f"width:{table_pct}%"
     return widths
 
 
@@ -2346,12 +2382,25 @@ def _build_detalle_tractorista_html(
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".") if v else "—"
 
+    W = {
+        "tipo": "width:9%",
+        "cc": "width:6%",
+        "labor": "width:22%",
+        "jornadas": "width:9%",
+        "unitario": "width:12%",
+        "total": "width:13%",
+        "contratista": "width:16%",
+        "campo": "width:13%",
+    }
     rows_html = "".join(
-        f"<tr><td>{r['tipo_pago']}</td><td>{r['centro_costo']}</td><td>{r['labor']}</td>"
-        f'<td class="num">{r["jornadas"]}</td>'
-        f'<td class="num">{clp(r["total_unitario"])}</td>'
-        f'<td class="total">{clp(r["costo_total"])}</td>'
-        f"<td>{r['contratista']}</td><td>{r['nombre_campo']}</td></tr>"
+        f'<tr><td style="{W["tipo"]}">{r["tipo_pago"]}</td>'
+        f'<td style="{W["cc"]}">{r["centro_costo"]}</td>'
+        f'<td style="{W["labor"]}">{r["labor"]}</td>'
+        f'<td class="num" style="{W["jornadas"]}">{r["jornadas"]}</td>'
+        f'<td class="num" style="{W["unitario"]}">{clp(r["total_unitario"])}</td>'
+        f'<td class="total" style="{W["total"]}">{clp(r["costo_total"])}</td>'
+        f'<td style="{W["contratista"]}">{r["contratista"]}</td>'
+        f'<td style="{W["campo"]}">{r["nombre_campo"]}</td></tr>'
         for r in rows
     )
     header = _pdf_header(
@@ -2367,10 +2416,13 @@ def _build_detalle_tractorista_html(
     )
     return f"""
     {header}
-    <table><thead>
-      <tr><th>Tipo pago</th><th>CC</th><th>Labor</th>
-      <th class="num">Jornadas</th><th class="num">Unitario</th>
-      <th class="num">Total</th><th>Contratista</th><th>Campo</th></tr>
+    <table style="width:88%;table-layout:fixed"><thead>
+      <tr><th style="{W["tipo"]}">Tipo pago</th><th style="{W["cc"]}">CC</th>
+      <th style="{W["labor"]}">Labor</th>
+      <th class="num" style="{W["jornadas"]}">Jornadas</th>
+      <th class="num" style="{W["unitario"]}">Unitario</th>
+      <th class="num" style="{W["total"]}">Total</th>
+      <th style="{W["contratista"]}">Contratista</th><th style="{W["campo"]}">Campo</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
@@ -2530,11 +2582,21 @@ def _build_general_tractorista_html(
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".") if v else "—"
 
+    W = {
+        "trab": "width:22%",
+        "cont": "width:22%",
+        "labor": "width:18%",
+        "tipo": "width:12%",
+        "prom": "width:12%",
+        "total": "width:14%",
+    }
     rows_html = "".join(
-        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td>"
-        f"<td>{r['labor']}</td><td>{r['tipo_pago']}</td>"
-        f'<td class="num">{clp(r["promedio"])}</td>'
-        f'<td class="total">{clp(r["total"])}</td></tr>'
+        f'<tr><td style="{W["trab"]}">{r["trabajador"]}</td>'
+        f'<td style="{W["cont"]}">{r["contratista"]}</td>'
+        f'<td style="{W["labor"]}">{r["labor"]}</td>'
+        f'<td style="{W["tipo"]}">{r["tipo_pago"]}</td>'
+        f'<td class="num" style="{W["prom"]}">{clp(r["promedio"])}</td>'
+        f'<td class="total" style="{W["total"]}">{clp(r["total"])}</td></tr>'
         for r in rows
     )
     header = _pdf_header(
@@ -2550,9 +2612,11 @@ def _build_general_tractorista_html(
     )
     return f"""
     {header}
-    <table><thead>
-      <tr><th>Trabajador</th><th>Contratista</th><th>Labor</th><th>Tipo de pago</th>
-      <th class="num">Promedio</th><th class="num">Total</th></tr>
+    <table style="width:75%;table-layout:fixed"><thead>
+      <tr><th style="{W["trab"]}">Trabajador</th><th style="{W["cont"]}">Contratista</th>
+      <th style="{W["labor"]}">Labor</th><th style="{W["tipo"]}">Tipo de pago</th>
+      <th class="num" style="{W["prom"]}">Promedio</th>
+      <th class="num" style="{W["total"]}">Total</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
@@ -2839,6 +2903,16 @@ def _build_resumen_persona_html(
 
     fmtCLP = lambda v: f"${v:,.0f}".replace(",", ".")
 
+    # Explicit widths (table-layout:fixed) on a narrower-than-100% table —
+    # without them this table's auto layout collapsed "Trabajador" to
+    # near-zero width and overlapped every column's text (issue #132).
+    W = {
+        "trabajador": "width:34%",
+        "tipo": "width:20%",
+        "fecha": "width:22%",
+        "monto": "width:24%",
+    }
+
     # Flat list layout — xhtml2pdf cannot reliably render wide pivot tables.
     # Rows: Trabajador | Tipo de pago | Fecha | Monto
     rows_html = ""
@@ -2856,24 +2930,25 @@ def _build_resumen_persona_html(
             fecha_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
             rows_html += (
                 f'<tr class="{cls}">'
-                f'<td>{"<b>" + trab + "</b>" if is_first_row else ""}</td>'
-                f"<td>{tipo if is_first_row else ''}</td>"
-                f"<td>{fecha_fmt}</td>"
-                f'<td class="num">{fmtCLP(v)}</td>'
+                f'<td style="{W["trabajador"]}">{"<b>" + trab + "</b>" if is_first_row else ""}</td>'
+                f'<td style="{W["tipo"]}">{tipo if is_first_row else ""}</td>'
+                f'<td style="{W["fecha"]}">{fecha_fmt}</td>'
+                f'<td class="num" style="{W["monto"]}">{fmtCLP(v)}</td>'
                 f"</tr>"
             )
         # subtotal row per worker+tipo
         rows_html += (
             f'<tr style="background:#e8e8e8">'
-            f"<td></td><td></td>"
-            f'<td style="font-weight:bold;text-align:right">Subtotal</td>'
-            f'<td class="total">{fmtCLP(entry["total"])}</td>'
+            f'<td style="{W["trabajador"]}"></td><td style="{W["tipo"]}"></td>'
+            f'<td style="{W["fecha"]};font-weight:bold;text-align:right">Subtotal</td>'
+            f'<td class="total" style="{W["monto"]}">{fmtCLP(entry["total"])}</td>'
             f"</tr>"
         )
 
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
     title = _pdf_title("Resumen Por Persona", contratista)
+    table_pct = "width:60%"
     return f"""
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e293b;margin-bottom:12px">
       <tr>
@@ -2884,8 +2959,13 @@ def _build_resumen_persona_html(
         </td>
       </tr>
     </table>
-    <table border="1" cellpadding="4" cellspacing="0">
-      <thead><tr><th>Trabajador</th><th>Tipo de pago</th><th>Fecha</th><th>Monto</th></tr></thead>
+    <table border="1" cellpadding="4" cellspacing="0" style="{table_pct};table-layout:fixed">
+      <thead><tr>
+        <th style="{W["trabajador"]}">Trabajador</th>
+        <th style="{W["tipo"]}">Tipo de pago</th>
+        <th style="{W["fecha"]}">Fecha</th>
+        <th style="{W["monto"]}">Monto</th>
+      </tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
     """
@@ -2972,20 +3052,33 @@ def _build_general_html(
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v is not None else "—"
     fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
 
+    # Explicit widths on narrower-than-100% tables — Labor/Trabajador/
+    # Contratista keep enough room for long text, the money/hour columns
+    # don't need nearly as much as auto-layout gave them (issue #132).
+    LW = {"labor": "width:39%", "prom": "width:16%", "gan": "width:16%", "horas": "width:12%", "total": "width:17%"}
+    RW = {
+        "trab": "width:23%",
+        "cont": "width:23%",
+        "prom": "width:14%",
+        "gan": "width:14%",
+        "horas": "width:10%",
+        "total": "width:16%",
+    }
     labor_html = "".join(
-        f"<tr><td>{r['labor']}</td>"
-        f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
-        f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
-        f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
-        f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
+        f'<tr><td style="{LW["labor"]}">{r["labor"]}</td>'
+        f'<td class="num" style="{LW["prom"]}">{fmtCLP(r["promedio_diario"])}</td>'
+        f'<td class="num" style="{LW["gan"]}">{fmtCLP(r["ganancia_hora"])}</td>'
+        f'<td class="num" style="{LW["horas"]}">{fmtHrs(r["total_horas"])}</td>'
+        f'<td class="total" style="{LW["total"]}">{fmtCLP(r["total"])}</td></tr>'
         for r in labor_rows
     )
     ranking_html = "".join(
-        f"<tr><td>{r['trabajador']}</td><td>{r['contratista']}</td>"
-        f'<td class="num">{fmtCLP(r["promedio_diario"])}</td>'
-        f'<td class="num">{fmtCLP(r["ganancia_hora"])}</td>'
-        f'<td class="num">{fmtHrs(r["total_horas"])}</td>'
-        f'<td class="total">{fmtCLP(r["total"])}</td></tr>'
+        f'<tr><td style="{RW["trab"]}">{r["trabajador"]}</td>'
+        f'<td style="{RW["cont"]}">{r["contratista"]}</td>'
+        f'<td class="num" style="{RW["prom"]}">{fmtCLP(r["promedio_diario"])}</td>'
+        f'<td class="num" style="{RW["gan"]}">{fmtCLP(r["ganancia_hora"])}</td>'
+        f'<td class="num" style="{RW["horas"]}">{fmtHrs(r["total_horas"])}</td>'
+        f'<td class="total" style="{RW["total"]}">{fmtCLP(r["total"])}</td></tr>'
         for r in ranking_rows
     )
     header = _pdf_header(
@@ -3003,14 +3096,17 @@ def _build_general_html(
     return f"""
     {header}
     <p class="section-title">Ganancia promedio por labor</p>
-    <table><thead>
-      <tr><th>Labor</th><th class="num">Promedio diario</th>
-      <th class="num">Ganancia por hora</th><th class="num">Horas</th><th class="num">Total</th></tr>
+    <table style="width:80%;table-layout:fixed"><thead>
+      <tr><th style="{LW["labor"]}">Labor</th><th class="num" style="{LW["prom"]}">Promedio diario</th>
+      <th class="num" style="{LW["gan"]}">Ganancia por hora</th><th class="num" style="{LW["horas"]}">Horas</th>
+      <th class="num" style="{LW["total"]}">Total</th></tr>
     </thead><tbody>{labor_html}</tbody></table>
     <p class="section-title">Ranking por persona</p>
-    <table><thead>
-      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Promedio diario</th>
-      <th class="num">Ganancia por hora</th><th class="num">Horas</th><th class="num">Total</th></tr>
+    <table style="width:80%;table-layout:fixed"><thead>
+      <tr><th style="{RW["trab"]}">Trabajador</th><th style="{RW["cont"]}">Contratista</th>
+      <th class="num" style="{RW["prom"]}">Promedio diario</th>
+      <th class="num" style="{RW["gan"]}">Ganancia por hora</th>
+      <th class="num" style="{RW["horas"]}">Horas</th><th class="num" style="{RW["total"]}">Total</th></tr>
     </thead><tbody>{ranking_html}</tbody></table>
     """
 
@@ -3080,15 +3176,29 @@ def _build_detalle_html(
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
+    # Labor/Nombre CC hold free-text descriptions that can run long, so this
+    # table keeps close to full width — but the numeric columns (Costo/hora,
+    # Jornadas, Total, % pago) had much more room than their short values
+    # ever need, before these explicit widths (issue #132).
+    DW = {
+        "tipo": "width:9%",
+        "labor": "width:20%",
+        "cc": "width:6%",
+        "nombre_cc": "width:19%",
+        "costo_hora": "width:11%",
+        "jornadas": "width:8%",
+        "total": "width:13%",
+        "pct": "width:14%",
+    }
     rows_html = "".join(
-        f'<tr><td><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
+        f'<tr><td style="{DW["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
         f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
-        f"<td>{r['labor']}</td><td>{r['centro_costo']}</td>"
-        f"<td>{_escape_html(r['centro_costo_nombre'] or '—')}</td>"
-        f'<td class="num">{fmtCLP(r["costo_hora"])}</td>'
-        f'<td class="num">{r["jornadas"]}</td>'
-        f'<td class="total">{fmtCLP(r["costo_total"])}</td>'
-        f'<td class="num">{fmtPct(r["pct_pago"])}</td></tr>'
+        f'<td style="{DW["labor"]}">{r["labor"]}</td><td style="{DW["cc"]}">{r["centro_costo"]}</td>'
+        f'<td style="{DW["nombre_cc"]}">{_escape_html(r["centro_costo_nombre"] or "—")}</td>'
+        f'<td class="num" style="{DW["costo_hora"]}">{fmtCLP(r["costo_hora"])}</td>'
+        f'<td class="num" style="{DW["jornadas"]}">{r["jornadas"]}</td>'
+        f'<td class="total" style="{DW["total"]}">{fmtCLP(r["costo_total"])}</td>'
+        f'<td class="num" style="{DW["pct"]}">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
     )
 
@@ -3121,10 +3231,13 @@ def _build_detalle_html(
     {header}
     {summary_section}
     <p class="section-title">Detalle</p>
-    <table class="detalle-table"><thead>
-      <tr><th>Tipo pago</th><th>Labor</th><th>CC</th><th>Nombre CC</th>
-      <th class="num">Costo/hora</th><th class="num">Jornadas</th>
-      <th class="num">Total</th><th class="num">% pago</th></tr>
+    <table class="detalle-table" style="table-layout:fixed"><thead>
+      <tr><th style="{DW["tipo"]}">Tipo pago</th><th style="{DW["labor"]}">Labor</th>
+      <th style="{DW["cc"]}">CC</th><th style="{DW["nombre_cc"]}">Nombre CC</th>
+      <th class="num" style="{DW["costo_hora"]}">Costo/hora</th>
+      <th class="num" style="{DW["jornadas"]}">Jornadas</th>
+      <th class="num" style="{DW["total"]}">Total</th>
+      <th class="num" style="{DW["pct"]}">% pago</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
@@ -3233,7 +3346,7 @@ def _build_contratista_html(
         g["by_date"][r["fecha"]] = g["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
 
     w = _pivot_col_widths(
-        {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}, len(dates)
+        {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9}, len(dates)
     )
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
@@ -3283,7 +3396,7 @@ def _build_contratista_html(
     )
     return f"""
     {header}
-    <table class="pivot-wide"><thead>
+    <table class="pivot-wide" style="{w['table']}"><thead>
       <tr>
         <th style="{w['worker']}">Trabajador</th>
         <th style="{w['labor']}">Labor</th>
@@ -3397,7 +3510,7 @@ def _build_resumen_horas_html(
     resumen_monto = sum(e["monto"] for _, e in sorted_workers)
 
     _check_pivot_date_range(dates, "Horas extra por persona")
-    w = _pivot_col_widths({"worker": 20, "tipo": 12, "total": 10, "monto": 14}, len(dates))
+    w = _pivot_col_widths({"worker": 16, "tipo": 7, "total": 7, "monto": 10}, len(dates))
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
         f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
@@ -3444,7 +3557,7 @@ def _build_resumen_horas_html(
     {header}
     <p class="pdf-note">*Sólo se muestran aquellos trabajadores que cuentan con horas extras en el periodo especificado.</p>
     {summary_html}
-    <table class="pivot-wide"><thead>
+    <table class="pivot-wide" style="{w['table']}"><thead>
       <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total hrs</th><th class="num" style="{w['monto']}">Monto</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
@@ -3674,15 +3787,20 @@ def _build_jornadas_trabajador_html(
     rows = _rows_to_dicts(cur)
 
     total = sum(int(r["jornadas"] or 0) for r in rows)
+    # Explicit widths (table-layout:fixed) on a narrower-than-100% table —
+    # without them this 3-column table's auto layout collapsed "Contratista"
+    # to near-zero width and overlapped its text (issue #132).
+    W = {"trabajador": "width:47%", "contratista": "width:41%", "jornadas": "width:12%"}
     rows_html = "".join(
-        f'<tr><td>{r["trabajador"] or ""}</td>'
-        f'<td>{r["contratista"] or ""}</td>'
-        f'<td class="num">{r["jornadas"] or 0}</td></tr>'
+        f'<tr><td style="{W["trabajador"]}">{r["trabajador"] or ""}</td>'
+        f'<td style="{W["contratista"]}">{r["contratista"] or ""}</td>'
+        f'<td class="num" style="{W["jornadas"]}">{r["jornadas"] or 0}</td></tr>'
         for r in rows
     )
     rows_html += (
-        f'<tr class="total-row"><td><b>Suma total</b></td><td></td>'
-        f'<td class="num"><b>{total}</b></td></tr>'
+        f'<tr class="total-row"><td style="{W["trabajador"]}"><b>Suma total</b></td>'
+        f'<td style="{W["contratista"]}"></td>'
+        f'<td class="num" style="{W["jornadas"]}"><b>{total}</b></td></tr>'
     )
 
     header = _pdf_header(
@@ -3693,8 +3811,8 @@ def _build_jornadas_trabajador_html(
     )
     return f"""
     {header}
-    <table><thead>
-      <tr><th>Trabajador</th><th>Contratista</th><th class="num">Jornadas</th></tr>
+    <table style="width:55%;table-layout:fixed"><thead>
+      <tr><th style="{W["trabajador"]}">Trabajador</th><th style="{W["contratista"]}">Contratista</th><th class="num" style="{W["jornadas"]}">Jornadas</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
 
@@ -3992,7 +4110,7 @@ def _build_bono_mensual_html(
     )
     return f"""
     {header}
-    <table><thead>
+    <table style="width:88%;table-layout:fixed"><thead>
       <tr><th style="{W["trabajador"]}">Trabajador</th><th style="{W["rut"]}">RUT</th>
       <th style="{W["contratista"]}">Contratista</th><th style="{W["campo"]}">Empresa/Campo</th>
       <th style="{W["cc"]}">CC</th><th style="{W["fecha"]}">Fecha</th>
@@ -4331,7 +4449,11 @@ def _build_hora_ponderada_html(
         grand_total += total
         grand_horas += horas
 
-    w = _pivot_col_widths({"labor": 16, "cc": 10, "total": 12}, len(dates))
+    # date_pct wider than the default (5 vs 3.5): this pivot's cells hold
+    # money values up to 7 digits ($X.XXX.XXX), unlike the smaller hour/count
+    # values in other pivots — narrower columns risk reproducing #108's
+    # column-overlap bug.
+    w = _pivot_col_widths({"labor": 13, "cc": 8, "total": 13}, len(dates), date_pct=5.0)
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
         f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
@@ -4399,7 +4521,7 @@ def _build_hora_ponderada_html(
     )
     return f"""
     {header}
-    <table class="pivot-wide"><thead>
+    <table class="pivot-wide" style="{w['table']}"><thead>
       <tr>
         <th style="{w['labor']}">Labor</th>
         <th style="{w['cc']}">CC</th>
@@ -5290,7 +5412,7 @@ async def download_tarjas_tractorista_pdf(
     pivot_html = ""
     if pivot["dates"]:
         _check_pivot_date_range(pivot["columns"], "Por operador")
-        widths = _pivot_col_widths({"fecha": 16, "total": 12}, len(pivot["columns"]))
+        widths = _pivot_col_widths({"fecha": 12, "total": 10}, len(pivot["columns"]))
         pivot_ths = "".join(
             f'<th class="num" style="{widths["date"]}">{_escape_html(c)}</th>'
             for c in pivot["columns"]
@@ -5311,7 +5433,7 @@ async def download_tarjas_tractorista_pdf(
             for c in pivot["columns"]
         )
         pivot_html = f"""
-        <table class="data" style="width:100%;border-collapse:collapse;font-size:8pt;table-layout:fixed;margin-top:16px">
+        <table class="data" style="{widths['table']};border-collapse:collapse;font-size:8pt;table-layout:fixed;margin-top:16px">
           <thead><tr>
             <th style="{widths["fecha"]}">Fecha</th>{pivot_ths}
             <th class="num" style="{widths["total"]}">Total</th>
