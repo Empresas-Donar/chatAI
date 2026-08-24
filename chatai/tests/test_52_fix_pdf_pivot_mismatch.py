@@ -67,13 +67,42 @@ async def _bytes(resp):
 
 
 class TestPivotColWidths:
-    def test_52_widths_sum_to_100_percent(self):
-        w = tc._pivot_col_widths(
-            {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}, 7
+    def test_52_widths_sum_to_100_percent_of_declared_table_width(self):
+        """Issue #132: a range with few dates now renders a narrower table
+        instead of always stretching to fill the page — each returned
+        column width is a percent OF THAT TABLE (w['table']), not of the
+        page. The 100%-sum invariant that guards against reportlab's
+        'negative availWidth' crash (#52) now applies at that level, so the
+        returned (already table-relative) widths must sum to 100 — not the
+        raw, unscaled fixed_pct input."""
+        fixed = {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}
+        w = tc._pivot_col_widths(fixed, 7)
+        returned_fixed_sum = sum(
+            float(w[k].split(":")[1].rstrip("%")) for k in fixed
         )
-        fixed_sum = 16 + 18 + 10 + 10 + 10
         date_pct = float(w["date"].split(":")[1].rstrip("%"))
-        assert abs(fixed_sum + date_pct * 7 - 100) < 0.01
+        assert abs(returned_fixed_sum + date_pct * 7 - 100) < 0.01
+
+    def test_52_many_dates_falls_back_to_full_width(self):
+        """Once fixed + n_dates*date_pct would exceed 100%, the table stays
+        full width and the date columns share the remainder evenly — same
+        behavior as before #132, still guarding against the #52 crash."""
+        fixed = {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}
+        w = tc._pivot_col_widths(fixed, 30)
+        assert w["table"] == "width:100.0%"
+        fixed_sum = sum(fixed.values())
+        date_pct = float(w["date"].split(":")[1].rstrip("%"))
+        assert abs(fixed_sum + date_pct * 30 - 100) < 0.01
+
+    def test_52_few_dates_narrows_table_below_100_percent(self):
+        """The behavior issue #132 actually added: a handful of dates no
+        longer stretches fixed columns' RENDERED (page-relative) width to
+        fill the page — the table itself narrows instead."""
+        fixed = {"worker": 16, "labor": 18, "tipo": 10, "rate": 10, "total": 10}
+        w = tc._pivot_col_widths(fixed, 3)
+        table_pct = float(w["table"].split(":")[1].rstrip("%"))
+        assert table_pct < 100.0
+        assert table_pct == pytest.approx(64 + 3.5 * 3)
 
     def test_52_zero_dates_does_not_divide_by_zero(self):
         w = tc._pivot_col_widths({"worker": 22, "tipo": 14, "total": 12}, 0)
