@@ -2901,54 +2901,37 @@ def _build_resumen_persona_html(
         workers[k]["total"] += float(r["total"] or 0)
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
-    fmtCLP = lambda v: f"${v:,.0f}".replace(",", ".")
-
-    # Explicit widths (table-layout:fixed) on a narrower-than-100% table —
-    # without them this table's auto layout collapsed "Trabajador" to
-    # near-zero width and overlapped every column's text (issue #132).
-    W = {
-        "trabajador": "width:34%",
-        "tipo": "width:20%",
-        "fecha": "width:22%",
-        "monto": "width:24%",
-    }
-
-    # Flat list layout — xhtml2pdf cannot reliably render wide pivot tables.
-    # Rows: Trabajador | Tipo de pago | Fecha | Monto
+    # Per-date pivot (one column per date), matching the on-screen table
+    # exactly (issue #134) — same _pivot_col_widths pattern already used by
+    # Detalle Contratistas / Horas Extra / Hora Ponderada 9h.
+    _check_pivot_date_range(dates, "Resumen por persona")
+    w = _pivot_col_widths({"worker": 18, "tipo": 9, "total": 11}, len(dates))
+    date_headers = "".join(
+        f'<th class="num" style="{w["date"]}">'
+        f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
+        for d in dates
+    )
     rows_html = ""
     prev = None
     for (trab, tipo), entry in sorted_workers:
-        day_rows = sorted(
-            ((d, v) for d, v in entry["by_date"].items() if v), key=lambda x: x[0]
-        )
-        for i, (d, v) in enumerate(day_rows):
-            is_first_row = i == 0
-            is_new_worker = prev != trab and is_first_row
-            if is_new_worker:
-                prev = trab
-            cls = "worker-first" if is_new_worker else ""
-            fecha_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
-            rows_html += (
-                f'<tr class="{cls}">'
-                f'<td style="{W["trabajador"]}">{"<b>" + trab + "</b>" if is_first_row else ""}</td>'
-                f'<td style="{W["tipo"]}">{tipo if is_first_row else ""}</td>'
-                f'<td style="{W["fecha"]}">{fecha_fmt}</td>'
-                f'<td class="num" style="{W["monto"]}">{fmtCLP(v)}</td>'
-                f"</tr>"
-            )
-        # subtotal row per worker+tipo
+        is_first = prev != trab
+        prev = trab
+        cls = "worker-first" if is_first else ""
         rows_html += (
-            f'<tr style="background:#e8e8e8">'
-            f'<td style="{W["trabajador"]}"></td><td style="{W["tipo"]}"></td>'
-            f'<td style="{W["fecha"]};font-weight:bold;text-align:right">Subtotal</td>'
-            f'<td class="total" style="{W["monto"]}">{fmtCLP(entry["total"])}</td>'
-            f"</tr>"
+            f'<tr class="{cls}">'
+            f'<td style="{w["worker"]}">{"<b>" + trab + "</b>" if is_first else ""}</td>'
+            f'<td style="{w["tipo"]}">{tipo}</td>'
         )
+        for d in dates:
+            v = entry["by_date"].get(d, 0)
+            rows_html += (
+                f'<td class="num" style="{w["date"]}">{_fmt_clp(v) if v else "0"}</td>'
+            )
+        rows_html += f'<td class="total" style="{w["total"]}">{_fmt_clp(entry["total"])}</td></tr>'
 
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
     title = _pdf_title("Resumen Por Persona", contratista)
-    table_pct = "width:60%"
     return f"""
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e293b;margin-bottom:12px">
       <tr>
@@ -2959,15 +2942,9 @@ def _build_resumen_persona_html(
         </td>
       </tr>
     </table>
-    <table border="1" cellpadding="4" cellspacing="0" style="{table_pct};table-layout:fixed">
-      <thead><tr>
-        <th style="{W["trabajador"]}">Trabajador</th>
-        <th style="{W["tipo"]}">Tipo de pago</th>
-        <th style="{W["fecha"]}">Fecha</th>
-        <th style="{W["monto"]}">Monto</th>
-      </tr></thead>
-      <tbody>{rows_html}</tbody>
-    </table>
+    <table class="pivot-wide" style="{w['table']}"><thead>
+      <tr><th style="{w['worker']}">Trabajador</th><th style="{w['tipo']}">Tipo de pago</th>{date_headers}<th class="num" style="{w['total']}">Total</th></tr>
+    </thead><tbody>{rows_html}</tbody></table>
     """
 
 
@@ -2993,7 +2970,8 @@ async def download_tarjas_resumen_persona_pdf(
             )
     finally:
         conn.close()
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
     {body}
     </body></html>"""
     return _render_pdf(html, f"resumen_persona_{fecha_inicio}_{fecha_termino}.pdf")
