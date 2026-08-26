@@ -301,6 +301,22 @@ Campo 1 — Talagante:
 | 615   | SEMILLERO BUNCHING 26/27 | 666 |
 | 583-612 | PIMENTONES (varios)    | 604-626 (ver detalle en tarjas_cc) |
 
+### vw_apuntes_analiticos_desglosados — Apuntes contables desglosados por CC
+Vista sobre Reporte_Analitico: explota `analytic_distribution` (una fila por CC) y
+resuelve modelos via `Modelos_Distribucion_Analitica` cuando el JSON directo viene vacío.
+DDL versionado en `sql/bigquery/vw_apuntes_analiticos_desglosados.sql`.
+
+- product_id (INTEGER): ID de producto del apunte (account.move.line.product_id)
+- producto (STRING): nombre en español del catálogo `Producto` (`JSON_VALUE(name, '$.es_CL')`).
+  NULL si `product_id` no matchea `Producto.id`. `Variantes_del_producto` no está exportada.
+- cc_nombre / cc_codigo: centro de costo analítico (JOIN `CC_analiticos`)
+- balance_asignado / debito_asignado / credito_asignado: montos ponderados por % del CC
+- empresa_nombre: razón social según company_id
+- origen_distribucion: "directo" | "via_codigo"
+
+Preferir esta vista (no `Reporte_Analitico` crudo) cuando el usuario pida costos por
+producto y centro de costo. Filtrar `parent_state = 'posted'`.
+
 ### Ordenes_de_aplicacion — Órdenes de aplicación agrícola (mrp.production) — 1.479 registros
 Estas son órdenes de fabricación/aplicación de insumos agroquímicos. Modelo Odoo: mrp.production.
 - id (INTEGER): ID interno
@@ -559,6 +575,8 @@ CRUCES CLAVE ENTRE TABLAS ODOO:
 - Pedido → líneas: Pedidos_de_Venta.id ↔ Lineas_del_Pedido_de_Venta.order_id
 - Movimientos de un despacho: Despachos.id ↔ Movimientos_de_Stock.picking_id
 - Nombre template de producto: Variantes_del_producto.product_tmpl_id ↔ Producto.id
+- Nombre producto en apunte analítico: vw_apuntes_analiticos_desglosados.producto
+  (JOIN Producto.id = product_id; Variantes_del_producto no está en el export actual)
 
 ══════════════════════════════════════════════
 FUENTE 2 — PostgreSQL (esquema appsheet / public)
@@ -827,6 +845,7 @@ _TOOLS = [
             "Ejecuta SQL en BigQuery y devuelve resultados. "
             "Usar path completo: `ace-scarab-484515-v1.odoo_data.TABLA`. "
             "Tablas disponibles: Cuentas_por_cobrar, Remuneraciones, Reporte_Analitico, "
+            "vw_apuntes_analiticos_desglosados (apuntes por CC + columna producto), "
             "Ordenes_de_aplicacion, Contactos, Cuentas_Contables, Diarios_Contables, "
             "Nomina, Ubicaciones, Variantes_del_producto, Producto, Empleados, "
             "Pedidos_de_Venta, Lineas_del_Pedido_de_Venta, Despachos, Movimientos_de_Stock. "
