@@ -1,7 +1,10 @@
 -- =============================================================================
--- TARJAS: Vista reporte semanal por contratista
--- Reemplaza los reportes dinámicos de Google Sheets
--- total_pagar = total_trabajado + total_contratista (lo que paga la empresa)
+-- TARJAS: agrega horas_extras a la vista tarjas_reporte
+-- Necesario para que el reporte Detalle Operacional pueda calcular Costo/hora
+-- en labores pagadas total o parcialmente como hora extra (horas_trabajadas=0
+-- pero horas_extras>0) en vez de mostrar "-".
+-- Columna agregada AL FINAL del SELECT: Postgres no permite insertar columnas
+-- en medio de un CREATE OR REPLACE VIEW sin romper las posiciones existentes.
 -- =============================================================================
 CREATE OR REPLACE VIEW appsheet.tarjas_reporte AS
 SELECT DISTINCT

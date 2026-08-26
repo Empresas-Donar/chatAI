@@ -709,8 +709,8 @@ def _query_detalle_rows(cur, where, params):
                  THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
                  ELSE NULL END                                        AS total_unitario,
             SUM(total_labor)                                          AS costo_total,
-            CASE WHEN SUM(horas_trabajadas) > 0
-                 THEN ROUND((SUM(total_labor) / SUM(horas_trabajadas))::numeric, 0)
+            CASE WHEN SUM(horas_trabajadas) + SUM(horas_extras) > 0
+                 THEN ROUND((SUM(total_labor) / (SUM(horas_trabajadas) + SUM(horas_extras)))::numeric, 0)
                  ELSE NULL END                                        AS costo_hora,
             ROUND(
                 SUM(total_labor)::numeric
