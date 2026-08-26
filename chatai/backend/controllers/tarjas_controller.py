@@ -2899,7 +2899,12 @@ def _build_resumen_persona_html(
             r["fecha"], 0
         ) + float(r["total"] or 0)
         workers[k]["total"] += float(r["total"] or 0)
-    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+    # Alphabetical by worker name, keeping each worker's "Al día"/"trato"
+    # rows contiguous — required for the is_first "print name once" logic
+    # below (issue #137).
+    sorted_workers = sorted(
+        workers.items(), key=lambda x: ((x[0][0] or "").lower(), x[0][1] or "")
+    )
 
     # Per-date pivot (one column per date), matching the on-screen table
     # exactly (issue #134) — same _pivot_col_widths pattern already used by
