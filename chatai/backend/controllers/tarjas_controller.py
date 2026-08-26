@@ -4156,7 +4156,7 @@ def _build_hora_ponderada_filters(
     centro_costo=None,
     labor=None,
 ):
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", f"NOT {_TRACTORISTA_PAGOS_SQL}"]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -4222,23 +4222,28 @@ async def get_tarjas_hora_ponderada_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                f"SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                f"WHERE contratista IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
+                f"ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
-                "WHERE cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
+                f"SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
+                f"WHERE cuartel_cc IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
+                f"ORDER BY cuartel_cc"
             )
             centros_costo = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
-                "WHERE labor IS NOT NULL ORDER BY labor"
+                f"SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
+                f"WHERE labor IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
+                f"ORDER BY labor"
             )
             labores = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=f"NOT {_TRACTORISTA_PAGOS_SQL}"
+            )
     finally:
         conn.close()
 
