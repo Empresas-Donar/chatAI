@@ -14,17 +14,17 @@ def get_connection():
     host = os.environ["DB_HOST"]
     # Cloud Run uses a Unix socket path (e.g. /cloudsql/project:region:instance)
     # psycopg2 connects via socket when host starts with '/'
+    timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "8"))
+    common = {
+        "dbname": os.environ["DB_NAME"],
+        "user": os.environ["DB_USER"],
+        "password": os.environ["DB_PASSWORD"],
+        "connect_timeout": timeout,
+    }
     if host.startswith("/"):
-        return psycopg2.connect(
-            host=host,
-            dbname=os.environ["DB_NAME"],
-            user=os.environ["DB_USER"],
-            password=os.environ["DB_PASSWORD"],
-        )
+        return psycopg2.connect(host=host, **common)
     return psycopg2.connect(
         host=host,
         port=int(os.environ.get("DB_PORT", 5432)),
-        dbname=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
+        **common,
     )

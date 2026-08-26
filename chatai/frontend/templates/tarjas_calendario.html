@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Calendario — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_calendario.css?v={{ static_v }}-edit2" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Calendario</h1>
+      <p>Planificación y registros de campo por día. Un plan largo se pinta en todos los días de su rango. Clic en un día para ver el detalle.</p>
+    </div>
+  </div>
+
+  <div class="filter-bar tcal-filter-bar">
+    <div class="tcal-month-nav">
+      <label>Mes</label>
+      <div class="tcal-month-row">
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-prev" aria-label="Mes anterior">‹</button>
+        <input lang="es-CL" type="month" id="fil-month" />
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-next" aria-label="Mes siguiente">›</button>
+      </div>
+    </div>
+    <div>
+      <label>Empresa / Campo</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Estado</label>
+      <select id="fil-estado"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Supervisor</label>
+      <select id="fil-supervisor"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+  </div>
+
+  <div id="meta-bar" class="tcal-meta" style="display:none"></div>
+
+  <div id="loading-state" class="tcal-empty" style="display:none">
+    <h3>Cargando…</h3>
+    <p>Consultando el mes.</p>
+  </div>
+
+  <div id="calendar" class="tcal-wrap" style="display:none"></div>
+
+  <div id="empty-state" class="tcal-empty" style="display:none">
+    <h3>Sin actividad</h3>
+    <p>No hay planificación ni registros para los filtros seleccionados en este mes.</p>
+  </div>
+
+</div>
+
+<div id="day-overlay" class="tcal-overlay" hidden></div>
+<aside id="day-panel" class="tcal-panel" hidden role="dialog" aria-modal="true" aria-labelledby="day-panel-title">
+  <div class="tcal-panel-head">
+    <div class="tcal-panel-head-main">
+      <div class="tcal-day-nav">
+        <button type="button" class="btn btn-secondary btn-sm" id="day-prev" aria-label="Día anterior">‹</button>
+        <input lang="es-CL" type="date" id="pan-fecha" />
+        <button type="button" class="btn btn-secondary btn-sm" id="day-next" aria-label="Día siguiente">›</button>
+      </div>
+      <h2 id="day-panel-title">Día</h2>
+      <p id="day-panel-sub" class="tcal-panel-sub"></p>
+    </div>
+    <button type="button" class="tcal-panel-close" id="day-panel-close" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="tcal-panel-filters">
+    <div>
+      <label for="pan-empresa">Empresa / Campo</label>
+      <select id="pan-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label for="pan-labor">Labor</label>
+      <select id="pan-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label for="pan-estado">Estado</label>
+      <select id="pan-estado"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label for="pan-contratista">Contratista</label>
+      <select id="pan-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label for="pan-supervisor">Supervisor</label>
+      <select id="pan-supervisor"><option value="">Todos</option></select>
+    </div>
+  </div>
+  <div class="tcal-tabs" role="tablist">
+    <button type="button" class="tcal-tab is-active" role="tab" id="tab-aplicados" data-tab="aplicados" aria-selected="true">
+      Labores aplicadas <span id="tab-count-app">0</span>
+    </button>
+    <button type="button" class="tcal-tab" role="tab" id="tab-planificados" data-tab="planificados" aria-selected="false">
+      Planificado <span id="tab-count-plan">0</span>
+    </button>
+  </div>
+  <div id="day-panel-toolbar" class="tcal-panel-toolbar" hidden>
+    <label class="tcal-toggle">
+      <input type="checkbox" id="fil-solo-sospechosos" />
+      Solo mal digitados
+    </label>
+    <a id="day-timeline-link" class="tcal-panel-link" href="#">Abrir línea de tiempo</a>
+  </div>
+  <div id="day-panel-body" class="tcal-panel-body">
+    <p class="tcal-panel-hint">Selecciona un día en el calendario.</p>
+  </div>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_calendario.js?v={{ static_v }}-edit2"></script>
+{% endblock %}
