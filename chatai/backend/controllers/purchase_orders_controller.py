@@ -1098,14 +1098,22 @@ async def billing_order_pdf(
             )
             tipo_rows = cur.fetchall()
 
-            # Pivot data: worker × date
+            # Pivot data: worker × date.
+            # Must mirror tarjas_reporte's scope (issue #146): total_pagar is
+            # the billable amount (total_pagar = total_trabajado +
+            # total_contratista — see sql/tarjas/01_views_reporte.sql), and
+            # only estado='Aprobado' rows count toward what's actually
+            # invoiced. Using total_trabajado and/or skipping the estado
+            # filter here made this pivot's "Suma total" drift from the
+            # header "Total a Pagar" (and from the on-screen total).
             cur.execute(
                 """
                 SELECT trabajador, fecha::date::text AS fecha,
-                       SUM(total_trabajado) AS total
+                       SUM(total_pagar) AS total
                 FROM appsheet.tarjas_pagos
                 WHERE contratista  = %s
                   AND nombre_campo = %s
+                  AND estado       = 'Aprobado'
                   AND fecha::date BETWEEN %s AND %s
                 GROUP BY trabajador, fecha::date
                 ORDER BY trabajador, fecha::date
