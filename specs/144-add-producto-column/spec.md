@@ -21,7 +21,7 @@ Hay que:
 
 ## Acceptance Criteria
 
-- [x] La vista incluye una columna `producto` (nombre en español cuando el catálogo matchea).
+- [x] La vista incluye una columna `producto` poblada (catálogo si coincide con la etiqueta; si no, name del apunte).
 - [x] Las columnas existentes no se renombran ni se eliminan.
 - [x] El DDL queda en `sql/bigquery/vw_apuntes_analiticos_desglosados.sql`.
 - [x] La vista se aplica en BigQuery (o queda documentado el comando si faltan permisos).
@@ -65,14 +65,13 @@ Issues cercanos: #77 (`CC_analiticos`), #7 (`Modelos_Distribucion_Analitica`),
   **final**, para no romper consumidores que seleccionan columnas por nombre
   (Looker Studio, `vw_informe_gerencial_costos`).
 - JOIN: `Producto.id = ad.product_id` porque `Variantes_del_producto` no existe
-  en `odoo_data`. Nombre:
-  `COALESCE(JSON_VALUE(p.name, '$.es_CL'), JSON_VALUE(p.name, '$.en_US'))`.
-- Cobertura live post-deploy: 10.733 / 291.524 filas con `producto` no nulo
-  (el catálogo `Producto` tiene solo 96 templates). Algunas coincidencias de
-  ID son falsas (variante vs template): p.ej. línea "PIMENTON …" → producto
-  "SERVICIO TECNICO TRABAJOS TERCEROS". No se filtra por substring del `name`
-  para no inventar lógica de negocio; el follow-up correcto es re-exportar
-  `Variantes_del_producto`.
+  en `odoo_data`. El catálogo solo tiene ~96 templates y deja `producto` vacío
+  en ~96% de las filas; además algunos IDs coinciden por accidente (variante vs
+  template). Por eso `producto` es:
+  1. nombre del catálogo **solo si** aparece en `name` del apunte;
+  2. si no, `name` sin prefijos OC / órdenes MO / `[código]`;
+  3. si no, el nombre del catálogo.
+- Cobertura esperada con el fallback de etiqueta: ~290k / 291k filas.
 - No se versiona `vw_informe_gerencial_costos` en este cambio (fuera de scope).
 - Tests offline contra el archivo SQL: no dependen de credenciales BQ.
 - Isolation farm-to-farm: N/A (warehouse BigQuery compartido, sin `farm_id`).

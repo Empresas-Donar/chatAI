@@ -307,8 +307,11 @@ resuelve modelos via `Modelos_Distribucion_Analitica` cuando el JSON directo vie
 DDL versionado en `sql/bigquery/vw_apuntes_analiticos_desglosados.sql`.
 
 - product_id (INTEGER): ID de producto del apunte (account.move.line.product_id)
-- producto (STRING): nombre en español del catálogo `Producto` (`JSON_VALUE(name, '$.es_CL')`).
-  NULL si `product_id` no matchea `Producto.id`. `Variantes_del_producto` no está exportada.
+- producto (STRING): nombre del insumo. Prefiere el catálogo `Producto` si ese
+  nombre aparece en la etiqueta del apunte; si no, limpia prefijos Odoo de `name`
+  (OC `OCD1-00674:`, órdenes `D1/MO/01035 -`, códigos `[PETR-002]`).
+  `Variantes_del_producto` no está exportada (el JOIN directo a `Producto.id`
+  cubre pocos IDs).
 - cc_nombre / cc_codigo: centro de costo analítico (JOIN `CC_analiticos`)
 - balance_asignado / debito_asignado / credito_asignado: montos ponderados por % del CC
 - empresa_nombre: razón social según company_id
@@ -576,7 +579,7 @@ CRUCES CLAVE ENTRE TABLAS ODOO:
 - Movimientos de un despacho: Despachos.id ↔ Movimientos_de_Stock.picking_id
 - Nombre template de producto: Variantes_del_producto.product_tmpl_id ↔ Producto.id
 - Nombre producto en apunte analítico: vw_apuntes_analiticos_desglosados.producto
-  (JOIN Producto.id = product_id; Variantes_del_producto no está en el export actual)
+  (catálogo Producto si coincide con la etiqueta; si no, name del apunte sin prefijo OC/MO)
 
 ══════════════════════════════════════════════
 FUENTE 2 — PostgreSQL (esquema appsheet / public)

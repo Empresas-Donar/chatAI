@@ -3,9 +3,9 @@ Regression tests for issue #144: add `producto` to BigQuery view
 vw_apuntes_analiticos_desglosados and persist the DDL in git.
 
 The live view lived only in BigQuery (ace-scarab-484515-v1.odoo_data) and
-exposed product_id but not the Spanish product name. Variantes_del_producto
-is not exported, so the SQL joins Producto.id = product_id and extracts
-JSON_VALUE(name, '$.es_CL').
+exposed product_id but not the product name. Variantes_del_producto is not
+exported, so producto is COALESCE(catalog name when it appears in the line,
+cleaned account.move.line name, catalog name).
 
 Tests are offline against the versioned SQL file so they do not depend on
 BigQuery credentials.
@@ -51,6 +51,14 @@ class TestIssue144AddProductoColumn:
         src = _sql_source()
         assert "JSON_VALUE(p.name, '$.es_CL')" in src
         assert "JSON_VALUE(p.name, '$.en_US')" in src
+
+    def test_144_sql_falls_back_to_line_name(self):
+        """Catalog join alone left producto empty; must parse OC/MO/[code] prefixes."""
+        src = _sql_source()
+        assert "_producto_etiqueta" in src
+        assert "COALESCE(" in src
+        assert r"r'(?i)^[A-Z0-9_-]+:\s*'" in src
+        assert r"r'^\[.*?\]\s*'" in src
 
     def test_144_sql_preserves_existing_consumer_columns(self):
         src = _sql_source()
