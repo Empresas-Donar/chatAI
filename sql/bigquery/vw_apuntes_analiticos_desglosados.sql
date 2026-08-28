@@ -1,28 +1,35 @@
 -- =============================================================================
 -- BigQuery: apuntes analíticos desglosados por centro de costo
 -- Project/dataset: ace-scarab-484515-v1.odoo_data
--- Issue: #144, #148
+-- Issue: #144, #148, #150
 --
 -- Explota analytic_distribution (un CC por fila) sobre Reporte_Analitico.
 -- Si el JSON directo viene vacío, resuelve el modelo via
 -- Modelos_Distribucion_Analitica (analytic_distribution_code_id).
 --
+-- product_id en Reporte_Analitico es el ID de la VARIANTE Odoo
+-- (product.product), no del template (product.template) que exporta
+-- Producto. El JOIN correcto es product_id → Variantes_del_producto.id
+-- → Variantes_del_producto.product_tmpl_id → Producto.id (#150). Antes de
+-- que Variantes_del_producto existiera en BigQuery, se usaba
+-- Producto.id = product_id directo, que solo acertaba por coincidencia
+-- (~96 de ~2.100 product_id distintos).
+--
 -- producto: nombre del insumo/producto de la línea.
--- 1) Catálogo Producto (template) solo si el nombre aparece en la etiqueta
---    (evita colisiones id variante vs id template).
+-- 1) Catálogo Producto (vía Variantes_del_producto.product_tmpl_id) solo si
+--    el nombre aparece en la etiqueta (evita falsos positivos de variantes
+--    que comparten template con productos de nombre distinto).
 -- 2) Fallback: limpia prefijos Odoo del campo name (OC, MO, [código]).
 -- 3) Último recurso: nombre del catálogo aunque no esté en la etiqueta.
--- Variantes_del_producto no está exportada; Producto tiene ~96 templates.
 --
--- referencia_interna: Producto.default_code del mismo JOIN por product_id.
---   1) Catálogo Producto (mismo JOIN que producto). Cobertura baja (~3% de
---      filas) por la misma limitación de catálogo: solo ~96 templates vs
---      ~2.100 product_id distintos (product_id en Reporte_Analitico es la
---      variante Odoo, no el template; Variantes_del_producto no está
---      exportada).
---   2) Fallback: código entre corchetes en name, ej. "[HER] OXUS",
---      "[PETR-002] PETROLEO". Sube la cobertura (~9% del total) pero es una
---      etiqueta libre del apunte contable: a veces es una categoría
+-- referencia_interna: código interno del producto.
+--   1) Variantes_del_producto.default_code (nivel variante, el más preciso —
+--      coincide exactamente con product_id).
+--   2) Producto.default_code (nivel template, por si la variante no tiene
+--      código propio pero el template sí).
+--   3) Fallback: código entre corchetes en name, ej. "[HER] OXUS",
+--      "[PETR-002] PETROLEO", para productos sin default_code en Odoo. Es
+--      una etiqueta libre del apunte contable: a veces es una categoría
 --      compartida entre varios productos (ej. "HER" en varios herbicidas),
 --      no necesariamente el SKU único de cada producto. Se exige mayúsculas/
 --      dígitos/._- sin espacios para excluir texto libre como
@@ -82,6 +89,7 @@ con_nombre AS (
             JSON_VALUE(p.name, '$.en_US')
         ) AS _producto_catalogo,
         COALESCE(
+            NULLIF(TRIM(v.default_code), ''),
             NULLIF(TRIM(p.default_code), ''),
             REGEXP_EXTRACT(ad.name, r'\[([A-Z][A-Z0-9._-]*)\]')
         ) AS referencia_interna,
@@ -111,8 +119,10 @@ con_nombre AS (
             ''
         )), '') AS _producto_etiqueta
     FROM apuntes_desarmados ad
+    LEFT JOIN `ace-scarab-484515-v1.odoo_data.Variantes_del_producto` v
+        ON v.id = ad.product_id
     LEFT JOIN `ace-scarab-484515-v1.odoo_data.Producto` p
-        ON p.id = ad.product_id
+        ON p.id = v.product_tmpl_id
 ),
 con_producto AS (
     SELECT

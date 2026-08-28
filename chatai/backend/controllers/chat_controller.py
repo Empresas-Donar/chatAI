@@ -306,17 +306,19 @@ Vista sobre Reporte_Analitico: explota `analytic_distribution` (una fila por CC)
 resuelve modelos via `Modelos_Distribucion_Analitica` cuando el JSON directo viene vacío.
 DDL versionado en `sql/bigquery/vw_apuntes_analiticos_desglosados.sql`.
 
-- product_id (INTEGER): ID de producto del apunte (account.move.line.product_id)
-- producto (STRING): nombre del insumo. Prefiere el catálogo `Producto` si ese
-  nombre aparece en la etiqueta del apunte; si no, limpia prefijos Odoo de `name`
-  (OC `OCD1-00674:`, órdenes `D1/MO/01035 -`, códigos `[PETR-002]`).
-  `Variantes_del_producto` no está exportada (el JOIN directo a `Producto.id`
-  cubre pocos IDs).
-- referencia_interna (STRING): código interno del producto. 1) `Producto.default_code`
-  vía el mismo JOIN que `producto` (cobertura ~3%). 2) Fallback: código en
-  mayúsculas entre corchetes en `name`, ej. "[HER] OXUS" (sube cobertura a ~10%,
-  pero puede ser una categoría compartida entre varios productos, no siempre
-  el SKU único).
+- product_id (INTEGER): ID de producto del apunte (account.move.line.product_id).
+  Es el ID de la VARIANTE Odoo (product.product), no del template.
+- producto (STRING): nombre del insumo. Resuelve el catálogo vía
+  `Variantes_del_producto.product_tmpl_id → Producto.id` (JOIN correcto por
+  variante); lo usa solo si el nombre aparece en la etiqueta del apunte, si no
+  limpia prefijos Odoo de `name` (OC `OCD1-00674:`, órdenes `D1/MO/01035 -`,
+  códigos `[PETR-002]`). Cobertura ~99,7%.
+- referencia_interna (STRING): código interno del producto. 1) `Variantes_del_producto.default_code`
+  (nivel variante, coincide exacto con product_id). 2) `Producto.default_code`
+  (nivel template, si la variante no tiene código propio). 3) Fallback: código
+  en mayúsculas entre corchetes en `name`, ej. "[HER] OXUS", para productos sin
+  default_code en Odoo (puede ser una categoría compartida entre varios
+  productos, no siempre el SKU único). Cobertura ~35%.
 - producto_con_referencia (STRING): `referencia_interna` + " - " + `producto`,
   o solo `producto` si no hay referencia interna.
 - cc_nombre / cc_codigo: centro de costo analítico (JOIN `CC_analiticos`)
