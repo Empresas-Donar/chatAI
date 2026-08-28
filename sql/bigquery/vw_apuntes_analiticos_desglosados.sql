@@ -15,8 +15,18 @@
 -- Variantes_del_producto no está exportada; Producto tiene ~96 templates.
 --
 -- referencia_interna: Producto.default_code del mismo JOIN por product_id.
---   Cobertura baja (~3% de filas) por la misma limitación de catálogo que
---   afecta a producto: solo ~96 templates vs ~2.100 product_id distintos.
+--   1) Catálogo Producto (mismo JOIN que producto). Cobertura baja (~3% de
+--      filas) por la misma limitación de catálogo: solo ~96 templates vs
+--      ~2.100 product_id distintos (product_id en Reporte_Analitico es la
+--      variante Odoo, no el template; Variantes_del_producto no está
+--      exportada).
+--   2) Fallback: código entre corchetes en name, ej. "[HER] OXUS",
+--      "[PETR-002] PETROLEO". Sube la cobertura (~9% del total) pero es una
+--      etiqueta libre del apunte contable: a veces es una categoría
+--      compartida entre varios productos (ej. "HER" en varios herbicidas),
+--      no necesariamente el SKU único de cada producto. Se exige mayúsculas/
+--      dígitos/._- sin espacios para excluir texto libre como
+--      "[Contabilizado en 2025-05-08]" o "[revertido]".
 -- producto_con_referencia: referencia_interna + " - " + producto, o solo
 --   producto cuando no hay referencia interna.
 -- =============================================================================
@@ -71,7 +81,10 @@ con_nombre AS (
             JSON_VALUE(p.name, '$.es_CL'),
             JSON_VALUE(p.name, '$.en_US')
         ) AS _producto_catalogo,
-        NULLIF(TRIM(p.default_code), '') AS referencia_interna,
+        COALESCE(
+            NULLIF(TRIM(p.default_code), ''),
+            REGEXP_EXTRACT(ad.name, r'\[([A-Z][A-Z0-9._-]*)\]')
+        ) AS referencia_interna,
         NULLIF(TRIM(REGEXP_REPLACE(
             REGEXP_REPLACE(
                 REGEXP_REPLACE(

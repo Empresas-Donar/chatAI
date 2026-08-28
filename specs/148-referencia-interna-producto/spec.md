@@ -41,6 +41,28 @@ solo 9.706 (~3,3%) tienen `Producto.default_code` no vacío para su `product_id`
 templates vs ~2.100 `product_id` distintos; `Variantes_del_producto` no está
 exportada).
 
+**Feedback post-deploy del usuario:** un producto conocido (OXUS, código Odoo
+"HER") no mostraba `referencia_interna` pese a que el código aparece
+literalmente en el apunte contable como `"OCD2-00206: [HER] OXUS"`. Causa
+raíz: `product_id` en `Reporte_Analitico` es el ID de la **variante** Odoo
+(`product.product`), pero `Producto` solo tiene templates (`product.template`);
+el JOIN por ID solo acierta quando el ID de variante coincide por accidente
+con un ID de template. Se investigó agregar un fallback que extrae el código
+entre corchetes de `name` cuando el catálogo no matchea. Se verificó contra
+datos live que:
+- Códigos como `[HER]`, `[PETR-002]`, `[BENC-002]`, `[COMISTAR-01]` son
+  referencias reales (mayúsculas, sin espacios, patrón consistente con
+  `Producto.default_code`), pero un mismo código puede repetirse en varios
+  productos distintos (`[HER]` aparece en OXUS, RIPPER FULL, HERBADOX, BASTA
+  14 SL) — es más una categoría que un SKU único por producto.
+- Hay corchetes con texto libre que **no** son códigos: `[Contabilizado en
+  2025-05-08]`, `[revertido]`, `[COMPRA ALVI]`, `[UBC: 7492]`. Se filtran
+  exigiendo que el contenido sea solo mayúsculas/dígitos/`._-` sin espacios.
+
+El usuario, informado del trade-off, eligió agregar el fallback pese a la
+imprecisión de categoría-vs-SKU (issue reportada en conversación, no en
+GitHub).
+
 ---
 
 ## Decisions
@@ -57,6 +79,12 @@ exportada).
 - `producto_con_referencia` = `CONCAT(referencia_interna, ' - ', producto)`
   cuando hay referencia interna; si no, cae a `producto` solo (nunca deja la
   columna vacía si `producto` existe).
+- `referencia_interna` = `COALESCE(Producto.default_code, código_entre_corchetes)`.
+  El fallback usa `REGEXP_EXTRACT(ad.name, r'\[([A-Z][A-Z0-9._-]*)\]')` —
+  requiere empezar con mayúscula y solo mayúsculas/dígitos/`._-`, sin
+  espacios, para no capturar texto libre entre corchetes. Sube la cobertura
+  de ~3,3% a ~9,9% (28.873 / 292.957 filas). Documentado como categoría, no
+  SKU único, en el header del SQL y en el system prompt.
 - Se agregan ambas columnas al final del SELECT (no se reordenan columnas
   existentes) para no romper consumidores por posición (Looker Studio,
   `vw_informe_gerencial_costos`, que hace `SELECT ad.*`).
@@ -71,19 +99,20 @@ exportada).
 
 - `sql/bigquery/vw_apuntes_analiticos_desglosados.sql` — DDL actualizado: `referencia_interna` y `producto_con_referencia`
 - `chatai/backend/controllers/chat_controller.py` — system prompt documenta las columnas nuevas
-- `chatai/tests/test_148_referencia_interna_producto.py` — 7 tests de regresión contra el SQL
+- `chatai/tests/test_148_referencia_interna_producto.py` — 8 tests de regresión contra el SQL
 - `specs/148-referencia-interna-producto/spec.md` — esta spec
-- Vista live aplicada en BigQuery (`CREATE OR REPLACE VIEW`, job `c367b5e1-720a-4dfe-94c6-06a6fc6bf4ea`, location `us-central1`)
+- Vista live aplicada en BigQuery: primero sin fallback (job `c367b5e1-720a-4dfe-94c6-06a6fc6bf4ea`),
+  luego con el fallback de código entre corchetes (job `cf1320eb-95c5-4f01-b4fe-d21f271d852d`, location `us-central1`)
 
 ---
 
 ## Tests
 
-7 passed (nuevos) + 7 passed (regresión #144 sigue verde) · isolation: N/A (vista BigQuery compartida, sin tenant/farm)
+8 passed (nuevos) + 7 passed (regresión #144 sigue verde) · isolation: N/A (vista BigQuery compartida, sin tenant/farm)
 
 ```
 cd chatai && pytest tests/test_148_referencia_interna_producto.py tests/test_144_add_producto_column.py -v
-14 passed in 0.12s
+15 passed in 0.16s
 ```
 
 Suite completa: `pytest tests/ -q` → 328 passed, 5 failed (preexistentes en `main`,

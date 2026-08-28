@@ -312,9 +312,11 @@ DDL versionado en `sql/bigquery/vw_apuntes_analiticos_desglosados.sql`.
   (OC `OCD1-00674:`, órdenes `D1/MO/01035 -`, códigos `[PETR-002]`).
   `Variantes_del_producto` no está exportada (el JOIN directo a `Producto.id`
   cubre pocos IDs).
-- referencia_interna (STRING): código interno del producto (`Producto.default_code`),
-  mismo JOIN que `producto`. Cobertura baja (~3% de filas) por la misma
-  limitación de catálogo.
+- referencia_interna (STRING): código interno del producto. 1) `Producto.default_code`
+  vía el mismo JOIN que `producto` (cobertura ~3%). 2) Fallback: código en
+  mayúsculas entre corchetes en `name`, ej. "[HER] OXUS" (sube cobertura a ~10%,
+  pero puede ser una categoría compartida entre varios productos, no siempre
+  el SKU único).
 - producto_con_referencia (STRING): `referencia_interna` + " - " + `producto`,
   o solo `producto` si no hay referencia interna.
 - cc_nombre / cc_codigo: centro de costo analítico (JOIN `CC_analiticos`)
