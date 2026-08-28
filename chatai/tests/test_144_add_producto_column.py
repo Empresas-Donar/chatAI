@@ -43,9 +43,11 @@ class TestIssue144AddProductoColumn:
         assert SQL_FILE.exists(), f"Missing SQL file: {SQL_FILE}"
 
     def test_144_sql_joins_producto_catalog(self):
+        """Issue #150 fixed this to join via the variant table (p.id = v.product_tmpl_id)
+        instead of the buggy direct p.id = ad.product_id (variant id vs template id)."""
         src = _sql_source()
         assert "`ace-scarab-484515-v1.odoo_data.Producto`" in src
-        assert "p.id = ad.product_id" in src
+        assert "p.id = v.product_tmpl_id" in src
 
     def test_144_sql_extracts_spanish_product_name(self):
         src = _sql_source()
