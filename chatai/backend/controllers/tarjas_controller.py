@@ -6292,6 +6292,16 @@ def _month_to_date_range(mes: str) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
+def _month_grid_range(mes: str) -> tuple[str, str]:
+    """Monday of the first week through Sunday of the last week."""
+    month_start, month_end = _month_to_date_range(mes)
+    start = datetime.date.fromisoformat(month_start)
+    end = datetime.date.fromisoformat(month_end)
+    grid_start = start - datetime.timedelta(days=start.weekday())
+    grid_end = end + datetime.timedelta(days=(6 - end.weekday()))
+    return grid_start.isoformat(), grid_end.isoformat()
+
+
 @router.get("/tarjas/calendario", response_class=HTMLResponse)
 async def tarjas_calendario_page(request: Request):
     return _templates.TemplateResponse(request, "tarjas_calendario.html")
@@ -6353,7 +6363,8 @@ async def get_tarjas_calendario(
     if not _MONTH_RE.match(mes):
         raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
 
-    fecha_inicio, fecha_termino = _month_to_date_range(mes)
+    month_start, month_end = _month_to_date_range(mes)
+    grid_start, grid_end = _month_grid_range(mes)
 
     try:
         conn = get_connection()
@@ -6363,8 +6374,8 @@ async def get_tarjas_calendario(
         )
 
     where, params = _build_registros_campo_where(
-        fecha_inicio,
-        fecha_termino,
+        grid_start,
+        grid_end,
         empresa=empresa,
         labor=labor,
         estado=estado,
@@ -6372,13 +6383,24 @@ async def get_tarjas_calendario(
         supervisor=supervisor,
     )
     plan_where, plan_params = _build_plan_diario_where(
-        fecha_inicio,
-        fecha_termino,
+        grid_start,
+        grid_end,
+        empresa=empresa,
+        labor=labor,
+        contratista=contratista,
+    )
+    plan_where_month, plan_params_month = _build_plan_diario_where(
+        month_start,
+        month_end,
         empresa=empresa,
         labor=labor,
         contratista=contratista,
     )
 
+    by_fecha: dict[str, dict] = {}
+    total = aprobado = pendiente = max_count = 0
+    sospechosos_total = 0
+    planes_total = 0
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -6402,58 +6424,70 @@ async def get_tarjas_calendario(
                 """,
                 params,
             )
-            by_fecha: dict[str, dict] = {}
-            total = aprobado = pendiente = max_count = 0
-            sospechosos_total = 0
             for row in cur.fetchall():
-                day = _empty_calendar_day(row[0])
+                fecha = row[0]
+                if not fecha:
+                    continue
+                day = _empty_calendar_day(fecha)
                 day["total"] = int(row[1] or 0)
                 day["aprobado"] = int(row[2] or 0)
                 day["pendiente"] = int(row[3] or 0)
                 day["sospechosos"] = int(row[4] or 0)
                 by_fecha[day["fecha"]] = day
-                total += day["total"]
-                aprobado += day["aprobado"]
-                pendiente += day["pendiente"]
-                sospechosos_total += day["sospechosos"]
-                if day["total"] > max_count:
-                    max_count = day["total"]
+                if month_start <= fecha <= month_end:
+                    total += day["total"]
+                    aprobado += day["aprobado"]
+                    pendiente += day["pendiente"]
+                    sospechosos_total += day["sospechosos"]
+                    if day["total"] > max_count:
+                        max_count = day["total"]
 
-            cur.execute(
-                f"SELECT COUNT(DISTINCT p.id_plan) FROM {_PLAN_DIARIO_FROM} {plan_where}",
-                plan_params,
-            )
-            planes_total = int(cur.fetchone()[0] or 0)
-
-            series_params = [fecha_inicio, fecha_termino] + plan_params
-            cur.execute(
-                f"""
-                SELECT gs.d::date::text AS fecha, COUNT(DISTINCT p.id_plan) AS planes
-                FROM {_PLAN_DIARIO_FROM}
-                CROSS JOIN LATERAL generate_series(
-                  GREATEST(p.fecha_inicio::date, %s::date),
-                  LEAST({_PLAN_DIARIO_END}, %s::date),
-                  interval '1 day'
-                ) AS gs(d)
-                {plan_where}
-                GROUP BY gs.d
-                """,
-                series_params,
-            )
-            for row in cur.fetchall():
-                fecha = row[0]
-                if fecha not in by_fecha:
-                    by_fecha[fecha] = _empty_calendar_day(fecha)
-                by_fecha[fecha]["planes"] = int(row[1] or 0)
-
-            days = sorted(by_fecha.values(), key=lambda d: d["fecha"])
+            try:
+                cur.execute(
+                    f"SELECT COUNT(DISTINCT p.id_plan) FROM {_PLAN_DIARIO_FROM} {plan_where_month}",
+                    plan_params_month,
+                )
+                planes_total = int(cur.fetchone()[0] or 0)
+                series_params = [grid_start, grid_end] + plan_params
+                cur.execute(
+                    f"""
+                    SELECT gs.d::date::text AS fecha, COUNT(DISTINCT p.id_plan) AS planes
+                    FROM {_PLAN_DIARIO_FROM}
+                    CROSS JOIN LATERAL generate_series(
+                      GREATEST(p.fecha_inicio::date, %s::date),
+                      LEAST({_PLAN_DIARIO_END}, %s::date),
+                      interval '1 day'
+                    ) AS gs(d)
+                    {plan_where}
+                    GROUP BY gs.d
+                    """,
+                    series_params,
+                )
+                for row in cur.fetchall():
+                    fecha = row[0]
+                    if not fecha:
+                        continue
+                    if fecha not in by_fecha:
+                        by_fecha[fecha] = _empty_calendar_day(fecha)
+                    by_fecha[fecha]["planes"] = int(row[1] or 0)
+            except Exception:
+                logger.exception("Calendar plan overlay failed for mes=%s", mes)
+                planes_total = 0
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Calendar month query failed for mes=%s", mes)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         conn.close()
 
+    days = sorted(by_fecha.values(), key=lambda d: d["fecha"])
     return {
         "mes": mes,
-        "fecha_inicio": fecha_inicio,
-        "fecha_termino": fecha_termino,
+        "fecha_inicio": month_start,
+        "fecha_termino": month_end,
+        "grid_inicio": grid_start,
+        "grid_termino": grid_end,
         "days": days,
         "total": total,
         "aprobado": aprobado,

@@ -339,6 +339,9 @@ def test_136_month_to_date_range():
     assert ns["_month_to_date_range"]("2026-02") == ("2026-02-01", "2026-02-28")
     assert ns["_month_to_date_range"]("2024-02") == ("2024-02-01", "2024-02-29")
     assert ns["_month_to_date_range"]("2026-12") == ("2026-12-01", "2026-12-31")
+    # Aug 2026: Sat 1 … Mon 31 → grid Mon 27 Jul … Sun 6 Sep
+    assert ns["_month_grid_range"]("2026-08") == ("2026-07-27", "2026-09-06")
+    assert ns["_month_grid_range"]("2026-09") == ("2026-08-31", "2026-10-04")
 
 
 def test_136_plan_diario_where_is_range_overlap():

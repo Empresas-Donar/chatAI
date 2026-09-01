@@ -286,16 +286,13 @@ function renderCalendar(data) {
   html += '<div class="tcal-grid">';
   WEEKDAYS.forEach(w => { html += `<div class="tcal-dow">${w}</div>`; });
   cells.forEach(cell => {
-    if (!cell.inMonth) {
-      html += `<div class="tcal-day is-outside" aria-hidden="true"></div>`;
-      return;
-    }
     const info = byDate.get(cell.iso);
     const total = info ? info.total : 0;
     const planes = info ? (info.planes || 0) : 0;
     const sospechosos = info ? (info.sospechosos || 0) : 0;
     const cls = [
       'tcal-day',
+      cell.inMonth ? '' : 'is-outside',
       total ? 'has-data' : '',
       planes && !total ? 'has-plan' : '',
       total || planes ? 'is-clickable' : '',
@@ -352,26 +349,39 @@ async function queryData() {
   const mes = document.getElementById('fil-month').value;
   if (!mes) return;
 
-  document.getElementById('empty-state').style.display = 'none';
+  const emptyEl = document.getElementById('empty-state');
+  const emptyTitle = emptyEl.querySelector('h3');
+  const emptyP = emptyEl.querySelector('p');
+  emptyEl.style.display = 'none';
   document.getElementById('calendar').style.display = 'none';
   document.getElementById('meta-bar').style.display = 'none';
   document.getElementById('loading-state').style.display = 'block';
   setBusy(true);
 
   try {
-    const res = await fetch('/api/tarjas/calendario?' + currentParams());
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const res = await fetch('/api/tarjas/calendario?' + currentParams(), {
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(apiDetail(data, res.status));
+    }
     document.getElementById('loading-state').style.display = 'none';
     renderMeta(data);
     renderCalendar(data);
     document.getElementById('calendar').style.display = '';
     const empty = !data.total && !data.planes;
-    document.getElementById('empty-state').style.display = empty ? 'block' : 'none';
+    if (empty) {
+      emptyTitle.textContent = 'Sin actividad';
+      emptyP.textContent = 'No hay planificación ni registros para los filtros seleccionados en este mes.';
+    }
+    emptyEl.style.display = empty ? 'block' : 'none';
   } catch (e) {
     console.error('Query error:', e);
     document.getElementById('loading-state').style.display = 'none';
-    document.getElementById('empty-state').style.display = 'block';
+    emptyTitle.textContent = 'No se pudo cargar el calendario';
+    emptyP.textContent = e.message || 'Error de red o del servidor.';
+    emptyEl.style.display = 'block';
   } finally {
     setBusy(false);
   }
@@ -746,11 +756,10 @@ async function openDay(fecha, opts = {}) {
 async function loadFiltersAndRestore() {
   initMonth();
   await loadFilters();
-  if (location.search) {
-    autoTriggerFromURL(FILTER_IDS, queryData);
-  } else {
-    queryData();
+  if (location.search && typeof loadFiltersFromURL === 'function') {
+    loadFiltersFromURL(FILTER_IDS);
   }
+  queryData();
 }
 
 document.getElementById('btn-apply').addEventListener('click', () => {

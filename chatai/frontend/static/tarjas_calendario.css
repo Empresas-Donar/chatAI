@@ -87,9 +87,16 @@
   color: var(--text);
 }
 .tcal-day.is-outside {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-light);
+  background: #f4f1eb;
+  border-color: #eee8dc;
+  color: var(--text-muted);
+  opacity: 0.78;
+}
+.tcal-day.is-outside .tcal-day-num { color: var(--text-muted); }
+.tcal-day.is-outside.has-data,
+.tcal-day.is-outside.has-plan,
+.tcal-day.is-outside.is-clickable {
+  opacity: 0.9;
 }
 .tcal-day.is-today {
   border-color: var(--terra);
