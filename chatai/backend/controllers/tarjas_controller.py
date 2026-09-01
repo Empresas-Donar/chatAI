@@ -35,6 +35,16 @@ Routes:
   GET  /tarjas/hora-ponderada-9h              → Hora ponderada 9h page (Labor x CC pivot)
   GET  /api/tarjas/hora-ponderada-9h/filters  → Filter options (hora ponderada 9h)
   GET  /api/tarjas/hora-ponderada-9h          → Report data, one row per Labor+CC+Fecha cell
+
+  GET  /tarjas/registros-campo               → App field-record timeline (audit)
+  GET  /api/tarjas/registros-campo/filters   → Distinct filter dropdowns
+  GET  /api/tarjas/registros-campo           → Paginated raw tarjas_pagos rows
+  PATCH /api/tarjas/registros-campo/{id}     → Edit mal-digitado fields (allowlisted)
+  GET  /api/tarjas/registros-campo/download-excel
+
+  GET  /tarjas/calendario                    → App monthly calendar of field records + plans
+  GET  /api/tarjas/calendario                → Per-day registro counts + overlapping plans
+  GET  /api/tarjas/calendario/planes         → Planificación overlapping a given day
 """
 
 import base64
@@ -49,7 +59,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from xhtml2pdf import pisa
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -64,6 +74,7 @@ router = APIRouter(dependencies=[Depends(require_auth)])
 
 _templates: Jinja2Templates = None
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 
@@ -5712,3 +5723,856 @@ async def notas_print_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
+
+
+# ===========================================================================
+# App → Registros de campo — audit timeline of tarjas_pagos (+ mal-digitado edits)
+# ===========================================================================
+
+_REGISTROS_CAMPO_KNOWN_ESTADOS = {"aprobado", "pendiente"}
+_REGISTROS_CAMPO_EXCEL_MAX = 10000
+_REGISTROS_CAMPO_COLUMNS = [
+    "id_Resumen",
+    "id_supervisor",
+    "fecha",
+    "fecha_iso",
+    "nombre_campo",
+    "cuartel_cc",
+    "labor",
+    "contratista",
+    "trabajador",
+    "rut_trabajador",
+    "tipo_pago",
+    "valor_jornada",
+    "valor_trato",
+    "base_trato",
+    "rendimiento",
+    "horas_extras",
+    "horas_trabajadas",
+    "maquina",
+    "total_tractor",
+    "total_hora_extra",
+    "total_jornada",
+    "total_trato",
+    "total_trabajado",
+    "contratista_jornada",
+    "contratista_trato",
+    "total_contratista",
+    "total_pagar",
+    "estado",
+    "id_tarja_supervisor",
+    "id_labor",
+]
+_REGISTROS_CAMPO_SELECT = """
+SELECT
+  "id_Resumen",
+  id_supervisor,
+  fecha,
+  fecha::date AS fecha_iso,
+  nombre_campo,
+  cuartel_cc,
+  labor,
+  contratista,
+  trabajador,
+  rut_trabajador,
+  tipo_pago,
+  valor_jornada,
+  valor_trato,
+  base_trato,
+  rendimiento,
+  horas_extras,
+  horas_trabajadas,
+  maquina,
+  total_tractor,
+  total_hora_extra,
+  total_jornada,
+  total_trato,
+  total_trabajado,
+  contratista_jornada,
+  contratista_trato,
+  total_contratista,
+  total_pagar,
+  estado,
+  id_tarja_supervisor,
+  id_labor
+FROM appsheet.tarjas_pagos
+"""
+
+
+_REGISTROS_CAMPO_EDITABLE = frozenset(
+    {
+        "trabajador",
+        "rut_trabajador",
+        "horas_trabajadas",
+        "horas_extras",
+    }
+)
+_MAL_DIGITADO_FLAGS = frozenset(
+    {
+        "bad_rut",
+        "double_space_name",
+        "name_has_digits",
+        "implausible_horas_extra",
+        "hours_and_extras",
+        "implausible_hours",
+    }
+)
+# Same heuristics as _registros_campo_flags / _is_mal_digitado, for GROUP BY.
+_HORAS_NUM_SQL = (
+    "CASE WHEN NULLIF(TRIM({col}::text), '') ~ '^[+-]?[0-9]+([.,][0-9]+)?$' "
+    "THEN REPLACE(TRIM({col}::text), ',', '.')::numeric END"
+)
+_REGISTROS_CAMPO_MAL_SQL = (
+    "("
+    " (NULLIF(TRIM(rut_trabajador), '') IS NOT NULL AND ("
+    "   rut_trabajador ~* '[eE][+\\-]' "
+    "   OR length(regexp_replace(rut_trabajador, '[^0-9kK]', '', 'g')) "
+    "      BETWEEN 1 AND 6"
+    " ))"
+    " OR (NULLIF(TRIM(trabajador), '') IS NOT NULL AND ("
+    "   position('  ' in trabajador) > 0 OR trabajador ~ '[0-9]'"
+    " ))"
+    f" OR COALESCE({_HORAS_NUM_SQL.format(col='horas_extras')}, 0) > 8"
+    f" OR COALESCE({_HORAS_NUM_SQL.format(col='horas_trabajadas')}, 0) > 14"
+    f" OR (COALESCE({_HORAS_NUM_SQL.format(col='horas_trabajadas')}, 0) > 0"
+    f"     AND COALESCE({_HORAS_NUM_SQL.format(col='horas_extras')}, 0) > 0)"
+    ")"
+)
+
+
+def _is_blank(v) -> bool:
+    if v is None:
+        return True
+    return str(v).strip() == ""
+
+
+def _as_number(v):
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float, decimal.Decimal)):
+        return float(v)
+    s = str(v).strip().replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _rut_is_malformed(v) -> bool:
+    """True when a present RUT looks typed/exported wrong, not when it is missing."""
+    if _is_blank(v):
+        return False
+    s = str(v).strip()
+    if re.search(r"[eE][+\-]", s):
+        return True
+    digits = re.sub(r"[^0-9kK]", "", s)
+    return 0 < len(digits) < 7
+
+
+def _registros_campo_flags(row: dict) -> list[str]:
+    """Heuristic QA flags for a raw field record. No DB writes."""
+    flags: list[str] = []
+    if _is_blank(row.get("labor")):
+        flags.append("missing_labor")
+    if _is_blank(row.get("nombre_campo")):
+        flags.append("missing_campo")
+    trabajador = row.get("trabajador")
+    if _is_blank(trabajador):
+        flags.append("missing_trabajador")
+    else:
+        name = str(trabajador)
+        if "  " in name:
+            flags.append("double_space_name")
+        if re.search(r"\d", name):
+            flags.append("name_has_digits")
+    if _is_blank(row.get("estado")):
+        flags.append("missing_estado")
+    elif str(row["estado"]).strip().lower() not in _REGISTROS_CAMPO_KNOWN_ESTADOS:
+        flags.append("unexpected_estado")
+    if _is_blank(row.get("fecha")) or _is_blank(row.get("fecha_iso")):
+        flags.append("invalid_fecha")
+    if _is_blank(row.get("id_supervisor")):
+        flags.append("missing_supervisor")
+    if _rut_is_malformed(row.get("rut_trabajador")):
+        flags.append("bad_rut")
+    horas = _as_number(row.get("horas_trabajadas"))
+    extras = _as_number(row.get("horas_extras"))
+    if extras is not None and extras > 8:
+        flags.append("implausible_horas_extra")
+    if horas is not None and horas > 14:
+        flags.append("implausible_hours")
+    # 0 regular hours is valid when overtime was entered instead.
+    # Entering both horas_trabajadas and horas_extras on the same row is the typo.
+    if (horas or 0) > 0 and (extras or 0) > 0:
+        flags.append("hours_and_extras")
+    return flags
+
+
+def _is_mal_digitado(flags: list[str]) -> bool:
+    return any(f in _MAL_DIGITADO_FLAGS for f in flags)
+
+
+def _build_registros_campo_where(
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None = None,
+    labor: str | None = None,
+    estado: str | None = None,
+    contratista: str | None = None,
+    supervisor: str | None = None,
+) -> tuple[str, list]:
+    filters = ["fecha::date BETWEEN %s AND %s"]
+    params: list = [fecha_inicio, fecha_termino]
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if labor:
+        filters.append("labor = %s")
+        params.append(labor)
+    if estado:
+        filters.append("estado = %s")
+        params.append(estado)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if supervisor:
+        filters.append("id_supervisor = %s")
+        params.append(supervisor)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _annotate_registros_campo(rows: list[dict]) -> list[dict]:
+    for row in rows:
+        flags = _registros_campo_flags(row)
+        row["flags"] = flags
+        row["mal_digitado"] = _is_mal_digitado(flags)
+    return rows
+
+
+@router.get("/tarjas/registros-campo", response_class=HTMLResponse)
+async def tarjas_registros_campo_page(request: Request):
+    return _templates.TemplateResponse(request, "tarjas_registros_campo.html")
+
+
+@router.get("/api/tarjas/registros-campo/filters")
+async def get_tarjas_registros_campo_filters():
+    """Distinct dropdown values for the field-record timeline."""
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            cur.execute(
+                "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
+                "WHERE labor IS NOT NULL AND TRIM(labor) <> '' ORDER BY labor"
+            )
+            labores = [r[0] for r in cur.fetchall()]
+            cur.execute(
+                "SELECT DISTINCT estado FROM appsheet.tarjas_pagos "
+                "WHERE estado IS NOT NULL AND TRIM(estado) <> '' ORDER BY estado"
+            )
+            estados = [r[0] for r in cur.fetchall()]
+            cur.execute(
+                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL AND TRIM(contratista) <> '' "
+                "ORDER BY contratista"
+            )
+            contratistas = [r[0] for r in cur.fetchall()]
+            cur.execute(
+                "SELECT DISTINCT id_supervisor FROM appsheet.tarjas_pagos "
+                "WHERE id_supervisor IS NOT NULL AND TRIM(id_supervisor) <> '' "
+                "ORDER BY id_supervisor"
+            )
+            supervisores = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    return {
+        "empresas": empresas,
+        "labores": labores,
+        "estados": estados,
+        "contratistas": contratistas,
+        "supervisores": supervisores,
+    }
+
+
+@router.get("/api/tarjas/registros-campo")
+async def get_tarjas_registros_campo(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    empresa: str = Query(None),
+    labor: str = Query(None),
+    estado: str = Query(None),
+    contratista: str = Query(None),
+    supervisor: str = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Paginated chronological dump of raw appsheet.tarjas_pagos rows."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    where, params = _build_registros_campo_where(
+        fecha_inicio,
+        fecha_termino,
+        empresa=empresa,
+        labor=labor,
+        estado=estado,
+        contratista=contratista,
+        supervisor=supervisor,
+    )
+    page_params = params + [limit, offset]
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) FROM appsheet.tarjas_pagos {where}",
+                params,
+            )
+            total = int(cur.fetchone()[0])
+            cur.execute(
+                f"{_REGISTROS_CAMPO_SELECT} {where} "
+                'ORDER BY fecha::date DESC, "id_Resumen" DESC '
+                "LIMIT %s OFFSET %s",
+                page_params,
+            )
+            rows = _annotate_registros_campo(_rows_to_dicts(cur))
+    finally:
+        conn.close()
+
+    return {
+        "columns": _REGISTROS_CAMPO_COLUMNS,
+        "rows": rows,
+        "count": len(rows),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _coerce_registro_campo_edit(col: str, raw):
+    if col in ("horas_trabajadas", "horas_extras"):
+        if raw is None or str(raw).strip() == "":
+            return None
+        n = _as_number(raw)
+        if n is None:
+            raise HTTPException(
+                status_code=422, detail=f"Valor inválido para {col}"
+            )
+        if n == int(n):
+            return str(int(n))
+        return str(n)
+    if raw is None:
+        return ""
+    return str(raw)
+
+
+@router.patch("/api/tarjas/registros-campo/{id_resumen}")
+async def patch_tarjas_registro_campo(
+    id_resumen: str,
+    payload: dict = Body(...),
+):
+    """Update allowlisted typo fields on a tarjas_pagos row."""
+    if not id_resumen or not str(id_resumen).strip():
+        raise HTTPException(status_code=400, detail="id_resumen is required")
+    fields = payload.get("fields") if isinstance(payload, dict) else None
+    if not isinstance(fields, dict) or not fields:
+        raise HTTPException(status_code=422, detail="fields is required")
+    unknown = [k for k in fields if k not in _REGISTROS_CAMPO_EDITABLE]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Campos no editables: {', '.join(unknown)}",
+        )
+    cols = [k for k in _REGISTROS_CAMPO_EDITABLE if k in fields]
+    values = [_coerce_registro_campo_edit(k, fields[k]) for k in cols]
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    assign = psql.SQL(", ").join(
+        psql.SQL("{} = %s").format(psql.Identifier(col)) for col in cols
+    )
+    update_sql = psql.SQL(
+        "UPDATE appsheet.tarjas_pagos SET {} WHERE {} = %s RETURNING {}"
+    ).format(assign, psql.Identifier("id_Resumen"), psql.Identifier("id_Resumen"))
+
+    rows: list[dict] = []
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(update_sql, values + [id_resumen])
+                updated = cur.fetchone()
+                if updated is None:
+                    raise HTTPException(
+                        status_code=404, detail="Registro no encontrado"
+                    )
+                cur.execute(
+                    f'{_REGISTROS_CAMPO_SELECT} WHERE "id_Resumen" = %s',
+                    (id_resumen,),
+                )
+                rows = _annotate_registros_campo(_rows_to_dicts(cur))
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return {"row": rows[0]}
+
+
+@router.get("/api/tarjas/registros-campo/download-excel")
+async def download_tarjas_registros_campo_excel(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    empresa: str = Query(None),
+    labor: str = Query(None),
+    estado: str = Query(None),
+    contratista: str = Query(None),
+    supervisor: str = Query(None),
+):
+    """Excel dump of the filtered field-record timeline (capped)."""
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    where, params = _build_registros_campo_where(
+        fecha_inicio,
+        fecha_termino,
+        empresa=empresa,
+        labor=labor,
+        estado=estado,
+        contratista=contratista,
+        supervisor=supervisor,
+    )
+    excel_params = params + [_REGISTROS_CAMPO_EXCEL_MAX]
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"{_REGISTROS_CAMPO_SELECT} {where} "
+                'ORDER BY fecha::date DESC, "id_Resumen" DESC '
+                "LIMIT %s",
+                excel_params,
+            )
+            rows = _annotate_registros_campo(_rows_to_dicts(cur))
+    finally:
+        conn.close()
+
+    headers = [
+        ("fecha_iso", "Fecha"),
+        ("estado", "Estado"),
+        ("labor", "Labor"),
+        ("id_supervisor", "Supervisor"),
+        ("nombre_campo", "Campo"),
+        ("cuartel_cc", "Cuartel / CC"),
+        ("trabajador", "Trabajador"),
+        ("rut_trabajador", "RUT"),
+        ("contratista", "Contratista"),
+        ("tipo_pago", "Tipo de pago"),
+        ("horas_trabajadas", "Horas trabajadas"),
+        ("horas_extras", "Horas extras"),
+        ("rendimiento", "Rendimiento"),
+        ("maquina", "Máquina"),
+        ("total_jornada", "Total jornada"),
+        ("total_trato", "Total trato"),
+        ("total_trabajado", "Total trabajado"),
+        ("total_pagar", "Total a pagar"),
+        ("total_tractor", "Total tractor"),
+        ("id_Resumen", "ID resumen"),
+        ("flags", "Alertas"),
+    ]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Registros de campo"
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(bold=True, color="FFFFFF")
+    warn_fill = PatternFill("solid", fgColor="FDE68A")
+
+    for col, (_, label) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=label)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_num, r in enumerate(rows, 2):
+        flags = r.get("flags") or []
+        flagged = bool(flags)
+        for col, (key, _) in enumerate(headers, 1):
+            if key == "flags":
+                value = ", ".join(flags)
+            elif key == "fecha_iso":
+                iso = str(r.get("fecha_iso") or "")[:10]
+                try:
+                    d = datetime.date.fromisoformat(iso)
+                    value = d.strftime("%d/%m/%Y")
+                except Exception:
+                    value = iso or (r.get("fecha") or "")
+            else:
+                value = r.get(key)
+                if value is None:
+                    value = ""
+            cell = ws.cell(row=row_num, column=col, value=value)
+            if flagged:
+                cell.fill = warn_fill
+
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 28
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["G"].width = 28
+    ws.column_dimensions["I"].width = 28
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"registros_campo_{fecha_inicio}_{fecha_termino}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ===========================================================================
+# App → Calendario — monthly heatmap of tarjas_pagos + tarjas_plan_diario
+# ===========================================================================
+
+_PLAN_DIARIO_FROM = """
+appsheet.tarjas_plan_diario p
+LEFT JOIN appsheet.tarjas_contratistas c
+  ON c.id_contratista = p.id_contratista
+LEFT JOIN appsheet.tarjas_cc cc
+  ON TRIM(cc.id_cc::text) = TRIM(p.id_cc)
+LEFT JOIN appsheet.tarjas_campo campo
+  ON campo.id_campo::text = TRIM(cc.id_campo::text)
+LEFT JOIN appsheet.tarjas_trato t
+  ON t.id_trato = p.id_trato
+LEFT JOIN LATERAL (
+  SELECT nombre
+  FROM appsheet.tarjas_labor
+  WHERE TRIM(id_labor::text) = TRIM(t.id_labor)
+  ORDER BY nombre
+  LIMIT 1
+) l ON TRUE
+"""
+
+_PLAN_DIARIO_DATE_OK = (
+    r"p.fecha_inicio ~ '^\d{4}-\d{2}-\d{2}' "
+    r"AND (p.fecha_fin IS NULL OR TRIM(p.fecha_fin) = '' "
+    r"OR p.fecha_fin ~ '^\d{4}-\d{2}-\d{2}')"
+)
+
+_PLAN_DIARIO_END = (
+    "COALESCE(NULLIF(TRIM(p.fecha_fin), '')::date, p.fecha_inicio::date)"
+)
+
+
+def _month_to_date_range(mes: str) -> tuple[str, str]:
+    year, month = int(mes[:4]), int(mes[5:7])
+    start = datetime.date(year, month, 1)
+    if month == 12:
+        end = datetime.date(year, 12, 31)
+    else:
+        end = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def _month_grid_range(mes: str) -> tuple[str, str]:
+    """Monday of the first week through Sunday of the last week."""
+    month_start, month_end = _month_to_date_range(mes)
+    start = datetime.date.fromisoformat(month_start)
+    end = datetime.date.fromisoformat(month_end)
+    grid_start = start - datetime.timedelta(days=start.weekday())
+    grid_end = end + datetime.timedelta(days=(6 - end.weekday()))
+    return grid_start.isoformat(), grid_end.isoformat()
+
+
+@router.get("/tarjas/calendario", response_class=HTMLResponse)
+async def tarjas_calendario_page(request: Request):
+    return _templates.TemplateResponse(request, "tarjas_calendario.html")
+
+
+def _build_plan_diario_where(
+    fecha_inicio: str,
+    fecha_termino: str,
+    empresa: str | None = None,
+    labor: str | None = None,
+    contratista: str | None = None,
+) -> tuple[str, list]:
+    """Range overlap: plan paints every day from fecha_inicio to fecha_fin.
+
+    estado / supervisor apply only to tarjas_pagos, not to planificación.
+    """
+    filters = [
+        _PLAN_DIARIO_DATE_OK,
+        "p.fecha_inicio::date <= %s",
+        f"{_PLAN_DIARIO_END} >= %s",
+    ]
+    params: list = [fecha_termino, fecha_inicio]
+    if empresa:
+        filters.append("campo.nombre = %s")
+        params.append(_empresa_to_campo(empresa))
+    if labor:
+        filters.append(
+            "LOWER(COALESCE(NULLIF(TRIM(p.labor_especifica), ''), "
+            "l.nombre, '')) LIKE LOWER(%s)"
+        )
+        params.append(f"%{labor}%")
+    if contratista:
+        filters.append("c.nombre = %s")
+        params.append(contratista)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _empty_calendar_day(fecha: str) -> dict:
+    return {
+        "fecha": fecha,
+        "total": 0,
+        "aprobado": 0,
+        "pendiente": 0,
+        "sospechosos": 0,
+        "planes": 0,
+    }
+
+
+@router.get("/api/tarjas/calendario")
+async def get_tarjas_calendario(
+    mes: str = Query(..., description="YYYY-MM"),
+    empresa: str = Query(None),
+    labor: str = Query(None),
+    estado: str = Query(None),
+    contratista: str = Query(None),
+    supervisor: str = Query(None),
+):
+    """Per-day registro counts plus overlapping planificación for the month."""
+    if not _MONTH_RE.match(mes):
+        raise HTTPException(status_code=400, detail="mes must be YYYY-MM")
+
+    month_start, month_end = _month_to_date_range(mes)
+    grid_start, grid_end = _month_grid_range(mes)
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    where, params = _build_registros_campo_where(
+        grid_start,
+        grid_end,
+        empresa=empresa,
+        labor=labor,
+        estado=estado,
+        contratista=contratista,
+        supervisor=supervisor,
+    )
+    plan_where, plan_params = _build_plan_diario_where(
+        grid_start,
+        grid_end,
+        empresa=empresa,
+        labor=labor,
+        contratista=contratista,
+    )
+    plan_where_month, plan_params_month = _build_plan_diario_where(
+        month_start,
+        month_end,
+        empresa=empresa,
+        labor=labor,
+        contratista=contratista,
+    )
+
+    by_fecha: dict[str, dict] = {}
+    total = aprobado = pendiente = max_count = 0
+    sospechosos_total = 0
+    planes_total = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                  fecha::date::text AS fecha,
+                  COUNT(*) AS total,
+                  COUNT(*) FILTER (
+                    WHERE LOWER(TRIM(estado)) = 'aprobado'
+                  ) AS aprobado,
+                  COUNT(*) FILTER (
+                    WHERE LOWER(TRIM(estado)) = 'pendiente'
+                  ) AS pendiente,
+                  COUNT(*) FILTER (
+                    WHERE {_REGISTROS_CAMPO_MAL_SQL}
+                  ) AS sospechosos
+                FROM appsheet.tarjas_pagos
+                {where}
+                GROUP BY fecha::date
+                ORDER BY fecha::date
+                """,
+                params,
+            )
+            for row in cur.fetchall():
+                fecha = row[0]
+                if not fecha:
+                    continue
+                day = _empty_calendar_day(fecha)
+                day["total"] = int(row[1] or 0)
+                day["aprobado"] = int(row[2] or 0)
+                day["pendiente"] = int(row[3] or 0)
+                day["sospechosos"] = int(row[4] or 0)
+                by_fecha[day["fecha"]] = day
+                if month_start <= fecha <= month_end:
+                    total += day["total"]
+                    aprobado += day["aprobado"]
+                    pendiente += day["pendiente"]
+                    sospechosos_total += day["sospechosos"]
+                    if day["total"] > max_count:
+                        max_count = day["total"]
+
+            try:
+                cur.execute(
+                    f"SELECT COUNT(DISTINCT p.id_plan) FROM {_PLAN_DIARIO_FROM} {plan_where_month}",
+                    plan_params_month,
+                )
+                planes_total = int(cur.fetchone()[0] or 0)
+                series_params = [grid_start, grid_end] + plan_params
+                cur.execute(
+                    f"""
+                    SELECT gs.d::date::text AS fecha, COUNT(DISTINCT p.id_plan) AS planes
+                    FROM {_PLAN_DIARIO_FROM}
+                    CROSS JOIN LATERAL generate_series(
+                      GREATEST(p.fecha_inicio::date, %s::date),
+                      LEAST({_PLAN_DIARIO_END}, %s::date),
+                      interval '1 day'
+                    ) AS gs(d)
+                    {plan_where}
+                    GROUP BY gs.d
+                    """,
+                    series_params,
+                )
+                for row in cur.fetchall():
+                    fecha = row[0]
+                    if not fecha:
+                        continue
+                    if fecha not in by_fecha:
+                        by_fecha[fecha] = _empty_calendar_day(fecha)
+                    by_fecha[fecha]["planes"] = int(row[1] or 0)
+            except Exception:
+                logger.exception("Calendar plan overlay failed for mes=%s", mes)
+                planes_total = 0
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Calendar month query failed for mes=%s", mes)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        conn.close()
+
+    days = sorted(by_fecha.values(), key=lambda d: d["fecha"])
+    return {
+        "mes": mes,
+        "fecha_inicio": month_start,
+        "fecha_termino": month_end,
+        "grid_inicio": grid_start,
+        "grid_termino": grid_end,
+        "days": days,
+        "total": total,
+        "aprobado": aprobado,
+        "pendiente": pendiente,
+        "sospechosos": sospechosos_total,
+        "planes": planes_total,
+        "max": max_count,
+    }
+
+
+@router.get("/api/tarjas/calendario/planes")
+async def get_tarjas_calendario_planes(
+    fecha: str = Query(..., description="YYYY-MM-DD"),
+    empresa: str = Query(None),
+    labor: str = Query(None),
+    contratista: str = Query(None),
+):
+    """Planificación overlapping a calendar day (AppSheet paints the full span)."""
+    if not _DATE_RE.match(fecha):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    where, params = _build_plan_diario_where(
+        fecha,
+        fecha,
+        empresa=empresa,
+        labor=labor,
+        contratista=contratista,
+    )
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                  p.id_plan,
+                  COALESCE(
+                    NULLIF(TRIM(p.labor_especifica), ''),
+                    l.nombre
+                  ) AS labor,
+                  p.comentario,
+                  p.numero_personas,
+                  p.id_cc,
+                  cc.cultivo,
+                  campo.nombre AS nombre_campo,
+                  c.nombre AS contratista,
+                  p.fecha_inicio::date::text AS fecha_inicio,
+                  {_PLAN_DIARIO_END}::text AS fecha_fin,
+                  ({_PLAN_DIARIO_END} - p.fecha_inicio::date) + 1 AS dias
+                FROM {_PLAN_DIARIO_FROM}
+                {where}
+                ORDER BY
+                  COALESCE(NULLIF(TRIM(p.labor_especifica), ''), l.nombre, ''),
+                  c.nombre NULLS LAST,
+                  p.id_cc
+                """,
+                params,
+            )
+            rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    for row in rows:
+        dias = int(row.get("dias") or 1)
+        row["dias"] = dias
+        row["largo"] = dias >= 7
+        for key in ("fecha_inicio", "fecha_fin"):
+            raw = row.get(key)
+            row[key] = str(raw)[:10] if raw else None
+
+    return {"fecha": fecha, "rows": rows, "count": len(rows)}
+

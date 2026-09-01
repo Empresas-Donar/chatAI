@@ -1,0 +1,230 @@
+/* tarjas_registros_campo.css — App field-record audit timeline */
+
+.trc-filter-bar { flex-wrap: wrap; }
+
+.filter-actions {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.trc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: -8px 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.trc-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.trc-empty h3 { font-size: 18px; margin: 0 0 8px; color: var(--text); }
+
+.trc-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.trc-day {
+  position: relative;
+  padding-left: 18px;
+  border-left: 3px solid var(--gold-light, #E8D5A3);
+}
+
+.trc-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px -18px;
+  padding-left: 18px;
+}
+.trc-day-date {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+.trc-day-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.trc-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow, 0 1px 2px rgba(42,32,24,0.04));
+}
+.trc-card.is-flagged {
+  border-color: #e8b86d;
+  background: #fffdf7;
+}
+.trc-card.is-alert,
+.trc-card.is-bad {
+  border-color: #d97757;
+  background: #fff8f5;
+}
+
+.trc-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.trc-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.trc-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.trc-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.trc-badge-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.trc-badge-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+.trc-badge-unknown {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.trc-badge-flag {
+  background: #fde68a;
+  color: #92400e;
+}
+.trc-badge-alert,
+.trc-badge-bad {
+  background: #fecaca;
+  color: #991b1b;
+}
+
+.trc-meta-line {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.trc-meta-line span {
+  color: var(--text-muted);
+}
+.trc-meta-line strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trc-expand {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--terra);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.trc-expand:hover { text-decoration: underline; }
+
+.trc-payload {
+  display: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.trc-card.is-open .trc-payload { display: block; }
+
+.trc-dl {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+.trc-dl dt.is-warn,
+.trc-dl dd.is-warn {
+  color: #991b1b;
+  font-weight: 700;
+}
+.trc-dl dd.is-warn {
+  background: #fecaca;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.trc-dl dd.is-warn:has(.trc-edit) {
+  background: transparent;
+  padding: 0;
+}
+.trc-edit {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid #d97757;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #991b1b;
+  background: #fff;
+}
+.trc-edit:focus {
+  outline: none;
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(196,80,58,0.12);
+}
+.trc-save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.trc-save-msg { font-size: 12px; font-weight: 600; color: #991b1b; }
+.trc-meta-warn {
+  background: #fff1f0;
+  border: 1px solid #d97757;
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.trc-meta-warn strong { color: #991b1b; }
+
+.trc-flag-list {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.trc-load-more {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0 8px;
+}
+
+@media (max-width: 640px) {
+  .trc-dl { grid-template-columns: 1fr; }
+  .trc-dl dt { margin-top: 6px; }
+}

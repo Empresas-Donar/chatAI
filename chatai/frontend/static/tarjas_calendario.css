@@ -1,0 +1,562 @@
+/* tarjas_calendario.css — App monthly field-record calendar */
+
+.tcal-filter-bar { flex-wrap: wrap; }
+
+.tcal-month-nav { min-width: 220px; }
+.tcal-month-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tcal-month-row input[type="month"] { flex: 1; min-width: 140px; }
+.tcal-month-row .btn { min-width: 36px; padding-left: 8px; padding-right: 8px; }
+
+.tcal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: -8px 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.tcal-meta strong { color: var(--text); font-weight: 700; }
+.tcal-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.tcal-dot-ok { background: #166534; }
+.tcal-dot-pend { background: #d97706; }
+.tcal-dot-plan { background: #6b4c8a; }
+
+.tcal-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tcal-empty h3 { font-size: 18px; margin: 0 0 8px; color: var(--text); }
+
+.tcal-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px 20px;
+  box-shadow: var(--shadow, 0 1px 2px rgba(42,32,24,0.04));
+}
+
+.tcal-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 0 0 14px;
+  text-transform: capitalize;
+}
+
+.tcal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tcal-dow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px 0 8px;
+}
+
+.tcal-day {
+  min-height: 92px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 8px 6px;
+  background: #faf8f4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+}
+.tcal-day.is-outside {
+  background: #f4f1eb;
+  border-color: #eee8dc;
+  color: var(--text-muted);
+  opacity: 0.78;
+}
+.tcal-day.is-outside .tcal-day-num { color: var(--text-muted); }
+.tcal-day.is-outside.has-data,
+.tcal-day.is-outside.has-plan,
+.tcal-day.is-outside.is-clickable {
+  opacity: 0.9;
+}
+.tcal-day.is-today {
+  border-color: var(--terra);
+  box-shadow: inset 0 0 0 1px var(--terra);
+}
+.tcal-day.has-data {
+  cursor: pointer;
+  background: var(--gold-light);
+  border-color: #e8d5a3;
+}
+.tcal-day.has-data:hover,
+.tcal-day.has-plan:hover,
+.tcal-day.is-clickable:hover {
+  border-color: var(--terra);
+  transform: translateY(-1px);
+}
+.tcal-day.has-plan {
+  cursor: pointer;
+  background: #f4eef8;
+  border-color: #d4c4e8;
+}
+.tcal-day.is-clickable { cursor: pointer; }
+.tcal-day.heat-1 { background: #FDF3D0; }
+.tcal-day.heat-2 { background: #F8E4A0; }
+.tcal-day.heat-3 { background: #F2C04A; }
+.tcal-day.heat-4 { background: #E8A23A; color: #2A2018; }
+.tcal-day.heat-5 { background: #C4503A; color: #fff; border-color: #9E3D2C; }
+.tcal-day.heat-5 .tcal-day-num,
+.tcal-day.heat-5 .tcal-count,
+.tcal-day.heat-5 .tcal-split { color: #fff; }
+
+.tcal-day-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.tcal-day.has-data .tcal-day-num { color: var(--text); }
+
+.tcal-count {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+.tcal-split {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .tcal-day { min-height: 72px; padding: 6px; }
+  .tcal-count { font-size: 16px; }
+  .tcal-split { display: none; }
+}
+
+.tcal-suspect {
+  margin-top: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #991b1b;
+  background: #fecaca;
+  border-radius: 999px;
+  padding: 1px 7px;
+  align-self: flex-start;
+}
+.tcal-plans {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4c2d69;
+  background: #e9dcf3;
+  border-radius: 999px;
+  padding: 1px 7px;
+  align-self: flex-start;
+}
+.tcal-day.heat-5 .tcal-plans {
+  background: rgba(255,255,255,0.92);
+  color: #4c2d69;
+}
+.tcal-day.heat-5 .tcal-suspect {
+  background: rgba(255,255,255,0.92);
+  color: #991b1b;
+}
+.tcal-day.is-open {
+  outline: 2px solid var(--terra);
+  outline-offset: 1px;
+}
+
+.tcal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 20, 9, 0.35);
+  z-index: 500;
+}
+.tcal-overlay[hidden],
+.tcal-panel[hidden] { display: none; }
+
+.tcal-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(1040px, 94vw);
+  height: 100vh;
+  background: var(--surface);
+  z-index: 510;
+  box-shadow: -8px 0 32px rgba(42, 32, 24, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.tcal-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tcal-panel-head-main { min-width: 0; flex: 1; }
+.tcal-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.tcal-day-nav input[type="date"] {
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.tcal-day-nav .btn { min-width: 36px; }
+.tcal-panel-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+.tcal-panel-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.tcal-panel-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.tcal-panel-close:hover { background: var(--bg-warm, #f6f1ea); color: var(--text); }
+
+.tcal-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.tcal-panel-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tcal-panel-filters label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 3px;
+}
+.tcal-panel-filters select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text);
+  min-width: 140px;
+  max-width: 180px;
+}
+.tcal-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tcal-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 14px 9px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tcal-tab span {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  background: #f3eee6;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.tcal-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--terra);
+}
+.tcal-tab[data-tab="planificados"].is-active {
+  border-bottom-color: #6b4c8a;
+}
+.tcal-range {
+  margin: 10px 0 4px;
+}
+.tcal-range-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: #efe6f6;
+  overflow: visible;
+}
+.tcal-range-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #c4a4dc, #6b4c8a);
+}
+.tcal-range-marker {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--terra);
+  box-shadow: 0 0 0 2px #fff;
+}
+.tcal-range-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4c2d69;
+}
+.tcal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tcal-panel-link {
+  color: var(--terra);
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 12px;
+}
+.tcal-panel-link:hover { text-decoration: underline; }
+
+.tcal-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 24px;
+}
+.tcal-panel-hint { color: var(--text-muted); font-size: 13px; }
+
+.tcal-labors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+.tcal-labor-chip {
+  background: var(--gold-light);
+  border: 1px solid #e8d5a3;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tcal-rec {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.tcal-rec.is-bad {
+  border-color: #d97757;
+  background: #fff8f5;
+}
+.tcal-rec-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+.tcal-rec-title { font-size: 14px; font-weight: 700; margin: 0; color: var(--text); }
+.tcal-rec-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.tcal-rec-meta strong { color: var(--text); font-weight: 600; }
+.tcal-rec-flags {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tcal-flag {
+  font-size: 11px;
+  font-weight: 700;
+  background: #fecaca;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.tcal-rec-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.tcal-kv {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.tcal-kv dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 0 0 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tcal-kv dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  word-break: break-word;
+}
+.tcal-kv.is-warn {
+  background: #fff1f0;
+  border-color: #d97757;
+  box-shadow: inset 3px 0 0 #c4503a;
+}
+.tcal-kv.is-warn dt { color: #9e3d2c; }
+.tcal-kv.is-warn dd { color: #991b1b; }
+.tcal-kv-why {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #fecaca;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+@media (max-width: 900px) {
+  .tcal-panel { width: 100vw; }
+  .tcal-rec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .tcal-rec-grid { grid-template-columns: 1fr; }
+}
+
+.tcal-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tcal-badge-ok { background: #dcfce7; color: #166534; }
+.tcal-badge-pending { background: #fef3c7; color: #92400e; }
+.tcal-badge-unknown { background: #fee2e2; color: #991b1b; }
+.tcal-badge-bad { background: #fecaca; color: #991b1b; }
+.tcal-badge-plan { background: #e9dcf3; color: #4c2d69; }
+
+.tcal-section { margin-bottom: 22px; }
+.tcal-section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tcal-section-title span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.tcal-section-hint {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tcal-kv.is-edit dd { padding: 0; }
+.tcal-edit {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid #d97757;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #991b1b;
+  background: #fff;
+}
+.tcal-edit:focus {
+  outline: none;
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(196,80,58,0.12);
+}
+.tcal-save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.tcal-save-msg { font-size: 12px; font-weight: 600; color: #991b1b; }

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Registros de campo — Tarjas{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/tarjas_registros_campo.css?v={{ static_v }}-edit" />
+{% endblock %}
+
+{% block body %}
+<div class="container">
+
+  <div class="page-header">
+    <div>
+      <h1>Registros de campo</h1>
+      <p>Línea de tiempo de los registros crudos ingresados desde la app (AppSheet), para auditar labor, fecha, estado, usuario y campo.</p>
+    </div>
+  </div>
+
+  <div class="filter-bar trc-filter-bar">
+    <div>
+      <label>Desde</label>
+      <input lang="es-CL" type="date" id="fil-from" />
+    </div>
+    <div>
+      <label>Hasta</label>
+      <input lang="es-CL" type="date" id="fil-to" />
+    </div>
+    <div>
+      <label>Empresa / Campo</label>
+      <select id="fil-empresa"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Labor</label>
+      <select id="fil-labor"><option value="">Todas</option></select>
+    </div>
+    <div>
+      <label>Estado</label>
+      <select id="fil-estado"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Contratista</label>
+      <select id="fil-contratista"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <label>Supervisor</label>
+      <select id="fil-supervisor"><option value="">Todos</option></select>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+    </div>
+  </div>
+
+  <div id="meta-bar" class="trc-meta" style="display:none"></div>
+
+  <div id="loading-state" class="trc-empty" style="display:none">
+    <h3>Cargando…</h3>
+    <p>Consultando registros de campo.</p>
+  </div>
+
+  <div id="timeline" class="trc-timeline" style="display:none"></div>
+
+  <div id="load-more-wrap" class="trc-load-more" style="display:none">
+    <button class="btn btn-secondary btn-sm" id="btn-more">Cargar más</button>
+  </div>
+
+  <div id="empty-state" class="trc-empty" style="display:none">
+    <h3>Sin resultados</h3>
+    <p>No hay registros para los filtros seleccionados.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_registros_campo.js?v={{ static_v }}-edit"></script>
+{% endblock %}
