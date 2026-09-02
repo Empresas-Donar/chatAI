@@ -169,7 +169,13 @@
 }
 .trp-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
 
-.trp-pivot .cell-null { color: var(--text-muted); }
+.trp-pivot tfoot td {
+  background: #fef3c7;
+  font-weight: 800;
+  border-top: 2px solid #ea8c1e;
+  padding: 8px 10px;
+}
+.trp-pivot tfoot .cell-total { background: #fde68a; }
 
 /* Download buttons */
 .filter-actions {

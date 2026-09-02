@@ -21,10 +21,6 @@ HTML for the same filters. Also fixes a real bug found along the way:
 _pdf_header() showed the Desde/Hasta date chips as raw ISO strings
 (e.g. "2026-07-01"), violating the project's "DD/MM/YYYY sin excepciones"
 convention.
-
-"resumen-tractorista" is the one report registered in the bulk PDF with no
-standalone PDF counterpart (only screen + Excel exist) — nothing to share
-code with, so it keeps its own implementation and is tested separately.
 """
 
 import os
@@ -34,7 +30,7 @@ import psycopg2
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), interpolate=False)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import controllers.reports_controller as rc
 import controllers.tarjas_controller as tc
@@ -56,6 +52,7 @@ BUILDER_MAP = {
     "hora-ponderada-9h": tc._build_hora_ponderada_html,
     "detalle-tractorista": tc._build_detalle_tractorista_html,
     "general-tractorista": tc._build_general_tractorista_html,
+    "resumen-tractorista": tc._build_resumen_persona_tractorista_html,
 }
 
 
@@ -104,13 +101,12 @@ class TestAllReportsDelegateToSharedBuilder:
             )
         assert actual == expected
 
-    def test_116_all_ten_reports_with_standalone_pdfs_covered(self):
+    def test_116_all_reports_with_standalone_pdfs_covered(self):
         """Guards against a report being added to _REPORT_GENERATORS without
         also being added to BUILDER_MAP above (i.e. without verifying it
-        shares code) — the only allowed gap is resumen-tractorista, which
-        has no standalone PDF to share with."""
+        shares code). Every bulk report must share a tarjas builder."""
         bulk_ids = set(rc._REPORT_GENERATORS.keys())
-        assert bulk_ids - set(BUILDER_MAP.keys()) == {"resumen-tractorista"}
+        assert bulk_ids == set(BUILDER_MAP.keys())
 
 
 class TestDateFormatBugFix:
@@ -136,14 +132,13 @@ class TestDateFormatBugFix:
 _ORIGINAL_PDF_HEADER = tc._pdf_header
 
 
-class TestResumenTractoristaStillWorks:
-    """The one bulk report without a standalone PDF — verify it still
-    renders and uses the shared _pdf_header/_pdf_title, even though it
-    can't share a builder function with anything."""
-
+class TestResumenTractoristaSharesBuilder:
     def test_116_resumen_tractorista_uses_shared_pdf_title_format(self, conn):
         with conn.cursor() as cur:
             html = rc._REPORT_GENERATORS["resumen-tractorista"](
                 cur, FECHA_INICIO, FECHA_TERMINO, None, CONTRATISTA
             )
         assert "Tarjas-Reporte Resumen Tractorista-Herbi Ml Spa" in html
+        assert "Máquina" in html
+        assert "Horas extra" in html
+        assert "Tipo pago" not in html

@@ -1,12 +1,8 @@
-// tarjas_detalle_tractorista.js — Weekly tractorista detail
+// tarjas_detalle_tractorista.js — Looker nested pivot (fecha × trabajador × labor)
 
 const fmtCLP = new Intl.NumberFormat('es-CL', {
   style: 'currency', currency: 'CLP', maximumFractionDigits: 0
 });
-const fmtCLPDec = new Intl.NumberFormat('es-CL', {
-  style: 'currency', currency: 'CLP', minimumFractionDigits: 2, maximumFractionDigits: 2
-});
-const fmtNum = new Intl.NumberFormat('es-CL');
 
 function esc(str) {
   return String(str ?? '')
@@ -14,7 +10,18 @@ function esc(str) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = String(iso).slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
 
 function initDates() {
   const now = new Date();
@@ -28,16 +35,19 @@ function initDates() {
   document.getElementById('fil-to').value = toISO(sunday);
 }
 
+function applyFilterOptions(data) {
+  if (!data) return;
+  fillSelect('fil-contratista', data.contratistas, 'Todos');
+  fillSelect('fil-empresa', data.empresas, 'Todas');
+  fillSelect('fil-cc', data.centros_costo, 'Todos');
+  fillSelect('fil-labor', data.labores, 'Todas');
+}
+
 async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/detalle-tractorista/filters');
-    const data = await res.json();
-
-    fillSelect('fil-contratista', data.contratistas, 'Todos');
-    fillSelect('fil-empresa', data.empresas, 'Todas');
-    fillSelect('fil-cc', data.centros_costo, 'Todos');
-    fillSelect('fil-labor', data.labores, 'Todas');
-    fillSelect('fil-campo', data.campos, 'Todos');
+    if (!res.ok) return;
+    applyFilterOptions(await res.json());
   } catch (e) {
     console.error('Error loading filters:', e);
   }
@@ -45,8 +55,12 @@ async function loadFilters() {
 
 function fillSelect(id, items, defaultLabel) {
   const sel = document.getElementById(id);
-  sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+  if (!sel || !Array.isArray(items) || !items.length) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  sel.add(new Option(defaultLabel, ''));
+  items.forEach(item => sel.add(new Option(String(item), String(item))));
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 }
 
 async function queryData() {
@@ -67,7 +81,6 @@ async function queryData() {
   add('empresa', 'fil-empresa');
   add('centro_costo', 'fil-cc');
   add('labor', 'fil-labor');
-  add('campo', 'fil-campo');
 
   const btn = document.getElementById('btn-apply');
   btn.disabled = true;
@@ -79,18 +92,19 @@ async function queryData() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    if (!data.rows.length) {
-      document.getElementById('summary-section').style.display = 'none';
-      document.getElementById('detail-section').style.display = 'none';
+    if (!data.pivots || !data.pivots.length) {
+      document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
-    renderSummary(data.resumen_contratista, data.total, data.jornadas);
-    renderDetail(data.rows, data.count);
-    document.getElementById('summary-section').style.display = '';
-    document.getElementById('detail-section').style.display = '';
+    applyFilterOptions(data.filter_options);
+    if ((document.getElementById('fil-contratista')?.options.length || 0) <= 1) {
+      await loadFilters();
+    }
+    renderPivots(data.pivots);
+    document.getElementById('pivot-section').style.display = '';
     _hasData = true;
   } catch (e) {
     console.error('Query error:', e);
@@ -101,35 +115,63 @@ async function queryData() {
   }
 }
 
-function renderSummary(rows, total, jornadas) {
-  const tbody = document.getElementById('summary-tbody');
-  tbody.innerHTML = rows.map(r => {
-    const tp = esc(r.tipo_pago ?? '');
-    const tot = r.total_pagar != null ? fmtCLP.format(r.total_pagar) : '—';
+function moneyCell(v) {
+  if (v == null) return '<td class="cell-empty"></td>';
+  return `<td class="num">${fmtCLP.format(v)}</td>`;
+}
+
+function renderOnePivot(p) {
+  const nCols = p.columns.length;
+  if (!nCols) return '';
+
+  const workerRow = p.workers.map(w =>
+    `<th class="th-worker" colspan="${w.labores.length}">${esc(w.name)}</th>`
+  ).join('');
+  const laborRow = p.columns.map(c =>
+    `<th class="th-labor">${esc(c.labor)}</th>`
+  ).join('');
+
+  const body = p.dates.map(d => {
+    const cells = p.columns.map(c => moneyCell(p.matrix[d][c.key])).join('');
     return `<tr>
-      <td>${tp}</td>
-      <td class="cell-contractor" title="${esc(r.contratista)}">${esc(r.contratista ?? '')}</td>
-      <td class="num">${tot}</td>
-      <td class="num">${fmtNum.format(r.jornadas)}</td>
+      <td class="cell-date">${formatDate(d)}</td>
+      ${cells}
+      <td class="num cell-total">${fmtCLP.format(p.date_totals[d])}</td>
     </tr>`;
   }).join('');
 
-  document.getElementById('summary-total').textContent = fmtCLP.format(total);
-  document.getElementById('summary-jornadas').textContent = fmtNum.format(jornadas);
+  const foot = p.columns.map(c =>
+    `<td class="num">${fmtCLP.format(p.col_totals[c.key])}</td>`
+  ).join('');
+
+  return `
+  <div class="tdt-pivot-wrap">
+    <div class="tdt-pivot-scroll">
+      <table class="tdt-pivot">
+        <thead>
+          <tr>
+            <th class="th-fecha" rowspan="3">Fecha</th>
+            <th class="th-contratista" colspan="${nCols}">${esc(p.contratista)}</th>
+            <th class="th-total" rowspan="3">Total ${esc(p.contratista)}</th>
+          </tr>
+          <tr>${workerRow}</tr>
+          <tr>${laborRow}</tr>
+        </thead>
+        <tbody>${body}</tbody>
+        <tfoot>
+          <tr>
+            <td>Suma total</td>
+            ${foot}
+            <td class="num cell-total">${fmtCLP.format(p.grand_total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>`;
 }
 
-function renderDetail(rows, count) {
-  document.getElementById('detail-count').textContent = `${count} registro${count !== 1 ? 's' : ''}`;
-
-  const tbody = document.getElementById('detail-tbody');
-  tbody.innerHTML = rows.map(r => `<tr>
-      <td>${esc(r.tipo_pago ?? '')}</td>
-      <td>${esc(String(r.centro_costo ?? ''))}</td>
-      <td>${esc(r.labor ?? '')}</td>
-      <td class="num">${r.total_unitario != null ? fmtCLPDec.format(r.total_unitario) : '—'}</td>
-      <td class="num">${r.jornadas ?? '—'}</td>
-      <td class="num">${r.costo_total != null ? fmtCLP.format(r.costo_total) : '—'}</td>
-    </tr>`).join('');
+function renderPivots(pivots) {
+  document.getElementById('pivot-section').innerHTML = pivots.map(renderOnePivot).join('');
 }
 
 function currentParams() {
@@ -142,7 +184,6 @@ function currentParams() {
   add('empresa','fil-empresa');
   add('centro_costo','fil-cc');
   add('labor','fil-labor');
-  add('campo','fil-campo');
   return p;
 }
 function setDownloadEnabled(on) {
@@ -172,11 +213,17 @@ function printWithHeader(title, filters) {
 }
 
 // ── URL filter sync ───────────────────────────────────────────────────
-const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-labor', 'fil-campo'];
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-labor'];
 
 async function loadFiltersAndRestore() {
   initDates();
   await loadFilters();
+  const params = new URLSearchParams(location.search);
+  if (!params.get('fil-empresa') && params.get('fil-campo')) {
+    params.set('fil-empresa', params.get('fil-campo'));
+    params.delete('fil-campo');
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
   autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
