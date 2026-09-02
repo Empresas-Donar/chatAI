@@ -8,7 +8,12 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function formatShortDate(isoStr) {
   if (!isoStr) return '—';
@@ -117,13 +122,17 @@ async function queryData() {
 function renderPivot(rows) {
   const dates = [...new Set(rows.map(r => r.fecha))].sort();
 
-  // Group by worker → (maquina|horas_extras key) → { maquina, horas_extras, byDate, total }
+  // Group by trabajador+contratista (same grain as General ranking) then machine/hours
   const workers = new Map();
   rows.forEach(r => {
     const w = r.trabajador ?? '(sin nombre)';
+    const c = r.contratista ?? '';
+    const groupKey = `${w}||${c}`;
     const rowKey = `${r.maquina ?? ''}||${r.horas_extras ?? ''}`;
-    if (!workers.has(w)) workers.set(w, new Map());
-    const rowMap = workers.get(w);
+    if (!workers.has(groupKey)) {
+      workers.set(groupKey, { name: w, contratista: c, rowMap: new Map() });
+    }
+    const rowMap = workers.get(groupKey).rowMap;
     if (!rowMap.has(rowKey)) {
       rowMap.set(rowKey, {
         maquina: r.maquina,
@@ -137,52 +146,55 @@ function renderPivot(rows) {
     entry.total += Number(r.total_tractor || 0);
   });
 
-  // Sort workers by grand total desc
-  const sortedWorkers = [...workers.entries()]
-    .map(([name, rowMap]) => {
+  // Sort by grand total desc — same order as General ranking
+  const sortedWorkers = [...workers.values()]
+    .map(g => {
       let grandTotal = 0;
-      rowMap.forEach(e => { grandTotal += e.total; });
-      return { name, rowMap, grandTotal };
+      g.rowMap.forEach(e => { grandTotal += e.total; });
+      return { ...g, grandTotal };
     })
     .sort((a, b) => b.grandTotal - a.grandTotal);
 
-  // thead
   const thead = document.getElementById('pivot-thead');
   let superHdr = '<tr class="trp-superheader">';
-  superHdr += '<th class="th-empty" colspan="3"></th>';
-  superHdr += `<th colspan="${dates.length}">fecha (Fecha) / total_tractor</th>`;
+  superHdr += '<th class="th-empty" colspan="4"></th>';
+  superHdr += `<th colspan="${dates.length}">Total tractorista por fecha</th>`;
   superHdr += '<th class="th-empty"></th>';
   superHdr += '</tr>';
 
   let hdr = '<tr>';
-  hdr += '<th class="th-fixed">trabajador</th>';
-  hdr += '<th class="th-fixed">maquina</th>';
-  hdr += '<th class="th-fixed">horas_extras</th>';
+  hdr += '<th class="th-fixed">Trabajador</th>';
+  hdr += '<th class="th-fixed">Contratista</th>';
+  hdr += '<th class="th-fixed">Máquina</th>';
+  hdr += '<th class="th-fixed">Horas extra</th>';
   dates.forEach(d => { hdr += `<th class="th-date">${formatShortDate(d)}</th>`; });
   hdr += '<th class="th-total">Total</th>';
   hdr += '</tr>';
 
   thead.innerHTML = superHdr + hdr;
 
-  // tbody
   let html = '';
+  let overall = 0;
+  const dateTotals = Object.fromEntries(dates.map(d => [d, 0]));
   sortedWorkers.forEach(w => {
     const entries = [...w.rowMap.values()];
     let isFirst = true;
+    overall += w.grandTotal;
 
     entries.forEach(entry => {
       const rowClass = isFirst ? 'worker-first' : '';
-      const workerCell = isFirst ? esc(w.name) : '';
       isFirst = false;
 
       html += `<tr class="${rowClass}">`;
-      html += `<td class="cell-worker" title="${esc(w.name)}">${workerCell}</td>`;
+      html += `<td class="cell-worker" title="${esc(w.name)}">${esc(w.name)}</td>`;
+      html += `<td class="cell-tipo" title="${esc(w.contratista)}">${w.contratista ? esc(w.contratista) : '<span class="cell-null">-</span>'}</td>`;
       html += `<td class="cell-tipo">${entry.maquina ? esc(entry.maquina) : '<span class="cell-null">-</span>'}</td>`;
       html += `<td class="cell-tipo">${entry.horas_extras ? esc(entry.horas_extras) : '<span class="cell-null">-</span>'}</td>`;
 
       dates.forEach(d => {
         const val = entry.byDate[d];
         if (val && val > 0) {
+          dateTotals[d] += val;
           html += `<td class="cell-value has-value">${fmtCLP.format(val)}</td>`;
         } else {
           html += '<td class="cell-zero">0</td>';
@@ -195,6 +207,19 @@ function renderPivot(rows) {
   });
 
   document.getElementById('pivot-tbody').innerHTML = html;
+
+  let foot = '<tr class="trp-grand-total"><td colspan="4">Suma total</td>';
+  dates.forEach(d => {
+    foot += `<td class="cell-total">${dateTotals[d] ? fmtCLP.format(dateTotals[d]) : ''}</td>`;
+  });
+  foot += `<td class="cell-total">${fmtCLP.format(overall)}</td></tr>`;
+  let tfoot = document.getElementById('pivot-tfoot');
+  if (!tfoot) {
+    tfoot = document.createElement('tfoot');
+    tfoot.id = 'pivot-tfoot';
+    document.getElementById('pivot-table').appendChild(tfoot);
+  }
+  tfoot.innerHTML = foot;
 }
 
 function currentParams() {
@@ -205,6 +230,7 @@ function currentParams() {
   const add = (key, id) => { const el = document.getElementById(id); if (el?.value) p.append(key, el.value); };
   add('trabajador','fil-trabajador'); add('tipo_pago','fil-tipo');
   add('maquina','fil-maquina'); add('contratista','fil-contratista');
+  add('empresa','fil-empresa');
   return p;
 }
 function setDownloadEnabled(on) {

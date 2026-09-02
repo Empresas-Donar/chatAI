@@ -1,6 +1,11 @@
 /* tarjas_general_tractorista.css — overrides for the tractorista variant */
 
-/* Tractorista accent uses the same orange palette — no overrides needed yet */
-
-/* Download buttons */
 .filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+
+.tg-table tfoot td {
+  background: #fef3c7;
+  font-weight: 800;
+  padding: 8px 12px;
+  border-top: 2px solid #ea8c1e;
+}
+.tg-table tfoot td.num { text-align: right; }

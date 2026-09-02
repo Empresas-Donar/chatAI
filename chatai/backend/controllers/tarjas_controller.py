@@ -14,7 +14,7 @@ Routes:
 
   GET  /tarjas/detalle-tractorista       → Weekly tractorista detail (Looker)
   GET  /api/tarjas/detalle-tractorista/filters
-  GET  /api/tarjas/detalle-tractorista   → Summary by contractor + detail rows
+  GET  /api/tarjas/detalle-tractorista   → Nested Looker pivot (fecha × trabajador × labor)
 
   GET  /tarjas/contratista              → Contractor/worker pivot page
   GET  /api/tarjas/contratista/filters  → Filter options (contratista)
@@ -282,6 +282,9 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 table.detalle-table th { background: #1a1a1a; color: #f5d87a; padding: 6px 8px; text-align: left; border: 1px solid #1a1a1a; font-weight: bold; }
 table.detalle-table th.num { text-align: right; }
 table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
+table.detalle-tract-pivot { margin-top: 12px; }
+table.detalle-tract-pivot th.th-group { background: #1F4E79; color: #ffffff; text-align: center; }
+table.detalle-tract-pivot tfoot td { font-weight: bold; background: #e8eef4; }
 """
 
 
@@ -836,7 +839,324 @@ async def get_tarjas_detail(
 # Detalle de la semana tractorista (Looker: Detalle tractorista)
 # ===========================================================================
 
-_TRACTORISTA_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
+
+def _detalle_tractorista_where(
+    fecha_inicio: str,
+    fecha_termino: str,
+    contratista: str | None = None,
+    empresa: str | None = None,
+    centro_costo: str | None = None,
+    labor: str | None = None,
+    campo: str | None = None,
+) -> tuple[str, list]:
+    """WHERE for Detalle tractorista on tarjas_pagos (all estados).
+
+    tarjas_reporte hides Pendiente and sums total_pagar; tractorista money
+    is total_tractor (issue #152).
+    """
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    if centro_costo:
+        filters.append("cuartel_cc = %s")
+        params.append(centro_costo)
+    if labor:
+        filters.append("labor = %s")
+        params.append(labor)
+    if campo:
+        filters.append("nombre_campo = %s")
+        params.append(campo)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _fetch_detalle_tractorista_filter_options(cur, where: str, params: list) -> dict:
+    """Distinct dropdown values for the current tractorista WHERE (one scan)."""
+    cur.execute(
+        f"""
+        SELECT contratista, nombre_campo, cuartel_cc, labor
+        FROM appsheet.tarjas_pagos
+        {where}
+        """,
+        params,
+    )
+    contratistas, empresas, centros, labores = set(), set(), set(), set()
+    for contratista, campo, cc, labor in cur.fetchall():
+        if contratista:
+            contratistas.add(contratista)
+        if campo:
+            empresas.add(campo)
+        if cc:
+            centros.add(str(cc))
+        if labor:
+            labores.add(labor)
+    return {
+        "contratistas": sorted(contratistas),
+        "empresas": sorted(empresas),
+        "centros_costo": sorted(centros),
+        "labores": sorted(labores),
+    }
+
+
+def _fetch_detalle_tractorista_rows(cur, where: str, params: list) -> list[dict]:
+    """Raw (fecha, contratista, trabajador, labor, monto) cells for the
+    Looker nested pivot. Shared by JSON, Excel and PDF (issues #152/#153)."""
+    cur.execute(
+        f"""
+        SELECT
+            fecha::date::text AS fecha,
+            contratista,
+            trabajador,
+            labor,
+            COALESCE(SUM(total_tractor), 0) AS monto
+        FROM appsheet.tarjas_pagos
+        {where}
+        GROUP BY fecha::date, contratista, trabajador, labor
+        ORDER BY contratista, fecha::date, trabajador, labor
+        """,
+        params,
+    )
+    return _rows_to_dicts(cur)
+
+
+def _general_tractorista_where(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    centro_costo: str | None = None,
+    labor: str | None = None,
+    maquina: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> tuple[str, list]:
+    """Same WHERE as the General tractorista screen — JSON, Excel and PDF."""
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if centro_costo:
+        filters.append("cuartel_cc = %s")
+        params.append(centro_costo)
+    if labor:
+        filters.append("labor = %s")
+        params.append(labor)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    maq_col = _resolve_maquina_column(cur)
+    if maq_col and maquina:
+        frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
+        filters.append(frag.as_string(cur.connection))
+        params.append(maquina)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _resumen_persona_tractorista_where(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    trabajador: str | None = None,
+    tipo_pago: str | None = None,
+    maquina: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+) -> tuple[str, list]:
+    """Same WHERE as the Resumen tractorista screen — JSON, Excel and PDF."""
+    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
+    params: list = [fecha_inicio, fecha_termino]
+    if trabajador:
+        filters.append("trabajador = %s")
+        params.append(trabajador)
+    if tipo_pago:
+        filters.append("tipo_pago = %s")
+        params.append(tipo_pago)
+    if contratista:
+        filters.append("contratista = %s")
+        params.append(contratista)
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(_empresa_to_campo(empresa))
+    maq_col = _resolve_maquina_column(cur)
+    if maq_col and maquina:
+        frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
+        filters.append(frag.as_string(cur.connection))
+        params.append(maquina)
+    return "WHERE " + " AND ".join(filters), params
+
+
+def _fetch_general_tractorista_tables(cur, where: str, params: list) -> tuple[list, list]:
+    """Labor summary + person ranking. Shared by JSON, Excel and PDF."""
+    cur.execute(
+        f"""
+        SELECT
+            labor,
+            ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
+            COALESCE(SUM(total_tractor), 0)       AS total
+        FROM appsheet.tarjas_pagos
+        {where}
+        GROUP BY labor
+        ORDER BY total DESC
+        """,
+        params,
+    )
+    labor_summary = _rows_to_dicts(cur)
+    cur.execute(
+        f"""
+        SELECT
+            trabajador,
+            contratista,
+            ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
+            COALESCE(SUM(total_tractor), 0)       AS total
+        FROM appsheet.tarjas_pagos
+        {where}
+        GROUP BY trabajador, contratista
+        ORDER BY total DESC
+        """,
+        params,
+    )
+    return labor_summary, _rows_to_dicts(cur)
+
+
+def _fetch_resumen_persona_tractorista_rows(cur, where: str, params: list) -> list[dict]:
+    """Worker × contratista × máquina × horas × fecha cells. Shared by
+    JSON, Excel and PDF (screen / standalone / bulk /reportes)."""
+    conn = cur.connection
+    maq_col = _resolve_maquina_column(cur)
+    maq_select = (
+        psql.SQL(", {col} AS maquina")
+        .format(col=psql.Identifier(maq_col))
+        .as_string(conn)
+        if maq_col
+        else ", NULL AS maquina"
+    )
+    cur.execute(
+        f"""
+        SELECT trabajador, contratista{maq_select}, horas_extras,
+               fecha::date::text AS fecha,
+               COALESCE(SUM(total_tractor), 0) AS total_tractor
+        FROM appsheet.tarjas_pagos {where}
+        GROUP BY trabajador, contratista, maquina, horas_extras, fecha::date
+        ORDER BY trabajador, contratista, maquina, fecha::date
+        """,
+        params,
+    )
+    return _rows_to_dicts(cur)
+
+
+def _pivot_resumen_persona_tractorista(rows: list[dict]) -> tuple[list[str], list[dict]]:
+    """Same grouping as the screen: trabajador+contratista, then máquina+horas."""
+    dates = sorted({r["fecha"] for r in rows if r.get("fecha")})
+    groups: dict[tuple, dict] = {}
+    for r in rows:
+        gkey = (r.get("trabajador") or "", r.get("contratista") or "")
+        maq = r.get("maquina") if r.get("maquina") is not None else ""
+        hextra = r.get("horas_extras") if r.get("horas_extras") is not None else ""
+        rkey = (maq, hextra)
+        if gkey not in groups:
+            groups[gkey] = {
+                "trabajador": gkey[0],
+                "contratista": gkey[1],
+                "rows": {},
+                "grand": 0.0,
+            }
+        g = groups[gkey]
+        if rkey not in g["rows"]:
+            g["rows"][rkey] = {
+                "maquina": maq,
+                "horas_extras": hextra,
+                "by_date": {},
+                "total": 0.0,
+            }
+        amt = float(r.get("total_tractor") or 0)
+        entry = g["rows"][rkey]
+        fecha = r["fecha"]
+        entry["by_date"][fecha] = entry["by_date"].get(fecha, 0.0) + amt
+        entry["total"] += amt
+        g["grand"] += amt
+    sorted_groups = sorted(groups.values(), key=lambda g: -g["grand"])
+    for g in sorted_groups:
+        g["row_list"] = list(g["rows"].values())
+    return dates, sorted_groups
+
+
+def _detalle_tract_col_key(trabajador: str, labor: str) -> str:
+    return f"{trabajador}||{labor}"
+
+
+def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
+    """One nested pivot block per contratista: fecha × (trabajador, labor).
+
+    Only dates that appear in `rows` are included (no empty calendar days).
+    Only labores that exist for that worker in the range become columns.
+    Missing cells stay None so the UI/Excel/PDF can render them empty.
+    """
+    from collections import defaultdict
+
+    by_contratista: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        name = r.get("contratista") or "(sin contratista)"
+        by_contratista[name].append(r)
+
+    pivots = []
+    for contratista in sorted(by_contratista):
+        crows = by_contratista[contratista]
+        dates = sorted({r["fecha"] for r in crows if r.get("fecha")})
+        worker_labores: dict[str, set[str]] = defaultdict(set)
+        for r in crows:
+            worker = r.get("trabajador") or "(sin nombre)"
+            worker_labores[worker].add(r.get("labor") or "")
+
+        workers = []
+        columns = []
+        for worker in sorted(worker_labores):
+            labores = sorted(worker_labores[worker])
+            workers.append({"name": worker, "labores": labores})
+            for labor in labores:
+                columns.append(
+                    {
+                        "trabajador": worker,
+                        "labor": labor,
+                        "key": _detalle_tract_col_key(worker, labor),
+                    }
+                )
+
+        keys = [c["key"] for c in columns]
+        matrix = {d: {k: None for k in keys} for d in dates}
+        for r in crows:
+            fecha = r.get("fecha")
+            if not fecha:
+                continue
+            worker = r.get("trabajador") or "(sin nombre)"
+            labor = r.get("labor") or ""
+            key = _detalle_tract_col_key(worker, labor)
+            amount = float(r.get("monto") or 0)
+            current = matrix[fecha].get(key)
+            matrix[fecha][key] = amount if current is None else current + amount
+
+        col_totals = {
+            k: sum(matrix[d][k] or 0.0 for d in dates) for k in keys
+        }
+        date_totals = {
+            d: sum(v or 0.0 for v in matrix[d].values()) for d in dates
+        }
+        pivots.append(
+            {
+                "contratista": contratista,
+                "dates": dates,
+                "workers": workers,
+                "columns": columns,
+                "matrix": matrix,
+                "col_totals": col_totals,
+                "date_totals": date_totals,
+                "grand_total": sum(col_totals.values()),
+            }
+        )
+    return pivots
 
 
 @router.get("/tarjas/detalle-tractorista", response_class=HTMLResponse)
@@ -852,7 +1172,7 @@ async def redirect_tractoristas_legacy():
 
 @router.get("/api/tarjas/detalle-tractorista/filters")
 async def get_tarjas_detalle_tractorista_filters():
-    """Filter options limited to Tractorista rows in tarjas_reporte."""
+    """Filter options limited to Tractorista rows in tarjas_pagos."""
     try:
         conn = get_connection()
     except Exception:
@@ -861,44 +1181,13 @@ async def get_tarjas_detalle_tractorista_filters():
         )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT DISTINCT contratista FROM appsheet.tarjas_reporte "
-                f"WHERE {_TRACTORISTA_SQL} ORDER BY contratista"
-            )
-            contratistas = [r[0] for r in cur.fetchall()]
-
-            cur.execute(
-                f'SELECT DISTINCT "CC" FROM appsheet.tarjas_reporte '
-                f'WHERE {_TRACTORISTA_SQL} AND "CC" IS NOT NULL ORDER BY "CC"'
-            )
-            centros_costo = [r[0] for r in cur.fetchall()]
-
-            cur.execute(
-                f'SELECT DISTINCT "Nombre Labor" FROM appsheet.tarjas_reporte '
-                f'WHERE {_TRACTORISTA_SQL} ORDER BY "Nombre Labor"'
-            )
-            labores = [r[0] for r in cur.fetchall()]
-
-            cur.execute(
-                f"SELECT DISTINCT nombre_campo FROM appsheet.tarjas_reporte "
-                f"WHERE {_TRACTORISTA_SQL} ORDER BY nombre_campo"
-            )
-            campos = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(
-                cur,
-                "appsheet.tarjas_reporte",
-                extra_where="LOWER(TRIM(tipo_pago)) = 'tractorista'",
+            options = _fetch_detalle_tractorista_filter_options(
+                cur, f"WHERE {_TRACTORISTA_PAGOS_SQL}", []
             )
     finally:
         conn.close()
 
-    return {
-        "contratistas": contratistas,
-        "empresas": empresas,
-        "centros_costo": centros_costo,
-        "labores": labores,
-        "campos": campos,
-    }
+    return options
 
 
 @router.get("/api/tarjas/detalle-tractorista")
@@ -911,7 +1200,8 @@ async def get_tarjas_detalle_tractorista(
     labor: str = Query(None),
     campo: str = Query(None),
 ):
-    """Weekly tractorista report: summary by contractor + detail rows."""
+    """Looker-style nested pivot: fecha × trabajador × labor, one block per
+    contratista. Amounts are SUM(total_tractor) from tarjas_pagos."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
 
@@ -922,78 +1212,46 @@ async def get_tarjas_detalle_tractorista(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    if centro_costo:
-        filters.append('"CC" = %s')
-        params.append(centro_costo)
-    if labor:
-        filters.append('"Nombre Labor" = %s')
-        params.append(labor)
-    if campo:
-        filters.append("nombre_campo = %s")
-        params.append(campo)
-
-    where = "WHERE " + " AND ".join(filters)
+    where, params = _detalle_tractorista_where(
+        fecha_inicio,
+        fecha_termino,
+        contratista=contratista,
+        empresa=empresa,
+        centro_costo=centro_costo,
+        labor=labor,
+        campo=campo,
+    )
 
     try:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT
-                    tipo_pago,
-                    contratista,
-                    COALESCE(SUM(total_labor), 0) AS total_pagar,
-                    COALESCE(SUM(jornadas), 0)    AS jornadas
-                FROM appsheet.tarjas_reporte
+                    COALESCE(SUM(total_tractor), 0) AS total,
+                    COUNT(*) AS jornadas
+                FROM appsheet.tarjas_pagos
                 {where}
-                GROUP BY tipo_pago, contratista
-                ORDER BY contratista
-            """,
+                """,
                 params,
             )
-            resumen_contratista = _rows_to_dicts(cur)
-
-            cur.execute(
-                f"""
-                SELECT
-                    tipo_pago,
-                    "CC"                  AS centro_costo,
-                    "Nombre Labor"        AS labor,
-                    SUM(jornadas)         AS jornadas,
-                    CASE WHEN SUM(jornadas) > 0
-                         THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
-                         ELSE NULL END    AS total_unitario,
-                    SUM(total_labor)      AS costo_total,
-                    contratista,
-                    nombre_campo
-                FROM appsheet.tarjas_reporte
-                {where}
-                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
-                ORDER BY contratista, "CC", "Nombre Labor"
-            """,
-                params,
+            total, jornadas = cur.fetchone()
+            rows = _fetch_detalle_tractorista_rows(cur, where, params)
+            date_where, date_params = _detalle_tractorista_where(
+                fecha_inicio, fecha_termino
             )
-            rows = _rows_to_dicts(cur)
+            filter_options = _fetch_detalle_tractorista_filter_options(
+                cur, date_where, date_params
+            )
     finally:
         conn.close()
 
-    total_general = sum(r["total_pagar"] for r in resumen_contratista)
-    jornadas_general = sum(r["jornadas"] for r in resumen_contratista)
-
+    pivots = _build_detalle_tractorista_pivots(rows)
     return {
-        "resumen_contratista": resumen_contratista,
-        "total": total_general,
-        "jornadas": jornadas_general,
-        "rows": rows,
+        "pivots": pivots,
+        "total": float(total or 0),
+        "jornadas": int(jornadas or 0),
         "count": len(rows),
+        "filter_options": filter_options,
     }
 
 
@@ -1705,50 +1963,19 @@ async def get_tarjas_resumen_persona_tractorista(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-
-    if trabajador:
-        filters.append("trabajador = %s")
-        params.append(trabajador)
-    if tipo_pago:
-        filters.append("tipo_pago = %s")
-        params.append(tipo_pago)
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-
     try:
         with conn.cursor() as cur:
-            maq_col = _resolve_maquina_column(cur)
-            if maq_col and maquina:
-                frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
-                filters.append(frag.as_string(conn))
-                params.append(maquina)
-
-            maq_select = (
-                psql.SQL(", {col} AS maquina")
-                .format(col=psql.Identifier(maq_col))
-                .as_string(conn)
-                if maq_col
-                else ", NULL AS maquina"
+            where, params = _resumen_persona_tractorista_where(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                trabajador=trabajador,
+                tipo_pago=tipo_pago,
+                maquina=maquina,
+                contratista=contratista,
+                empresa=empresa,
             )
-
-            where = "WHERE " + " AND ".join(filters)
-
-            cur.execute(
-                f"SELECT trabajador{maq_select}, horas_extras, "
-                f"fecha::date::text AS fecha, "
-                f"COALESCE(SUM(total_tractor), 0) AS total_tractor "
-                f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, maquina, horas_extras, fecha::date "
-                "ORDER BY trabajador, maquina, fecha::date",
-                params,
-            )
-            rows = _rows_to_dicts(cur)
+            rows = _fetch_resumen_persona_tractorista_rows(cur, where, params)
     finally:
         conn.close()
 
@@ -1849,66 +2076,47 @@ async def get_tarjas_general_tractorista(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-
-    if centro_costo:
-        filters.append("cuartel_cc = %s")
-        params.append(centro_costo)
-    if labor:
-        filters.append("labor = %s")
-        params.append(labor)
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-
     try:
         with conn.cursor() as cur:
+            where, params = _general_tractorista_where(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                centro_costo=centro_costo,
+                labor=labor,
+                maquina=maquina,
+                contratista=contratista,
+                empresa=empresa,
+            )
+            labor_summary, person_ranking = _fetch_general_tractorista_tables(
+                cur, where, params
+            )
             maq_col = _resolve_maquina_column(cur)
+
+            # 3) Daily average by labor × worker (top 6) — same filters as ranking
+            p_filters = [
+                "p.fecha::date BETWEEN %s AND %s",
+                "(LOWER(TRIM(p.tipo_pago)) = 'tractorista')",
+            ]
+            p_params: list = [fecha_inicio, fecha_termino]
+            if centro_costo:
+                p_filters.append("p.cuartel_cc = %s")
+                p_params.append(centro_costo)
+            if labor:
+                p_filters.append("p.labor = %s")
+                p_params.append(labor)
+            if contratista:
+                p_filters.append("p.contratista = %s")
+                p_params.append(contratista)
+            if empresa:
+                p_filters.append("p.nombre_campo = %s")
+                p_params.append(_empresa_to_campo(empresa))
             if maq_col and maquina:
-                frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
-                filters.append(frag.as_string(conn))
-                params.append(maquina)
+                frag = psql.SQL("p.{} = %s").format(psql.Identifier(maq_col))
+                p_filters.append(frag.as_string(conn))
+                p_params.append(maquina)
+            p_where = "WHERE " + " AND ".join(p_filters)
 
-            where = "WHERE " + " AND ".join(filters)
-
-            # 1) Average earnings per labor — tractoristas use total_tractor
-            cur.execute(
-                f"""
-                SELECT
-                    labor,
-                    ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
-                    COALESCE(SUM(total_tractor), 0)       AS total
-                FROM appsheet.tarjas_pagos
-                {where}
-                GROUP BY labor
-                ORDER BY total DESC
-            """,
-                params,
-            )
-            labor_summary = _rows_to_dicts(cur)
-
-            # 2) Person ranking
-            cur.execute(
-                f"""
-                SELECT
-                    trabajador,
-                    contratista,
-                    ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
-                    COALESCE(SUM(total_tractor), 0)       AS total
-                FROM appsheet.tarjas_pagos
-                {where}
-                GROUP BY trabajador, contratista
-                ORDER BY total DESC
-            """,
-                params,
-            )
-            person_ranking = _rows_to_dicts(cur)
-
-            # 3) Daily average by labor × worker (top 6)
             cur.execute(
                 f"""
                 WITH top_workers AS (
@@ -1925,12 +2133,11 @@ async def get_tarjas_general_tractorista(
                     ROUND(AVG(p.total_tractor)::numeric, 2) AS avg_daily
                 FROM appsheet.tarjas_pagos p
                 JOIN top_workers tw ON tw.trabajador = p.trabajador
-                WHERE p.fecha::date BETWEEN %s AND %s
-                  AND {_TRACTORISTA_PAGOS_SQL.replace("tipo_pago", "p.tipo_pago")}
+                {p_where}
                 GROUP BY p.labor, p.trabajador
                 ORDER BY p.labor, avg_daily DESC
             """,
-                params + [fecha_inicio, fecha_termino],
+                params + p_params,
             )
             chart_data = _rows_to_dicts(cur)
     finally:
@@ -2270,77 +2477,201 @@ async def download_tarjas_detalle_tractorista_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    if centro_costo:
-        filters.append('"CC" = %s')
-        params.append(centro_costo)
-    if labor:
-        filters.append('"Nombre Labor" = %s')
-        params.append(labor)
-    if campo:
-        filters.append("nombre_campo = %s")
-        params.append(campo)
-    where = "WHERE " + " AND ".join(filters)
+    where, params = _detalle_tractorista_where(
+        fecha_inicio,
+        fecha_termino,
+        contratista=contratista,
+        empresa=empresa,
+        centro_costo=centro_costo,
+        labor=labor,
+        campo=campo,
+    )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
-                       SUM(jornadas) AS jornadas,
-                       CASE WHEN SUM(jornadas) > 0
-                            THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
-                            ELSE NULL END AS total_unitario,
-                       SUM(total_labor) AS costo_total,
-                       contratista, nombre_campo
-                FROM appsheet.tarjas_reporte {where}
-                GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
-                ORDER BY contratista, "CC", "Nombre Labor"
-            """,
-                params,
-            )
-            rows = _rows_to_dicts(cur)
+            rows = _fetch_detalle_tractorista_rows(cur, where, params)
     finally:
         conn.close()
+    pivots = _build_detalle_tractorista_pivots(rows)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Detalle tractorista"
-    _apply_header(
-        ws,
-        [
-            "Tipo de pago",
-            "CC",
-            "Labor",
-            "Jornadas",
-            "Total unitario",
-            "Costo total",
-            "Contratista",
-            "Campo",
-        ],
-    )
-    money = "#,##0"
-    for i, r in enumerate(rows, 2):
-        ws.cell(i, 1, r["tipo_pago"])
-        ws.cell(i, 2, r["centro_costo"])
-        ws.cell(i, 3, r["labor"])
-        ws.cell(i, 4, r["jornadas"])
-        c5 = ws.cell(i, 5, float(r["total_unitario"] or 0))
-        c5.number_format = money
-        c6 = ws.cell(i, 6, float(r["costo_total"] or 0))
-        c6.number_format = money
-        ws.cell(i, 7, r["contratista"])
-        ws.cell(i, 8, r["nombre_campo"])
-    for col, w in zip("ABCDEFGH", [14, 10, 28, 10, 14, 14, 24, 20]):
-        ws.column_dimensions[col].width = w
+    row = 1
+    for pivot in pivots:
+        row = _write_detalle_tractorista_excel_pivot(ws, pivot, row)
+    if not pivots:
+        ws.cell(1, 1, "Sin resultados")
     return _excel_response(
         wb, f"tarjas_detalle_tractorista_{fecha_inicio}_{fecha_termino}.xlsx"
     )
+
+
+def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> int:
+    """Write one Looker nested pivot block. Returns the next free row."""
+    from openpyxl.utils import get_column_letter
+
+    fill, font, _align = _excel_header_style()
+    wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    n = len(pivot["columns"])
+    if n == 0:
+        return start_row
+    total_col = 2 + n
+    money = "$#,##0"
+
+    def _paint(cell, value=None):
+        if value is not None:
+            cell.value = value
+        cell.fill = fill
+        cell.font = font
+        cell.alignment = wrap
+
+    _paint(ws.cell(start_row, 1), "Fecha")
+    ws.merge_cells(
+        start_row=start_row, start_column=2, end_row=start_row, end_column=1 + n
+    )
+    _paint(ws.cell(start_row, 2), pivot["contratista"])
+    for col in range(3, 2 + n):
+        _paint(ws.cell(start_row, col))
+    _paint(ws.cell(start_row, total_col), f"Total {pivot['contratista']}")
+
+    ws.merge_cells(
+        start_row=start_row, start_column=1, end_row=start_row + 2, end_column=1
+    )
+    ws.merge_cells(
+        start_row=start_row,
+        start_column=total_col,
+        end_row=start_row + 2,
+        end_column=total_col,
+    )
+
+    col = 2
+    for wk in pivot["workers"]:
+        span = len(wk["labores"])
+        end_col = col + span - 1
+        if span > 1:
+            ws.merge_cells(
+                start_row=start_row + 1,
+                start_column=col,
+                end_row=start_row + 1,
+                end_column=end_col,
+            )
+        _paint(ws.cell(start_row + 1, col), wk["name"])
+        for i in range(span):
+            _paint(ws.cell(start_row + 1, col + i))
+        col += span
+
+    for i, c in enumerate(pivot["columns"]):
+        _paint(ws.cell(start_row + 2, 2 + i), c["labor"])
+
+    for r in range(start_row, start_row + 3):
+        _paint(ws.cell(r, 1))
+        _paint(ws.cell(r, total_col))
+
+    right = Alignment(horizontal="right")
+    bold = Font(bold=True)
+    total_fill = PatternFill("solid", fgColor="E8EEF4")
+    row = start_row + 3
+    for fecha in pivot["dates"]:
+        ws.cell(row, 1, _fmt_date_slash(fecha))
+        for i, c in enumerate(pivot["columns"]):
+            val = pivot["matrix"][fecha].get(c["key"])
+            if val is not None:
+                cell = ws.cell(row, 2 + i, int(round(val)))
+                cell.number_format = money
+                cell.alignment = right
+        tot = ws.cell(row, total_col, int(round(pivot["date_totals"][fecha])))
+        tot.number_format = money
+        tot.font = bold
+        tot.alignment = right
+        row += 1
+
+    ws.cell(row, 1, "Suma total").font = bold
+    ws.cell(row, 1).fill = total_fill
+    for i, c in enumerate(pivot["columns"]):
+        cell = ws.cell(row, 2 + i, int(round(pivot["col_totals"][c["key"]])))
+        cell.number_format = money
+        cell.font = bold
+        cell.fill = total_fill
+        cell.alignment = right
+    grand = ws.cell(row, total_col, int(round(pivot["grand_total"])))
+    grand.number_format = money
+    grand.font = bold
+    grand.fill = total_fill
+    grand.alignment = right
+
+    ws.column_dimensions["A"].width = 14
+    for i in range(n):
+        ws.column_dimensions[get_column_letter(2 + i)].width = 16
+    ws.column_dimensions[get_column_letter(total_col)].width = max(
+        18, min(36, len(f"Total {pivot['contratista']}") + 2)
+    )
+    return row + 2
+
+
+def _detalle_tractorista_pivot_table_html(pivot: dict) -> str:
+    """One nested pivot HTML table for the PDF (no rowspan — xhtml2pdf)."""
+    n = len(pivot["columns"])
+    if n == 0:
+        return ""
+    _check_pivot_date_range(pivot["columns"], "Detalle tractorista")
+    w = _pivot_col_widths({"fecha": 10, "total": 12}, n, date_pct=6.0)
+    contratista = _escape_html(pivot["contratista"])
+    group = 'class="th-group" style="text-align:center;background:#1F4E79;color:#ffffff"'
+    worker_ths = "".join(
+        f'<th {group} colspan="{len(wk["labores"])}">{_escape_html(wk["name"])}</th>'
+        for wk in pivot["workers"]
+    )
+    labor_ths = "".join(
+        f'<th class="num" style="{w["date"]};background:#1F4E79;color:#ffffff">'
+        f'{_escape_html(c["labor"])}</th>'
+        for c in pivot["columns"]
+    )
+
+    def money(v) -> str:
+        return _fmt_clp(v) if v is not None else ""
+
+    body = ""
+    for d in pivot["dates"]:
+        cells = "".join(
+            f'<td class="num" style="{w["date"]}">{money(pivot["matrix"][d].get(c["key"]))}</td>'
+            for c in pivot["columns"]
+        )
+        body += (
+            f'<tr><td style="{w["fecha"]}">{_fmt_date_slash(d)}</td>{cells}'
+            f'<td class="num" style="{w["total"]}">{_fmt_clp(pivot["date_totals"][d])}</td></tr>'
+        )
+    foot = "".join(
+        f'<td class="num" style="{w["date"]}">{_fmt_clp(pivot["col_totals"][c["key"]])}</td>'
+        for c in pivot["columns"]
+    )
+    return f"""
+    <table class="detalle-tract-pivot pivot-wide" style="{w['table']}">
+      <thead>
+        <tr>
+          <th style="{w["fecha"]}"></th>
+          <th {group} colspan="{n}">{contratista}</th>
+          <th style="{w["total"]}"></th>
+        </tr>
+        <tr>
+          <th style="{w["fecha"]}"></th>
+          {worker_ths}
+          <th style="{w["total"]}"></th>
+        </tr>
+        <tr>
+          <th style="{w["fecha"]};background:#1F4E79;color:#ffffff">Fecha</th>
+          {labor_ths}
+          <th class="num" style="{w["total"]};background:#1F4E79;color:#ffffff">Total {contratista}</th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+      <tfoot>
+        <tr>
+          <td style="{w["fecha"]}">Suma total</td>
+          {foot}
+          <td class="num" style="{w["total"]}">{_fmt_clp(pivot["grand_total"])}</td>
+        </tr>
+      </tfoot>
+    </table>
+    """
 
 
 def _build_detalle_tractorista_html(
@@ -2355,64 +2686,20 @@ def _build_detalle_tractorista_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha BETWEEN %s AND %s", _TRACTORISTA_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    if centro_costo:
-        filters.append('"CC" = %s')
-        params.append(centro_costo)
-    if labor:
-        filters.append('"Nombre Labor" = %s')
-        params.append(labor)
-    if campo:
-        filters.append("nombre_campo = %s")
-        params.append(campo)
-    where = "WHERE " + " AND ".join(filters)
-    cur.execute(
-        f"""
-        SELECT tipo_pago, "CC" AS centro_costo, "Nombre Labor" AS labor,
-               SUM(jornadas) AS jornadas,
-               CASE WHEN SUM(jornadas) > 0
-                    THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
-                    ELSE NULL END AS total_unitario,
-               SUM(total_labor) AS costo_total,
-               contratista, nombre_campo
-        FROM appsheet.tarjas_reporte {where}
-        GROUP BY tipo_pago, "CC", "Nombre Labor", contratista, nombre_campo
-        ORDER BY contratista, "CC", "Nombre Labor"
-    """,
-        params,
+    where, params = _detalle_tractorista_where(
+        fecha_inicio,
+        fecha_termino,
+        contratista=contratista,
+        empresa=empresa,
+        centro_costo=centro_costo,
+        labor=labor,
+        campo=campo,
     )
-    rows = _rows_to_dicts(cur)
-
-    def clp(v):
-        return f"${float(v):,.0f}".replace(",", ".") if v else "—"
-
-    W = {
-        "tipo": "width:9%",
-        "cc": "width:6%",
-        "labor": "width:22%",
-        "jornadas": "width:9%",
-        "unitario": "width:12%",
-        "total": "width:13%",
-        "contratista": "width:16%",
-        "campo": "width:13%",
-    }
-    rows_html = "".join(
-        f'<tr><td style="{W["tipo"]}">{r["tipo_pago"]}</td>'
-        f'<td style="{W["cc"]}">{r["centro_costo"]}</td>'
-        f'<td style="{W["labor"]}">{r["labor"]}</td>'
-        f'<td class="num" style="{W["jornadas"]}">{r["jornadas"]}</td>'
-        f'<td class="num" style="{W["unitario"]}">{clp(r["total_unitario"])}</td>'
-        f'<td class="total" style="{W["total"]}">{clp(r["costo_total"])}</td>'
-        f'<td style="{W["contratista"]}">{r["contratista"]}</td>'
-        f'<td style="{W["campo"]}">{r["nombre_campo"]}</td></tr>'
-        for r in rows
+    rows = _fetch_detalle_tractorista_rows(cur, where, params)
+    pivots = _build_detalle_tractorista_pivots(rows)
+    tables = (
+        "".join(_detalle_tractorista_pivot_table_html(p) for p in pivots)
+        or "<p>Sin resultados</p>"
     )
     header = _pdf_header(
         _pdf_title("Detalle Tractoristas", contratista),
@@ -2427,14 +2714,7 @@ def _build_detalle_tractorista_html(
     )
     return f"""
     {header}
-    <table style="width:88%;table-layout:fixed"><thead>
-      <tr><th style="{W["tipo"]}">Tipo pago</th><th style="{W["cc"]}">CC</th>
-      <th style="{W["labor"]}">Labor</th>
-      <th class="num" style="{W["jornadas"]}">Jornadas</th>
-      <th class="num" style="{W["unitario"]}">Unitario</th>
-      <th class="num" style="{W["total"]}">Total</th>
-      <th style="{W["contratista"]}">Contratista</th><th style="{W["campo"]}">Campo</th></tr>
-    </thead><tbody>{rows_html}</tbody></table>
+    {tables}
     """
 
 
@@ -2485,6 +2765,7 @@ async def download_tarjas_general_tractorista_excel(
     fecha_termino: str = Query(...),
     centro_costo: str = Query(None),
     labor: str = Query(None),
+    maquina: str = Query(None),
     contratista: str = Query(None),
     empresa: str = Query(None),
 ):
@@ -2496,56 +2777,63 @@ async def download_tarjas_general_tractorista_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-    if centro_costo:
-        filters.append("cuartel_cc = %s")
-        params.append(centro_costo)
-    if labor:
-        filters.append("labor = %s")
-        params.append(labor)
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    where = "WHERE " + " AND ".join(filters)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT trabajador, contratista, labor, tipo_pago,
-                       ROUND(AVG(total_tractor)::numeric,2) AS promedio,
-                       COALESCE(SUM(total_tractor),0) AS total
-                FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago
-                ORDER BY total DESC
-            """,
-                params,
+            where, params = _general_tractorista_where(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                centro_costo=centro_costo,
+                labor=labor,
+                maquina=maquina,
+                contratista=contratista,
+                empresa=empresa,
             )
-            rows = _rows_to_dicts(cur)
+            labor_summary, person_ranking = _fetch_general_tractorista_tables(
+                cur, where, params
+            )
     finally:
         conn.close()
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "General tractorista"
-    _apply_header(
-        ws, ["Trabajador", "Contratista", "Labor", "Tipo de pago", "Promedio", "Total"]
-    )
     money = "#,##0"
     money2 = "#,##0.00"
-    for i, r in enumerate(rows, 2):
-        ws.cell(i, 1, r["trabajador"])
-        ws.cell(i, 2, r["contratista"])
-        ws.cell(i, 3, r["labor"])
-        ws.cell(i, 4, r["tipo_pago"])
-        c5 = ws.cell(i, 5, float(r["promedio"] or 0))
-        c5.number_format = money2
-        c6 = ws.cell(i, 6, float(r["total"] or 0))
-        c6.number_format = money
-    for col, w in zip("ABCDEF", [28, 24, 28, 16, 14, 14]):
+    ws = wb.active
+    ws.title = "Por labor"
+    _apply_header(ws, ["Labor", "Promedio", "Total"])
+    for i, r in enumerate(labor_summary, 2):
+        ws.cell(i, 1, r["labor"])
+        c2 = ws.cell(i, 2, float(r["avg_rate"] or 0))
+        c2.number_format = money2
+        c3 = ws.cell(i, 3, float(r["total"] or 0))
+        c3.number_format = money
+    foot = 2 + len(labor_summary)
+    ws.cell(foot, 1, "Suma total")
+    tot = ws.cell(
+        foot, 3, sum(float(r["total"] or 0) for r in labor_summary)
+    )
+    tot.number_format = money
+    tot.font = Font(bold=True)
+    for col, w in zip("ABC", [32, 14, 14]):
         ws.column_dimensions[col].width = w
+
+    ws2 = wb.create_sheet("Ranking")
+    _apply_header(ws2, ["Trabajador", "Contratista", "Promedio", "Total"])
+    for i, r in enumerate(person_ranking, 2):
+        ws2.cell(i, 1, r["trabajador"])
+        ws2.cell(i, 2, r["contratista"])
+        c3 = ws2.cell(i, 3, float(r["avg_rate"] or 0))
+        c3.number_format = money2
+        c4 = ws2.cell(i, 4, float(r["total"] or 0))
+        c4.number_format = money
+    foot = 2 + len(person_ranking)
+    ws2.cell(foot, 1, "Suma total")
+    tot = ws2.cell(
+        foot, 4, sum(float(r["total"] or 0) for r in person_ranking)
+    )
+    tot.number_format = money
+    tot.font = Font(bold=True)
+    for col, w in zip("ABCD", [28, 28, 14, 14]):
+        ws2.column_dimensions[col].width = w
     return _excel_response(
         wb, f"tarjas_general_tractorista_{fecha_inicio}_{fecha_termino}.xlsx"
     )
@@ -2559,57 +2847,47 @@ def _build_general_tractorista_html(
     labor: str | None = None,
     contratista: str | None = None,
     empresa: str | None = None,
+    maquina: str | None = None,
 ) -> str:
-    """Shared by the standalone PDF endpoint and the bulk /reportes PDF
-    (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-    if centro_costo:
-        filters.append("cuartel_cc = %s")
-        params.append(centro_costo)
-    if labor:
-        filters.append("labor = %s")
-        params.append(labor)
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    where = "WHERE " + " AND ".join(filters)
-    cur.execute(
-        f"""
-        SELECT trabajador, contratista, labor, tipo_pago,
-               ROUND(AVG(total_tractor)::numeric,2) AS promedio,
-               COALESCE(SUM(total_tractor),0) AS total
-        FROM appsheet.tarjas_pagos {where}
-        GROUP BY trabajador, contratista, labor, tipo_pago
-        ORDER BY total DESC
-    """,
-        params,
+    """Same two tables as the screen (labor + ranking). Shared by standalone
+    PDF and bulk /reportes (issue #116)."""
+    where, params = _general_tractorista_where(
+        cur,
+        fecha_inicio,
+        fecha_termino,
+        centro_costo=centro_costo,
+        labor=labor,
+        maquina=maquina,
+        contratista=contratista,
+        empresa=empresa,
     )
-    rows = _rows_to_dicts(cur)
-
-    def clp(v):
-        return f"${float(v):,.0f}".replace(",", ".") if v else "—"
-
-    W = {
-        "trab": "width:22%",
-        "cont": "width:22%",
-        "labor": "width:18%",
-        "tipo": "width:12%",
-        "prom": "width:12%",
-        "total": "width:14%",
-    }
-    rows_html = "".join(
-        f'<tr><td style="{W["trab"]}">{r["trabajador"]}</td>'
-        f'<td style="{W["cont"]}">{r["contratista"]}</td>'
-        f'<td style="{W["labor"]}">{r["labor"]}</td>'
-        f'<td style="{W["tipo"]}">{r["tipo_pago"]}</td>'
-        f'<td class="num" style="{W["prom"]}">{clp(r["promedio"])}</td>'
-        f'<td class="total" style="{W["total"]}">{clp(r["total"])}</td></tr>'
-        for r in rows
+    labor_summary, person_ranking = _fetch_general_tractorista_tables(
+        cur, where, params
     )
+
+    def money(v, decimals=False):
+        if v is None:
+            return "—"
+        if decimals:
+            n = f"{float(v):,.2f}"
+            return "$" + n.replace(",", "X").replace(".", ",").replace("X", ".")
+        return _fmt_clp(v)
+
+    labor_rows = "".join(
+        f'<tr><td>{_escape_html(r["labor"] or "")}</td>'
+        f'<td class="num">{money(r["avg_rate"], True)}</td>'
+        f'<td class="total">{money(r["total"])}</td></tr>'
+        for r in labor_summary
+    )
+    labor_sum = sum(float(r["total"] or 0) for r in labor_summary)
+    rank_rows = "".join(
+        f'<tr><td>{_escape_html(r["trabajador"] or "")}</td>'
+        f'<td>{_escape_html(r["contratista"] or "")}</td>'
+        f'<td class="num">{money(r["avg_rate"], True)}</td>'
+        f'<td class="total">{money(r["total"])}</td></tr>'
+        for r in person_ranking
+    )
+    rank_sum = sum(float(r["total"] or 0) for r in person_ranking)
     header = _pdf_header(
         _pdf_title("General Tractoristas", contratista),
         fecha_inicio,
@@ -2619,16 +2897,27 @@ def _build_general_tractorista_html(
             "Contratista": contratista,
             "CC": centro_costo,
             "Labor": labor,
+            "Máquina": maquina,
         },
     )
     return f"""
     {header}
-    <table style="width:75%;table-layout:fixed"><thead>
-      <tr><th style="{W["trab"]}">Trabajador</th><th style="{W["cont"]}">Contratista</th>
-      <th style="{W["labor"]}">Labor</th><th style="{W["tipo"]}">Tipo de pago</th>
-      <th class="num" style="{W["prom"]}">Promedio</th>
-      <th class="num" style="{W["total"]}">Total</th></tr>
-    </thead><tbody>{rows_html}</tbody></table>
+    <h2 style="font-size:12pt;margin:10px 0 6px">Ganancia promedio por labor</h2>
+    <table style="width:70%;table-layout:fixed"><thead>
+      <tr><th style="width:50%">Labor</th>
+          <th class="num" style="width:25%">Promedio</th>
+          <th class="num" style="width:25%">Total</th></tr>
+    </thead><tbody>{labor_rows}</tbody>
+    <tfoot><tr><td>Suma total</td><td></td>
+      <td class="total">{money(labor_sum)}</td></tr></tfoot></table>
+    <h2 style="font-size:12pt;margin:16px 0 6px">Ranking por persona</h2>
+    <table style="width:85%;table-layout:fixed"><thead>
+      <tr><th style="width:32%">Trabajador</th><th style="width:32%">Contratista</th>
+          <th class="num" style="width:18%">Promedio</th>
+          <th class="num" style="width:18%">Total</th></tr>
+    </thead><tbody>{rank_rows}</tbody>
+    <tfoot><tr><td colspan="3">Suma total</td>
+      <td class="total">{money(rank_sum)}</td></tr></tfoot></table>
     """
 
 
@@ -2638,6 +2927,7 @@ async def download_tarjas_general_tractorista_pdf(
     fecha_termino: str = Query(...),
     centro_costo: str = Query(None),
     labor: str = Query(None),
+    maquina: str = Query(None),
     contratista: str = Query(None),
     empresa: str = Query(None),
 ):
@@ -2659,6 +2949,7 @@ async def download_tarjas_general_tractorista_pdf(
                 labor,
                 contratista,
                 empresa,
+                maquina,
             )
     finally:
         conn.close()
@@ -2774,6 +3065,7 @@ async def download_tarjas_resumen_persona_tractorista_excel(
     fecha_termino: str = Query(...),
     trabajador: str = Query(None),
     tipo_pago: str = Query(None),
+    maquina: str = Query(None),
     contratista: str = Query(None),
     empresa: str = Query(None),
 ):
@@ -2785,84 +3077,223 @@ async def download_tarjas_resumen_persona_tractorista_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    filters = ["fecha::date BETWEEN %s AND %s", _TRACTORISTA_PAGOS_SQL]
-    params: list = [fecha_inicio, fecha_termino]
-    if trabajador:
-        filters.append("trabajador = %s")
-        params.append(trabajador)
-    if tipo_pago:
-        filters.append("tipo_pago = %s")
-        params.append(tipo_pago)
-    if contratista:
-        filters.append("contratista = %s")
-        params.append(contratista)
-    if empresa:
-        filters.append("nombre_campo = %s")
-        params.append(_empresa_to_campo(empresa))
-    where = "WHERE " + " AND ".join(filters)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
-                f"COALESCE(SUM(total_tractor),0) AS total_tractor "
-                f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
-                "ORDER BY trabajador, tipo_pago, fecha::date",
-                params,
+            where, params = _resumen_persona_tractorista_where(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                trabajador=trabajador,
+                tipo_pago=tipo_pago,
+                maquina=maquina,
+                contratista=contratista,
+                empresa=empresa,
             )
-            rows = _rows_to_dicts(cur)
+            rows = _fetch_resumen_persona_tractorista_rows(cur, where, params)
     finally:
         conn.close()
-    dates = sorted({r["fecha"] for r in rows})
-    workers: dict = {}
-    for r in rows:
-        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
-        if key not in workers:
-            workers[key] = {"by_date": {}, "total": 0}
-        workers[key]["by_date"][r["fecha"]] = workers[key]["by_date"].get(
-            r["fecha"], 0
-        ) + float(r["total_tractor"] or 0)
-        workers[key]["total"] += float(r["total_tractor"] or 0)
-    sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
+    dates, groups = _pivot_resumen_persona_tractorista(rows)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Tractorista"
     headers = (
-        ["Trabajador", "Contratista", "Tipo de pago"]
+        ["Trabajador", "Contratista", "Máquina", "Horas extra"]
         + [datetime.date.fromisoformat(d).strftime("%d/%m/%Y") for d in dates]
         + ["Total"]
     )
     _apply_header(ws, headers)
-    from openpyxl.styles import PatternFill, Font
-
     total_fill = PatternFill("solid", fgColor="D6E4F0")
     money = "#,##0"
-    for row_num, ((trab, cont, tipo), entry) in enumerate(sorted_workers, 2):
-        ws.cell(row_num, 1, trab)
-        ws.cell(row_num, 2, cont)
-        ws.cell(row_num, 3, tipo)
-        for col, d in enumerate(dates, 4):
-            v = entry["by_date"].get(d, 0)
-            c = ws.cell(row_num, col, v if v else None)
-            if v:
-                c.number_format = money
-        tc = ws.cell(row_num, 4 + len(dates), entry["total"])
-        tc.number_format = money
-        tc.fill = total_fill
-        tc.font = Font(bold=True)
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 24
-    ws.column_dimensions["C"].width = 18
+    date_totals = {d: 0.0 for d in dates}
+    overall = 0.0
+    row_num = 2
+    for g in groups:
+        for entry in g["row_list"]:
+            ws.cell(row_num, 1, g["trabajador"])
+            ws.cell(row_num, 2, g["contratista"] or None)
+            ws.cell(row_num, 3, entry["maquina"] or None)
+            ws.cell(row_num, 4, entry["horas_extras"] if entry["horas_extras"] != "" else None)
+            for col, d in enumerate(dates, 5):
+                v = entry["by_date"].get(d, 0)
+                c = ws.cell(row_num, col, v if v else None)
+                if v:
+                    c.number_format = money
+                    date_totals[d] += v
+            tc = ws.cell(row_num, 5 + len(dates), entry["total"])
+            tc.number_format = money
+            tc.fill = total_fill
+            tc.font = Font(bold=True)
+            overall += entry["total"]
+            row_num += 1
+    ws.cell(row_num, 1, "Suma total")
+    ws.cell(row_num, 1).font = Font(bold=True)
+    for col, d in enumerate(dates, 5):
+        c = ws.cell(row_num, col, date_totals[d] if date_totals[d] else None)
+        if date_totals[d]:
+            c.number_format = money
+        c.font = Font(bold=True)
+        c.fill = total_fill
+    tot = ws.cell(row_num, 5 + len(dates), overall)
+    tot.number_format = money
+    tot.font = Font(bold=True)
+    tot.fill = total_fill
+    for col, w in zip("ABCD", [28, 24, 18, 14]):
+        ws.column_dimensions[col].width = w
     for i in range(len(dates) + 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(4 + i)].width = 14
+        ws.column_dimensions[openpyxl.utils.get_column_letter(5 + i)].width = 14
     return _excel_response(
         wb, f"tarjas_tractorista_{fecha_inicio}_{fecha_termino}.xlsx"
+    )
+
+
+def _build_resumen_persona_tractorista_html(
+    cur,
+    fecha_inicio: str,
+    fecha_termino: str,
+    trabajador: str | None = None,
+    tipo_pago: str | None = None,
+    contratista: str | None = None,
+    empresa: str | None = None,
+    maquina: str | None = None,
+) -> str:
+    """Same pivot as the screen (Trabajador, Contratista, Máquina, Horas extra,
+    dates DD/MM/YYYY, Total). Shared by standalone PDF and bulk /reportes."""
+    where, params = _resumen_persona_tractorista_where(
+        cur,
+        fecha_inicio,
+        fecha_termino,
+        trabajador=trabajador,
+        tipo_pago=tipo_pago,
+        maquina=maquina,
+        contratista=contratista,
+        empresa=empresa,
+    )
+    rows = _fetch_resumen_persona_tractorista_rows(cur, where, params)
+    dates, groups = _pivot_resumen_persona_tractorista(rows)
+    _check_pivot_date_range(dates, "Resumen tractorista")
+    w = _pivot_col_widths(
+        {"worker": 16, "cont": 16, "maq": 10, "hextra": 8, "total": 10},
+        len(dates),
+    )
+    date_headers = "".join(
+        f'<th class="num" style="{w["date"]}">{_fmt_date_slash(d)}</th>'
+        for d in dates
+    )
+    date_totals = {d: 0.0 for d in dates}
+    overall = 0.0
+    rows_html = ""
+    for g in groups:
+        first = True
+        for entry in g["row_list"]:
+            cls = "worker-first" if first else ""
+            first = False
+            maq = _escape_html(str(entry["maquina"])) if entry["maquina"] not in ("", None) else "—"
+            hextra = (
+                _escape_html(str(entry["horas_extras"]))
+                if entry["horas_extras"] not in ("", None)
+                else "—"
+            )
+            rows_html += (
+                f'<tr class="{cls}">'
+                f'<td style="{w["worker"]}">{_escape_html(g["trabajador"])}</td>'
+                f'<td style="{w["cont"]}">{_escape_html(g["contratista"]) or "—"}</td>'
+                f'<td style="{w["maq"]}">{maq}</td>'
+                f'<td style="{w["hextra"]}">{hextra}</td>'
+            )
+            for d in dates:
+                v = entry["by_date"].get(d, 0)
+                if v:
+                    date_totals[d] += v
+                    rows_html += (
+                        f'<td class="num" style="{w["date"]}">{_fmt_clp(v)}</td>'
+                    )
+                else:
+                    rows_html += f'<td class="num" style="{w["date"]}">0</td>'
+            rows_html += (
+                f'<td class="total" style="{w["total"]}">{_fmt_clp(entry["total"])}</td></tr>'
+            )
+            overall += entry["total"]
+    foot_dates = "".join(
+        f'<td class="total" style="{w["date"]}">'
+        f'{_fmt_clp(date_totals[d]) if date_totals[d] else ""}</td>'
+        for d in dates
+    )
+    header = _pdf_header(
+        _pdf_title("Resumen Tractorista", contratista),
+        fecha_inicio,
+        fecha_termino,
+        {
+            "Empresa": empresa,
+            "Contratista": contratista,
+            "Trabajador": trabajador,
+            "Máquina": maquina,
+        },
+    )
+    return f"""
+    {header}
+    <table class="pivot-wide" style="{w['table']}"><thead>
+      <tr>
+        <th style="{w['worker']}">Trabajador</th>
+        <th style="{w['cont']}">Contratista</th>
+        <th style="{w['maq']}">Máquina</th>
+        <th style="{w['hextra']}">Horas extra</th>
+        {date_headers}
+        <th class="num" style="{w['total']}">Total</th>
+      </tr>
+    </thead><tbody>{rows_html}</tbody>
+    <tfoot><tr>
+      <td colspan="4">Suma total</td>
+      {foot_dates}
+      <td class="total" style="{w['total']}">{_fmt_clp(overall)}</td>
+    </tr></tfoot></table>
+    """
+
+
+@router.get("/api/tarjas/resumen-persona-tractorista/download-pdf")
+async def download_tarjas_resumen_persona_tractorista_pdf(
+    fecha_inicio: str = Query(...),
+    fecha_termino: str = Query(...),
+    trabajador: str = Query(None),
+    tipo_pago: str = Query(None),
+    maquina: str = Query(None),
+    contratista: str = Query(None),
+    empresa: str = Query(None),
+):
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn.cursor() as cur:
+            body = _build_resumen_persona_tractorista_html(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                trabajador=trabajador,
+                tipo_pago=tipo_pago,
+                contratista=contratista,
+                empresa=empresa,
+                maquina=maquina,
+            )
+    finally:
+        conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_PDF_CSS}</style></head><body>
+    {body}
+    </body></html>"""
+    return _render_pdf(
+        html, f"resumen_tractorista_{fecha_inicio}_{fecha_termino}.pdf"
     )
 
 
 # ===========================================================================
 # PDF download endpoints
 # ===========================================================================
+
 
 
 def _build_resumen_persona_html(

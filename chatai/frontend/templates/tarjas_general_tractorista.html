@@ -71,11 +71,12 @@
         <thead>
           <tr>
             <th>Labor</th>
-            <th class="num">Ganancia promedio por hora</th>
+            <th class="num">Promedio</th>
             <th class="num">Total</th>
           </tr>
         </thead>
         <tbody id="labor-tbody"></tbody>
+        <tfoot id="labor-tfoot"></tfoot>
       </table>
     </div>
 
@@ -84,13 +85,14 @@
       <table class="tg-table">
         <thead>
           <tr>
-            <th>trabajador</th>
-            <th>contratista</th>
-            <th class="num">Ganancia por hora</th>
+            <th>Trabajador</th>
+            <th>Contratista</th>
+            <th class="num">Promedio</th>
             <th class="num">Total</th>
           </tr>
         </thead>
         <tbody id="ranking-tbody"></tbody>
+        <tfoot id="ranking-tfoot"></tfoot>
       </table>
     </div>
 
@@ -115,5 +117,5 @@
 
 {% block scripts %}
 <script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/tarjas_general_tractorista.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_general_tractorista.js?v={{ static_v }}&c=1"></script>
 {% endblock %}

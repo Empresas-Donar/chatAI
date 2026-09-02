@@ -11,7 +11,12 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 let chartInstance = null;
 
@@ -50,8 +55,11 @@ async function loadFilters() {
 
 function fillSelect(id, items, defaultLabel) {
   const sel = document.getElementById(id);
+  if (!sel || !Array.isArray(items) || !items.length) return;
+  const prev = sel.value;
   sel.innerHTML = `<option value="">${defaultLabel}</option>` +
     items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 }
 
 async function queryData() {
@@ -111,6 +119,11 @@ function renderLaborTable(rows) {
     <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
     <td class="num">${fmtCLP.format(r.total)}</td>
   </tr>`).join('');
+  const sum = rows.reduce((s, r) => s + Number(r.total || 0), 0);
+  document.getElementById('labor-tfoot').innerHTML = `<tr>
+    <td>Suma total</td><td></td>
+    <td class="num">${fmtCLP.format(sum)}</td>
+  </tr>`;
 }
 
 function renderRanking(rows) {
@@ -120,6 +133,11 @@ function renderRanking(rows) {
     <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
     <td class="num">${fmtCLP.format(r.total)}</td>
   </tr>`).join('');
+  const sum = rows.reduce((s, r) => s + Number(r.total || 0), 0);
+  document.getElementById('ranking-tfoot').innerHTML = `<tr>
+    <td colspan="3">Suma total</td>
+    <td class="num">${fmtCLP.format(sum)}</td>
+  </tr>`;
 }
 
 function renderChart(data) {
@@ -174,6 +192,7 @@ function currentParams() {
   const add = (key, id) => { const v = document.getElementById(id)?.value; if (v) p.append(key, v); };
   add('centro_costo','fil-cc'); add('labor','fil-labor');
   add('maquina','fil-maquina'); add('contratista','fil-contratista');
+  add('empresa','fil-empresa');
   return p;
 }
 function setDownloadEnabled(on) {

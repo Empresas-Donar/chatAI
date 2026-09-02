@@ -4,7 +4,7 @@
 
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_detail.css?v={{ static_v }}" />
-<link rel="stylesheet" href="/static/tarjas_detalle_tractorista.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_detalle_tractorista.css?v={{ static_v }}&f=3" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 {% endblock %}
 
@@ -14,14 +14,14 @@
   <div class="page-header">
     <div>
       <h1>Detalle de la semana tractorista</h1>
-      <p>Resumen por contratista y detalle de labores — solo tipo Tractorista</p>
+      <p>Pivote fecha × trabajador × labor — solo tipo Tractorista</p>
     </div>
   </div>
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
 
-  <div class="filter-bar td-filter-bar">
+  <div class="filter-bar tdt-filter-bar">
     <div>
       <label>Desde</label>
       <input lang="es-CL" type="date" id="fil-from" />
@@ -31,13 +31,8 @@
       <input lang="es-CL" type="date" id="fil-to" />
     </div>
     <div>
-      <label>Empresa</label>
+      <label>Empresa / Campo</label>
       <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-
-    <div>
-      <label>Campo</label>
-      <select id="fil-campo"><option value="">Todos</option></select>
     </div>
     <div>
       <label>Contratista</label>
@@ -51,63 +46,14 @@
       <label>Labor</label>
       <select id="fil-labor"><option value="">Todas</option></select>
     </div>
-    <div>
-      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
-    </div>
     <div class="filter-actions">
+      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
       <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
       <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
     </div>
   </div>
 
-  <div class="td-tract-summary-only" id="summary-section" style="display:none">
-    <div class="td-summary-table-wrap td-tract-full">
-      <div class="td-section-title">Resumen</div>
-      <table class="td-summary-table">
-        <thead>
-          <tr>
-            <th>Tipo de pago</th>
-            <th>contratista</th>
-            <th class="num">Total pagar</th>
-            <th class="num">Jornada</th>
-          </tr>
-        </thead>
-        <tbody id="summary-tbody"></tbody>
-        <tfoot>
-          <tr>
-            <td colspan="2"><strong>Total</strong></td>
-            <td class="num"><strong id="summary-total"></strong></td>
-            <td class="num"><strong id="summary-jornadas"></strong></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  </div>
-
-  <div class="td-detail-section" id="detail-section" style="display:none">
-    <div class="td-section-title">Detalle</div>
-    <div class="table-card">
-      <div class="table-header">
-        <span>Registros</span>
-        <span class="count" id="detail-count">—</span>
-      </div>
-      <div style="overflow-x:auto">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>Tipo de pago</th>
-              <th>Centro costo</th>
-              <th>Labor</th>
-              <th class="num">Costo por hora</th>
-              <th class="num">Jornada</th>
-              <th class="num">Costo total</th>
-            </tr>
-          </thead>
-          <tbody id="detail-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+  <div id="pivot-section" class="tdt-pivot-section" style="display:none"></div>
 
   <div id="empty-state" class="td-empty" style="display:none">
     <h3>Sin resultados</h3>
@@ -119,5 +65,5 @@
 
 {% block scripts %}
 <script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/tarjas_detalle_tractorista.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_detalle_tractorista.js?v={{ static_v }}&f=3"></script>
 {% endblock %}
