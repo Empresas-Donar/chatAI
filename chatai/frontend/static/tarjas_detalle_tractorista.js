@@ -115,9 +115,61 @@ async function queryData() {
   }
 }
 
-function moneyCell(v) {
+function parseCLP(raw) {
+  const digits = String(raw ?? '').replace(/[^\d]/g, '');
+  if (!digits) return null;
+  return Number(digits);
+}
+
+async function fetchRetry(url, opts, tries = 3) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    last = await fetch(url, opts);
+    if (last.status !== 503) return last;
+    if (i < tries - 1) {
+      showSaveStatus('Reintentando guardar…', 'pending');
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  return last;
+}
+
+function showSaveStatus(msg, kind) {
+  const el = document.getElementById('tdt-save-status');
+  if (!el) return;
+  el.hidden = false;
+  el.className = 'tdt-save-status tdt-save-' + (kind || 'ok');
+  el.textContent = msg;
+}
+
+function moneyCell(p, d, c) {
+  const v = p.matrix[d][c.key];
   if (v == null) return '<td class="cell-empty"></td>';
-  return `<td class="num">${fmtCLP.format(v)}</td>`;
+  return `<td class="num tdt-cell-edit">
+    <input class="tdt-monto" inputmode="numeric"
+      data-contratista="${esc(p.contratista)}"
+      data-fecha="${esc(d)}"
+      data-trabajador="${esc(c.trabajador)}"
+      data-labor="${esc(c.labor)}"
+      data-original="${v}"
+      value="${esc(fmtCLP.format(v))}" />
+  </td>`;
+}
+
+function estadoSelect(p, d) {
+  const current = p.date_estados?.[d] || 'Pendiente';
+  const known = current === 'Pendiente' || current === 'Aprobado';
+  const mixto = known ? '' : `<option value="" selected disabled>${esc(current)}</option>`;
+  return `<td class="tdt-estado-cell">
+    <select class="tdt-estado"
+      data-contratista="${esc(p.contratista)}"
+      data-fecha="${esc(d)}"
+      data-original="${esc(known ? current : '')}">
+      ${mixto}
+      <option value="Pendiente"${current === 'Pendiente' ? ' selected' : ''}>Pendiente</option>
+      <option value="Aprobado"${current === 'Aprobado' ? ' selected' : ''}>Aprobado</option>
+    </select>
+  </td>`;
 }
 
 function renderOnePivot(p) {
@@ -132,9 +184,11 @@ function renderOnePivot(p) {
   ).join('');
 
   const body = p.dates.map(d => {
-    const cells = p.columns.map(c => moneyCell(p.matrix[d][c.key])).join('');
-    return `<tr>
+    const cells = p.columns.map(c => moneyCell(p, d, c)).join('');
+    const rowClass = (p.date_estados?.[d] === 'Aprobado') ? 'row-aprobado' : 'row-pendiente';
+    return `<tr class="${rowClass}" data-fecha="${esc(d)}" data-contratista="${esc(p.contratista)}">
       <td class="cell-date">${formatDate(d)}</td>
+      ${estadoSelect(p, d)}
       ${cells}
       <td class="num cell-total">${fmtCLP.format(p.date_totals[d])}</td>
     </tr>`;
@@ -151,6 +205,7 @@ function renderOnePivot(p) {
         <thead>
           <tr>
             <th class="th-fecha" rowspan="3">Fecha</th>
+            <th class="th-estado" rowspan="3">Estado</th>
             <th class="th-contratista" colspan="${nCols}">${esc(p.contratista)}</th>
             <th class="th-total" rowspan="3">Total ${esc(p.contratista)}</th>
           </tr>
@@ -160,7 +215,7 @@ function renderOnePivot(p) {
         <tbody>${body}</tbody>
         <tfoot>
           <tr>
-            <td>Suma total</td>
+            <td colspan="2">Suma total</td>
             ${foot}
             <td class="num cell-total">${fmtCLP.format(p.grand_total)}</td>
           </tr>
@@ -173,6 +228,120 @@ function renderOnePivot(p) {
 function renderPivots(pivots) {
   document.getElementById('pivot-section').innerHTML = pivots.map(renderOnePivot).join('');
 }
+
+async function saveEstado(sel) {
+  const estado = sel.value;
+  if (!estado || estado === sel.dataset.original) return;
+  sel.disabled = true;
+  showSaveStatus('Guardando estado…', 'pending');
+  try {
+    const res = await fetchRetry('/api/tarjas/detalle-tractorista/fila', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contratista: sel.dataset.contratista,
+        fecha: sel.dataset.fecha,
+        estado,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    sel.dataset.original = estado;
+    const tr = sel.closest('tr');
+    if (tr) {
+      tr.classList.toggle('row-aprobado', estado === 'Aprobado');
+      tr.classList.toggle('row-pendiente', estado !== 'Aprobado');
+    }
+    showSaveStatus('Estado guardado', 'ok');
+  } catch (e) {
+    sel.value = sel.dataset.original || 'Pendiente';
+    showSaveStatus('No se pudo guardar el estado: ' + e.message, 'err');
+  } finally {
+    sel.disabled = false;
+  }
+}
+
+async function saveMonto(input) {
+  const next = parseCLP(input.value);
+  const prev = Number(input.dataset.original);
+  if (next == null) {
+    input.value = fmtCLP.format(prev);
+    return;
+  }
+  if (next === prev) {
+    input.value = fmtCLP.format(prev);
+    return;
+  }
+  input.disabled = true;
+  showSaveStatus('Guardando monto…', 'pending');
+  try {
+    const res = await fetchRetry('/api/tarjas/detalle-tractorista/celda', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contratista: input.dataset.contratista,
+        fecha: input.dataset.fecha,
+        trabajador: input.dataset.trabajador,
+        labor: input.dataset.labor,
+        total_tractor: next,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const delta = next - prev;
+    input.dataset.original = String(next);
+    input.value = fmtCLP.format(next);
+    const td = input.closest('td');
+    const tr = input.closest('tr');
+    const tds = [...tr.children];
+    const colIndex = tds.indexOf(td);
+    const totalCell = tr.querySelector('td.cell-total');
+    if (totalCell) {
+      totalCell.textContent = fmtCLP.format(parseCLP(totalCell.textContent) + delta);
+    }
+    const table = input.closest('table');
+    const footCells = [...table.querySelectorAll('tfoot tr td')];
+    const laborFoot = footCells[colIndex - 1];
+    if (laborFoot && !laborFoot.classList.contains('cell-total')) {
+      laborFoot.textContent = fmtCLP.format(parseCLP(laborFoot.textContent) + delta);
+    }
+    const grand = table.querySelector('tfoot td.cell-total');
+    if (grand) {
+      grand.textContent = fmtCLP.format(parseCLP(grand.textContent) + delta);
+    }
+    showSaveStatus('Monto guardado', 'ok');
+  } catch (e) {
+    input.value = fmtCLP.format(prev);
+    showSaveStatus('No se pudo guardar el monto: ' + e.message, 'err');
+  } finally {
+    input.disabled = false;
+  }
+}
+
+document.getElementById('pivot-section').addEventListener('change', (e) => {
+  if (e.target.classList.contains('tdt-estado')) saveEstado(e.target);
+});
+document.getElementById('pivot-section').addEventListener('focusin', (e) => {
+  if (e.target.classList.contains('tdt-monto')) e.target.select();
+});
+document.getElementById('pivot-section').addEventListener('blur', (e) => {
+  if (e.target.classList.contains('tdt-monto')) saveMonto(e.target);
+}, true);
+document.getElementById('pivot-section').addEventListener('keydown', (e) => {
+  if (!e.target.classList.contains('tdt-monto')) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    e.target.blur();
+  }
+  if (e.key === 'Escape') {
+    e.target.value = fmtCLP.format(Number(e.target.dataset.original));
+    e.target.blur();
+  }
+});
 
 function currentParams() {
   const p = new URLSearchParams({

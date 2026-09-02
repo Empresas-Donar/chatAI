@@ -1,5 +1,12 @@
 /* tarjas_detalle_tractorista.css — Looker nested pivot (fecha × trabajador × labor) */
 
+.tdt-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
 .tdt-pivot-section {
   display: flex;
   flex-direction: column;
@@ -87,9 +94,56 @@
   width: 150px;
 }
 
-.tdt-filter-bar .filter-actions {
-  display: flex;
-  gap: 6px;
-  align-items: flex-end;
-  margin-left: auto;
+.tdt-save-status {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  align-self: center;
+}
+.tdt-save-ok { background: #dcfce7; color: #166534; }
+.tdt-save-pending { background: #fef9c3; color: #854d0e; }
+.tdt-save-err { background: #fee2e2; color: #991b1b; }
+
+.tdt-pivot thead th.th-estado {
+  text-align: left;
+  min-width: 118px;
+}
+
+.tdt-estado {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  max-width: 130px;
+}
+.row-aprobado .tdt-estado { border-color: #16a34a; background: #f0fdf4; }
+.row-pendiente .tdt-estado { border-color: #ca8a04; background: #fffbeb; }
+
+.tdt-monto {
+  width: 92px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+}
+.tdt-monto:hover,
+.tdt-monto:focus {
+  border-color: var(--earth);
+  background: #fff;
+  outline: none;
+}
+.tdt-monto:disabled { opacity: 0.6; }
+
+.tdt-pivot tbody td.tdt-cell-edit { padding: 3px 6px; }
+
+@media print {
+  .tdt-estado { border: none; background: transparent; appearance: none; }
+  .tdt-monto { border: none; }
+  .tdt-save-status { display: none; }
 }

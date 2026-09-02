@@ -15,6 +15,8 @@ Routes:
   GET  /tarjas/detalle-tractorista       → Weekly tractorista detail (Looker)
   GET  /api/tarjas/detalle-tractorista/filters
   GET  /api/tarjas/detalle-tractorista   → Nested Looker pivot (fecha × trabajador × labor)
+  PATCH /api/tarjas/detalle-tractorista/fila  → Update estado for contratista × fecha
+  PATCH /api/tarjas/detalle-tractorista/celda → Update total_tractor for a pivot cell
 
   GET  /tarjas/contratista              → Contractor/worker pivot page
   GET  /api/tarjas/contratista/filters  → Filter options (contratista)
@@ -77,6 +79,7 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
+_DETALLE_TRACT_ESTADOS = ("Pendiente", "Aprobado")
 
 
 def _fmt_clp(v) -> str:
@@ -912,7 +915,9 @@ def _fetch_detalle_tractorista_rows(cur, where: str, params: list) -> list[dict]
             contratista,
             trabajador,
             labor,
-            COALESCE(SUM(total_tractor), 0) AS monto
+            COALESCE(SUM(total_tractor), 0) AS monto,
+            MIN(estado) AS estado,
+            COUNT(DISTINCT estado) AS n_estados
         FROM appsheet.tarjas_pagos
         {where}
         GROUP BY fecha::date, contratista, trabajador, labor
@@ -1144,6 +1149,26 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
         date_totals = {
             d: sum(v or 0.0 for v in matrix[d].values()) for d in dates
         }
+        estados_by_date: dict[str, set[str]] = defaultdict(set)
+        for r in crows:
+            fecha = r.get("fecha")
+            if not fecha:
+                continue
+            n_est = int(r.get("n_estados") or 1)
+            est = (r.get("estado") or "").strip()
+            if n_est > 1:
+                estados_by_date[fecha].add("Mixto")
+            elif est:
+                estados_by_date[fecha].add(est)
+        date_estados = {}
+        for d in dates:
+            found = estados_by_date.get(d) or set()
+            if len(found) == 1:
+                date_estados[d] = next(iter(found))
+            elif len(found) > 1:
+                date_estados[d] = "Mixto"
+            else:
+                date_estados[d] = "Pendiente"
         pivots.append(
             {
                 "contratista": contratista,
@@ -1153,6 +1178,7 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
                 "matrix": matrix,
                 "col_totals": col_totals,
                 "date_totals": date_totals,
+                "date_estados": date_estados,
                 "grand_total": sum(col_totals.values()),
             }
         )
@@ -1252,7 +1278,166 @@ async def get_tarjas_detalle_tractorista(
         "jornadas": int(jornadas or 0),
         "count": len(rows),
         "filter_options": filter_options,
+        "estados": list(_DETALLE_TRACT_ESTADOS),
     }
+
+
+def _detalle_tract_name_clause(col: str, value: str | None, empty_label: str) -> tuple[str, list]:
+    """Match a text column to the pivot's display name, including blanks."""
+    label = (value or "").strip()
+    if not label or label == empty_label:
+        return f"({col} IS NULL OR TRIM({col}) = '')", []
+    return f"{col} = %s", [label]
+
+
+def _parse_clp_int(raw) -> int:
+    """CLP integer: '$34.500', '34500' or 34500 → 34500."""
+    if raw is None or str(raw).strip() == "":
+        raise HTTPException(status_code=422, detail="Monto requerido")
+    if isinstance(raw, bool):
+        raise HTTPException(status_code=422, detail="Monto inválido")
+    if isinstance(raw, (int, float, decimal.Decimal)):
+        n = int(round(float(raw)))
+        if n < 0:
+            raise HTTPException(status_code=422, detail="El monto no puede ser negativo")
+        return n
+    digits = re.sub(r"[^\d]", "", str(raw))
+    if not digits:
+        raise HTTPException(status_code=422, detail="Monto inválido")
+    return int(digits)
+
+
+def _update_detalle_tractorista_estado(
+    cur, contratista: str, fecha: str, estado: str
+) -> int:
+    """Set estado on every tractorista row for that contratista + date."""
+    name_sql, name_params = _detalle_tract_name_clause(
+        "contratista", contratista, "(sin contratista)"
+    )
+    cur.execute(
+        f"""
+        UPDATE appsheet.tarjas_pagos
+        SET estado = %s
+        WHERE {_TRACTORISTA_PAGOS_SQL}
+          AND fecha::date = %s
+          AND {name_sql}
+        """,
+        [estado, fecha, *name_params],
+    )
+    return cur.rowcount
+
+
+def _update_detalle_tractorista_monto(
+    cur,
+    contratista: str,
+    fecha: str,
+    trabajador: str,
+    labor: str,
+    monto: int,
+) -> int:
+    """Set SUM(total_tractor) for one pivot cell. If several source rows
+    exist, the amount goes on the first id_Resumen and the rest become 0."""
+    cont_sql, cont_params = _detalle_tract_name_clause(
+        "contratista", contratista, "(sin contratista)"
+    )
+    trab_sql, trab_params = _detalle_tract_name_clause(
+        "trabajador", trabajador, "(sin nombre)"
+    )
+    labor_val = labor or ""
+    cur.execute(
+        f"""
+        SELECT "id_Resumen"
+        FROM appsheet.tarjas_pagos
+        WHERE {_TRACTORISTA_PAGOS_SQL}
+          AND fecha::date = %s
+          AND {cont_sql}
+          AND {trab_sql}
+          AND COALESCE(labor, '') = %s
+        ORDER BY "id_Resumen"
+        """,
+        [fecha, *cont_params, *trab_params, labor_val],
+    )
+    ids = [r[0] for r in cur.fetchall()]
+    if not ids:
+        raise HTTPException(status_code=404, detail="Celda sin registros")
+    first, rest = ids[0], ids[1:]
+    cur.execute(
+        'UPDATE appsheet.tarjas_pagos SET total_tractor = %s WHERE "id_Resumen" = %s',
+        [monto, first],
+    )
+    if rest:
+        cur.execute(
+            'UPDATE appsheet.tarjas_pagos SET total_tractor = 0 WHERE "id_Resumen" IN %s',
+            [tuple(rest)],
+        )
+    return len(ids)
+
+
+@router.patch("/api/tarjas/detalle-tractorista/fila")
+async def patch_tarjas_detalle_tractorista_fila(payload: dict = Body(...)):
+    """Update estado for every tractorista tarja on a contratista × fecha row."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="JSON requerido")
+    fecha = payload.get("fecha") or ""
+    if not _DATE_RE.match(str(fecha)):
+        raise HTTPException(status_code=400, detail="fecha must be YYYY-MM-DD")
+    estado = (payload.get("estado") or "").strip()
+    if estado not in _DETALLE_TRACT_ESTADOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"estado debe ser {' o '.join(_DETALLE_TRACT_ESTADOS)}",
+        )
+    contratista = payload.get("contratista")
+    try:
+        conn = get_connection()
+    except Exception:
+        logger.exception("detalle-tractorista fila: DB connect failed")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                n = _update_detalle_tractorista_estado(
+                    cur, contratista, fecha, estado
+                )
+    finally:
+        conn.close()
+    if n == 0:
+        raise HTTPException(status_code=404, detail="Fila sin registros")
+    return {"ok": True, "updated": n, "estado": estado}
+
+
+@router.patch("/api/tarjas/detalle-tractorista/celda")
+async def patch_tarjas_detalle_tractorista_celda(payload: dict = Body(...)):
+    """Update total_tractor for one trabajador × labor × fecha cell."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="JSON requerido")
+    fecha = payload.get("fecha") or ""
+    if not _DATE_RE.match(str(fecha)):
+        raise HTTPException(status_code=400, detail="fecha must be YYYY-MM-DD")
+    monto = _parse_clp_int(payload.get("total_tractor"))
+    try:
+        conn = get_connection()
+    except Exception:
+        logger.exception("detalle-tractorista celda: DB connect failed")
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                n = _update_detalle_tractorista_monto(
+                    cur,
+                    payload.get("contratista"),
+                    fecha,
+                    payload.get("trabajador"),
+                    payload.get("labor") or "",
+                    monto,
+                )
+    finally:
+        conn.close()
+    return {"ok": True, "updated": n, "total_tractor": monto}
 
 
 # ===========================================================================
