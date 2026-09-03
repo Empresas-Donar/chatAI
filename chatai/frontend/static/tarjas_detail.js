@@ -124,7 +124,7 @@ async function queryData() {
     }
 
     document.getElementById('empty-state').style.display = 'none';
-    renderSummary(data.resumen, data.total, data.jornadas);
+    renderSummary(data.resumen, data.total, data.total_trabajado, data.jornadas);
     renderChart(data.resumen, data.total);
     renderDetail(data.rows, data.count);
     document.getElementById('summary-section').style.display = '';
@@ -140,7 +140,7 @@ async function queryData() {
 }
 
 // ── Render summary table ─────────────────────────────────────────────
-function renderSummary(resumen, total, jornadas) {
+function renderSummary(resumen, total, totalTrabajado, jornadas) {
   const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día' };
   const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia' };
 
@@ -151,11 +151,13 @@ function renderSummary(resumen, total, jornadas) {
     return `<tr>
       <td><span class="${cls}">${esc(label)}</span></td>
       <td class="num">${fmtCLP.format(r.total_pagar)}</td>
+      <td class="num">${fmtCLP.format(r.total_trabajado)}</td>
       <td class="num">${fmtNum.format(r.jornadas)}</td>
     </tr>`;
   }).join('');
 
   document.getElementById('summary-total').textContent = fmtCLP.format(total);
+  document.getElementById('summary-trabajado').textContent = fmtCLP.format(totalTrabajado || 0);
   document.getElementById('summary-jornadas').textContent = fmtNum.format(jornadas);
 }
 
@@ -220,9 +222,23 @@ function renderDetail(rows, count) {
       <td class="num">${r.jornadas ?? '—'}</td>
       <td class="num">${r.total_unitario != null ? fmtCLP.format(r.total_unitario) : '—'}</td>
       <td class="num">${r.costo_total != null ? fmtCLP.format(r.costo_total) : '—'}</td>
+      <td class="num">${r.total_trabajado != null ? fmtCLP.format(r.total_trabajado) : '—'}</td>
       <td class="num">${fmtPct(r.pct_pago)}</td>
     </tr>`;
   }).join('');
+
+  const sumJornadas = rows.reduce((s, r) => s + Number(r.jornadas || 0), 0);
+  const sumCosto = rows.reduce((s, r) => s + Number(r.costo_total || 0), 0);
+  const sumTrab = rows.reduce((s, r) => s + Number(r.total_trabajado || 0), 0);
+  document.getElementById('detail-tfoot').innerHTML = `<tr>
+    <td colspan="3"><strong>Total</strong></td>
+    <td></td>
+    <td class="num"><strong>${fmtNum.format(sumJornadas)}</strong></td>
+    <td></td>
+    <td class="num"><strong>${fmtCLP.format(sumCosto)}</strong></td>
+    <td class="num"><strong>${fmtCLP.format(sumTrab)}</strong></td>
+    <td class="num"><strong>${sumCosto > 0 ? '100.00 %' : '—'}</strong></td>
+  </tr>`;
 }
 
 // ── Download helpers ─────────────────────────────────────────────────

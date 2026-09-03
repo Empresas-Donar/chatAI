@@ -129,8 +129,11 @@ def test_152_pdf_html_includes_august_contractors(conn):
     assert "Jornada Tractor" in html or "jornada tractor" in html.lower()
 
 
-def test_152_detalle_operacional_still_uses_reporte_isolation():
-    """Cuadrilla /tarjas/detalle must keep reading tarjas_reporte."""
+def test_152_detalle_operacional_exposes_trabajado_isolation():
+    """Cuadrilla detalle keeps total_pagar and adds total_trabajado
+    from tarjas_pagos — not tractorista money."""
     src = _fn_source("_query_detalle_rows")
-    assert "tarjas_reporte" in src
-    assert "total_labor" in src
+    assert "tarjas_pagos" in src
+    assert "total_trabajado" in src
+    assert "total_pagar" in src
+    assert "total_tractor" not in src

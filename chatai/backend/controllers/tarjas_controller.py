@@ -222,20 +222,29 @@ def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
     # Column widths are % of this table's own (now narrower-than-100%) box
     # — without them "Jornadas"/"%" stretched much wider than their short
     # values need, across the full page (issue #132).
-    W = {"tipo": "width:34%", "total": "width:32%", "jornadas": "width:17%", "pct": "width:17%"}
+    total_trab = sum(float(r.get("total_trabajado") or 0) for r in resumen)
+    W = {
+        "tipo": "width:22%",
+        "total": "width:22%",
+        "trab": "width:22%",
+        "jornadas": "width:17%",
+        "pct": "width:17%",
+    }
     rows_html = "".join(
         f'<tr><td style="{W["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
         f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
         f'<td class="num" style="{W["total"]}">{_fmt_clp(r["total_pagar"])}</td>'
+        f'<td class="num" style="{W["trab"]}">{_fmt_clp(r.get("total_trabajado"))}</td>'
         f'<td class="num" style="{W["jornadas"]}">{r["jornadas"]}</td>'
         f'<td class="num" style="{W["pct"]}">{_pct(r["total_pagar"])}</td></tr>'
         for r in resumen
     )
     return f"""
-    <table class="summary-table" style="width:45%;table-layout:fixed">
+    <table class="summary-table" style="width:62%;table-layout:fixed">
       <thead><tr>
         <th style="{W["tipo"]}">Tipo de pago</th>
         <th class="num" style="{W["total"]}">Total a pagar</th>
+        <th class="num" style="{W["trab"]}">Total trabajado</th>
         <th class="num" style="{W["jornadas"]}">Jornadas</th>
         <th class="num" style="{W["pct"]}">%</th>
       </tr></thead>
@@ -243,6 +252,7 @@ def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
       <tfoot><tr>
         <td style="{W["tipo"]}">Total</td>
         <td class="num" style="{W["total"]}">{_fmt_clp(total)}</td>
+        <td class="num" style="{W["trab"]}">{_fmt_clp(total_trab)}</td>
         <td class="num" style="{W["jornadas"]}">{jornadas}</td>
         <td class="num" style="{W["pct"]}">{"100.0 %" if total > 0 else "—"}</td>
       </tr></tfoot>
@@ -285,6 +295,7 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 table.detalle-table th { background: #1a1a1a; color: #f5d87a; padding: 6px 8px; text-align: left; border: 1px solid #1a1a1a; font-weight: bold; }
 table.detalle-table th.num { text-align: right; }
 table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
+table.detalle-table tfoot td { border-top: 1.5px solid #888888; font-weight: bold; background: #fdf3d0; }
 table.detalle-tract-pivot { margin-top: 12px; }
 table.detalle-tract-pivot th.th-group { background: #1F4E79; color: #ffffff; text-align: center; }
 table.detalle-tract-pivot tfoot td { font-weight: bold; background: #e8eef4; }
@@ -689,7 +700,16 @@ def _build_detalle_filters(
     labor=None,
     campo=None,
 ):
-    filters = ["fecha BETWEEN %s AND %s"]
+    """WHERE for Detalle operacional on tarjas_pagos (Aprobado only).
+
+    Costo total / Total a pagar stay on total_pagar. Total trabajado is
+    SUM(total_trabajado) so the cuadrilla figure still shows when AppSheet
+    leaves total_pagar at 0.
+    """
+    filters = [
+        "fecha::date BETWEEN %s AND %s",
+        "estado = 'Aprobado'",
+    ]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -698,13 +718,13 @@ def _build_detalle_filters(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     if centro_costo:
-        filters.append('"CC" = %s')
+        filters.append("cuartel_cc = %s")
         params.append(centro_costo)
     if tipo_pago:
         filters.append("tipo_pago = %s")
         params.append(tipo_pago)
     if labor:
-        filters.append('"Nombre Labor" = %s')
+        filters.append("labor = %s")
         params.append(labor)
     if campo:
         filters.append("nombre_campo = %s")
@@ -716,35 +736,36 @@ def _query_detalle_rows(cur, where, params):
     cur.execute(
         f"""
         SELECT
-            tipo_pago,
-            "Nombre Labor"                                            AS labor,
-            "CC"                                                      AS centro_costo,
+            p.tipo_pago,
+            p.labor                                                   AS labor,
+            p.cuartel_cc                                              AS centro_costo,
             cc.cultivo                                                AS centro_costo_nombre,
-            SUM(jornadas)                                             AS jornadas,
-            SUM(horas_trabajadas)                                     AS horas_trabajadas,
-            CASE WHEN SUM(jornadas) > 0
-                 THEN ROUND((SUM(total_labor) / SUM(jornadas))::numeric, 2)
+            COUNT(*)                                                  AS jornadas,
+            SUM(p.horas_trabajadas)                                   AS horas_trabajadas,
+            CASE WHEN COUNT(*) > 0
+                 THEN ROUND((SUM(p.total_pagar) / COUNT(*))::numeric, 2)
                  ELSE NULL END                                        AS total_unitario,
-            SUM(total_labor)                                          AS costo_total,
-            CASE WHEN SUM(horas_trabajadas) > 0
-                 THEN ROUND((SUM(total_labor) / SUM(horas_trabajadas))::numeric, 0)
+            SUM(p.total_pagar)                                        AS costo_total,
+            SUM(p.total_trabajado)                                    AS total_trabajado,
+            CASE WHEN SUM(p.horas_trabajadas) > 0
+                 THEN ROUND((SUM(p.total_pagar) / SUM(p.horas_trabajadas))::numeric, 0)
                  ELSE NULL END                                        AS costo_hora,
             ROUND(
-                SUM(total_labor)::numeric
+                SUM(p.total_pagar)::numeric
                 / NULLIF(
-                    SUM(SUM(total_labor)) FILTER (
-                        WHERE tipo_pago IN ('trato', 'Al dia', 'Al día')
+                    SUM(SUM(p.total_pagar)) FILTER (
+                        WHERE p.tipo_pago IN ('trato', 'Al dia', 'Al día')
                     ) OVER (),
                     0
                   ) * 100,
                 2
             )                                                         AS pct_pago,
-            nombre_campo
-        FROM appsheet.tarjas_reporte
-        LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = "CC"::text
+            p.nombre_campo
+        FROM appsheet.tarjas_pagos p
+        LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = p.cuartel_cc::text
         {where}
-        GROUP BY tipo_pago, "Nombre Labor", "CC", cc.cultivo, nombre_campo
-        ORDER BY tipo_pago DESC, "Nombre Labor", "CC"
+        GROUP BY p.tipo_pago, p.labor, p.cuartel_cc, cc.cultivo, p.nombre_campo
+        ORDER BY p.tipo_pago DESC, p.labor, p.cuartel_cc
     """,
         params,
     )
@@ -752,14 +773,15 @@ def _query_detalle_rows(cur, where, params):
 
 
 def _query_detalle_resumen(cur, where, params):
-    """Sum total_labor/jornadas by tipo_pago — feeds both the Resumen table
-    and the pie chart shown on screen and reused in the PDF export."""
+    """Sum total_pagar and total_trabajado by tipo_pago — Resumen table
+    and pie chart (pie stays on total_pagar)."""
     cur.execute(
         f"""
         SELECT tipo_pago,
-               COALESCE(SUM(total_labor), 0) AS total_pagar,
-               COALESCE(SUM(jornadas), 0)    AS jornadas
-        FROM appsheet.tarjas_reporte {where}
+               COALESCE(SUM(total_pagar), 0)     AS total_pagar,
+               COALESCE(SUM(total_trabajado), 0) AS total_trabajado,
+               COUNT(*)                          AS jornadas
+        FROM appsheet.tarjas_pagos {where}
         GROUP BY tipo_pago ORDER BY tipo_pago
     """,
         params,
@@ -827,11 +849,13 @@ async def get_tarjas_detail(
         conn.close()
 
     total_general = sum(r["total_pagar"] for r in resumen)
+    total_trabajado = sum(float(r["total_trabajado"] or 0) for r in resumen)
     jornadas_general = sum(r["jornadas"] for r in resumen)
 
     return {
         "resumen": resumen,
         "total": total_general,
+        "total_trabajado": total_trabajado,
         "jornadas": jornadas_general,
         "rows": rows,
         "count": len(rows),
@@ -2503,6 +2527,7 @@ async def download_tarjas_detalle_excel(
             "Jornadas",
             "Total unitario",
             "Costo total",
+            "Total trabajado",
             "% Tipo pago",
             "Campo",
         ],
@@ -2521,9 +2546,21 @@ async def download_tarjas_detalle_excel(
         c6.number_format = money
         c7 = ws.cell(i, 7, float(r["costo_total"] or 0))
         c7.number_format = money
-        ws.cell(i, 8, float(r["pct_pago"] or 0))
-        ws.cell(i, 9, r["nombre_campo"])
-    for col, w in zip("ABCDEFGHI", [14, 28, 10, 14, 10, 14, 14, 12, 20]):
+        c8 = ws.cell(i, 8, float(r["total_trabajado"] or 0))
+        c8.number_format = money
+        ws.cell(i, 9, float(r["pct_pago"] or 0))
+        ws.cell(i, 10, r["nombre_campo"])
+    last = len(rows) + 2
+    ws.cell(last, 1, "Total")
+    ws.cell(last, 5, sum(float(r["jornadas"] or 0) for r in rows))
+    c7t = ws.cell(last, 7, sum(float(r["costo_total"] or 0) for r in rows))
+    c7t.number_format = money
+    c8t = ws.cell(last, 8, sum(float(r.get("total_trabajado") or 0) for r in rows))
+    c8t.number_format = money
+    ws.cell(last, 9, 100 if any(float(r["costo_total"] or 0) for r in rows) else None)
+    for col in range(1, 11):
+        ws.cell(last, col).font = Font(bold=True)
+    for col, w in zip("ABCDEFGHIJ", [14, 28, 10, 14, 10, 14, 14, 16, 12, 20]):
         ws.column_dimensions[col].width = w
     return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
 
@@ -3791,14 +3828,15 @@ def _build_detalle_html(
     # Jornadas, Total, % pago) had much more room than their short values
     # ever need, before these explicit widths (issue #132).
     DW = {
-        "tipo": "width:9%",
-        "labor": "width:20%",
-        "cc": "width:6%",
-        "nombre_cc": "width:19%",
-        "costo_hora": "width:11%",
-        "jornadas": "width:8%",
-        "total": "width:13%",
-        "pct": "width:14%",
+        "tipo": "width:8%",
+        "labor": "width:16%",
+        "cc": "width:5%",
+        "nombre_cc": "width:15%",
+        "costo_hora": "width:9%",
+        "jornadas": "width:7%",
+        "total": "width:12%",
+        "trab": "width:13%",
+        "pct": "width:15%",
     }
     rows_html = "".join(
         f'<tr><td style="{DW["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
@@ -3808,8 +3846,21 @@ def _build_detalle_html(
         f'<td class="num" style="{DW["costo_hora"]}">{fmtCLP(r["costo_hora"])}</td>'
         f'<td class="num" style="{DW["jornadas"]}">{r["jornadas"]}</td>'
         f'<td class="total" style="{DW["total"]}">{fmtCLP(r["costo_total"])}</td>'
+        f'<td class="num" style="{DW["trab"]}">{fmtCLP(r.get("total_trabajado"))}</td>'
         f'<td class="num" style="{DW["pct"]}">{fmtPct(r["pct_pago"])}</td></tr>'
         for r in rows
+    )
+    sum_jornadas = sum(float(r["jornadas"] or 0) for r in rows)
+    sum_costo = sum(float(r["costo_total"] or 0) for r in rows)
+    sum_trab = sum(float(r.get("total_trabajado") or 0) for r in rows)
+    foot_pct = "100.00 %" if sum_costo > 0 else "—"
+    foot_html = (
+        f'<tr><td colspan="4"><strong>Total</strong></td>'
+        f'<td class="num" style="{DW["costo_hora"]}"></td>'
+        f'<td class="num" style="{DW["jornadas"]}"><strong>{int(sum_jornadas)}</strong></td>'
+        f'<td class="total" style="{DW["total"]}"><strong>{fmtCLP(sum_costo)}</strong></td>'
+        f'<td class="num" style="{DW["trab"]}"><strong>{fmtCLP(sum_trab)}</strong></td>'
+        f'<td class="num" style="{DW["pct"]}"><strong>{foot_pct}</strong></td></tr>'
     )
 
     # Resumen — mismos datos y colores que la pantalla (issue #96): la
@@ -3847,8 +3898,9 @@ def _build_detalle_html(
       <th class="num" style="{DW["costo_hora"]}">Costo/hora</th>
       <th class="num" style="{DW["jornadas"]}">Jornadas</th>
       <th class="num" style="{DW["total"]}">Total</th>
+      <th class="num" style="{DW["trab"]}">Total trabajado</th>
       <th class="num" style="{DW["pct"]}">% pago</th></tr>
-    </thead><tbody>{rows_html}</tbody></table>
+    </thead><tbody>{rows_html}</tbody><tfoot>{foot_html}</tfoot></table>
     """
 
 

@@ -107,5 +107,13 @@
 }
 .td-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
 
+.td-detail-section .tbl tfoot td {
+  padding: 10px 12px;
+  border-top: 2px solid var(--ink);
+  font-weight: 700;
+  background: #fffbeb;
+}
+.td-detail-section .tbl tfoot td.num { text-align: right; }
+
 /* Download buttons */
 .filter-actions { display: flex; gap: 6px; align-items: flex-end; }
