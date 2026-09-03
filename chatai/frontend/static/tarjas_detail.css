@@ -78,6 +78,15 @@
   font-weight: 600;
   font-size: 13px;
 }
+.tipo-bono {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: #d1fae5;
+  color: #065f46;
+  font-weight: 600;
+  font-size: 13px;
+}
 
 /* Chart */
 .td-chart-wrap {

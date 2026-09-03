@@ -141,8 +141,8 @@ async function queryData() {
 
 // ── Render summary table ─────────────────────────────────────────────
 function renderSummary(resumen, total, totalTrabajado, jornadas) {
-  const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día' };
-  const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia' };
+  const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono' };
+  const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono' };
 
   const tbody = document.getElementById('summary-tbody');
   tbody.innerHTML = resumen.map(r => {
@@ -168,12 +168,15 @@ function renderChart(resumen, total) {
   const labels = resumen.map(r => {
     if (r.tipo_pago === 'trato') return 'Trato';
     if (r.tipo_pago === 'Al dia' || r.tipo_pago === 'Al día') return 'Al Día';
+    if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return 'Bono';
     return r.tipo_pago;
   });
   const values = resumen.map(r => r.total_pagar);
-  const colors = resumen.map(r =>
-    r.tipo_pago === 'trato' ? '#3b82f6' : '#f97316'
-  );
+  const colors = resumen.map(r => {
+    if (r.tipo_pago === 'trato') return '#3b82f6';
+    if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return '#10b981';
+    return '#f97316';
+  });
 
   chartTipo = new Chart(document.getElementById('chart-tipo').getContext('2d'), {
     type: 'pie',
@@ -207,8 +210,8 @@ function renderChart(resumen, total) {
 function renderDetail(rows, count) {
   document.getElementById('detail-count').textContent = `${count} registro${count !== 1 ? 's' : ''}`;
 
-  const TIPO_CLASS = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia' };
-  const TIPO_LABEL = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día' };
+  const TIPO_CLASS = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono' };
+  const TIPO_LABEL = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono' };
 
   const tbody = document.getElementById('detail-tbody');
   tbody.innerHTML = rows.map(r => {

@@ -292,6 +292,7 @@ table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .summary-table tfoot td { border-top: 1.5px solid #888888; font-weight: bold; }
 .badge-trato { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-weight: bold; }
 .badge-aldia { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #ffedd5; color: #c2410c; font-weight: bold; }
+.badge-bono { display: inline-block; padding: 2px 10px; border-radius: 4px; background: #d1fae5; color: #065f46; font-weight: bold; }
 table.detalle-table th { background: #1a1a1a; color: #f5d87a; padding: 6px 8px; text-align: left; border: 1px solid #1a1a1a; font-weight: bold; }
 table.detalle-table th.num { text-align: right; }
 table.detalle-table tbody tr:nth-child(even) td { background: #f0ebe1; }
@@ -793,11 +794,13 @@ def _query_detalle_resumen(cur, where, params):
 # summary table and pie chart match the screen exactly, including the
 # fallback for tipo_pago values outside "trato"/"Al dia" (e.g. "Tractorista",
 # "Bono"): plain label, no badge class, orange slice.
-_TIPO_PAGO_LABELS = {"trato": "Trato", "Al dia": "Al Día", "Al día": "Al Día"}
+_TIPO_PAGO_LABELS = {"trato": "Trato", "Al dia": "Al Día", "Al día": "Al Día", "Bono": "Bono", "bono": "Bono"}
 _TIPO_PAGO_BADGE_CLASS = {
     "trato": "badge-trato",
     "Al dia": "badge-aldia",
     "Al día": "badge-aldia",
+    "Bono": "badge-bono",
+    "bono": "badge-bono",
 }
 
 
@@ -6211,6 +6214,7 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .detail-table td.num { text-align: right; }
 .badge-trato { color: #1d4ed8; font-weight: 700; }
 .badge-aldia { color: #15803d; font-weight: 700; }
+.badge-bono { color: #065f46; font-weight: 700; }
 """
 
 
@@ -6311,9 +6315,13 @@ async def notas_print_pdf(
 
     rows_html = ""
     for i, (tipo, cc, labor, jornadas, unitario, total) in enumerate(rows):
-        is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
-        tipo_label = "Trato" if is_trato else "Al día"
-        tipo_cls = "badge-trato" if is_trato else "badge-aldia"
+        tipo_norm = (tipo or "").lower().strip()
+        if tipo_norm in ("trato", "a trato"):
+            tipo_label, tipo_cls = "Trato", "badge-trato"
+        elif tipo_norm == "bono":
+            tipo_label, tipo_cls = "Bono", "badge-bono"
+        else:
+            tipo_label, tipo_cls = "Al día", "badge-aldia"
         even_cls = "even" if i % 2 == 0 else ""
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
