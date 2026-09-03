@@ -5,7 +5,7 @@
 /* Pivot table overrides */
 .bo-pivot-wrap {
   overflow-x: auto;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .bo-pivot {
@@ -34,11 +34,29 @@
 .bo-pivot tbody tr:last-child td { border-bottom: none; }
 
 .bo-pivot td.cell-worker { font-weight: 600; min-width: 220px; }
-.bo-pivot td.cell-date   { text-align: right; min-width: 90px; }
+.bo-pivot td.cell-worker .badge {
+  margin-left: 8px;
+  font-size: 10px;
+  vertical-align: middle;
+}
+.bo-totals {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.bo-pivot-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 16px 0 8px;
+  color: #1e293b;
+}
+
+.bo-pivot td.cell-date {
+  text-align: right;
+  min-width: 90px;
+}
 .bo-pivot td.cell-total  { text-align: right; font-weight: 700; min-width: 100px; background: #fef9c3; }
 .bo-pivot td.cell-dash   { color: #94a3b8; text-align: right; }
 
-/* Totals footer row */
 .bo-totals-row td {
   font-weight: 700;
   background: #1e293b;
@@ -48,6 +66,22 @@
   border-bottom: none !important;
 }
 .bo-totals-row td:first-child { text-align: left; }
+
+.bo-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid #cbd5e1;
+  margin: 0 0 24px;
+}
+.bo-summary .oc-total-cell { text-align: center; padding: 10px 8px; border-right: 1px solid #e2e8f0; }
+.bo-summary .oc-total-cell:last-child { border-right: none; }
+
+.oc-total-pct {
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  margin-top: 2px;
+}
 
 /* Print overrides */
 @media print {

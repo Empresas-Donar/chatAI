@@ -21,6 +21,17 @@ function formatShortDate(isoStr) {
   return `${d}/${m}`;
 }
 
+function fmtPct(v) {
+  if (v == null || v === '' || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  return n.toFixed(1).replace(/\.0$/, '').replace('.', ',') + '%';
+}
+
+function setPct(id, v) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = fmtPct(v);
+}
+
 function toISO(d) { return d.toISOString().slice(0, 10); }
 
 // Worker column candidates (AppSheet names vary)
@@ -49,18 +60,22 @@ function initDates() {
 async function loadFilters() {
   try {
     const res  = await fetch('/api/purchase-orders/filters');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     fillSelect('sel-contractor', data.contratistas, '-- Seleccionar --');
     fillSelect('sel-company',    data.empresas,      '-- Seleccionar --');
   } catch (e) {
     console.error('Error loading filters:', e);
+    fillSelect('sel-contractor', [], '-- Error al cargar --');
+    fillSelect('sel-company',    [], '-- Error al cargar --');
   }
 }
 
 function fillSelect(id, items, defaultLabel) {
   const sel = document.getElementById(id);
+  const list = Array.isArray(items) ? items : [];
   sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+    list.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
 }
 
 // ── Generate ───────────────────────────────────────────────────────────
@@ -100,7 +115,13 @@ async function generate() {
     let header = data.header;
     if (!header) {
       const total = data.rows.reduce((s, r) => s + (Number(r.total_pagar) || 0), 0);
-      header = { total, total_trato: 0, total_al_dia: total };
+      header = {
+        total,
+        total_trato: 0,
+        total_al_dia: total,
+        total_trabajado: data.rows.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0),
+        total_contratista: data.rows.reduce((s, r) => s + (Number(r.total_contratista) || 0), 0),
+      };
     }
 
     renderHeader(header, contratista, empresa, fecha_inicio, fecha_termino);
@@ -139,9 +160,14 @@ function renderHeader(header, contratista, empresa, fechaFrom, fechaTo) {
   // Totals
   const total = h.total ?? 0;
   document.getElementById('doc-grand-total').textContent  = fmtCLP.format(total);
+  document.getElementById('doc-total-trabajadores').textContent = fmtCLP.format(h.total_trabajado ?? 0);
+  document.getElementById('doc-total-comision').textContent = fmtCLP.format(h.total_contratista ?? 0);
   document.getElementById('doc-total-trato').textContent  = fmtCLP.format(h.total_trato  ?? 0);
   document.getElementById('doc-total-aldia').textContent  = fmtCLP.format(h.total_al_dia ?? 0);
   document.getElementById('doc-total').textContent        = fmtCLP.format(total);
+  setPct('doc-pct-comision', h.pct_comision);
+  setPct('doc-pct-trato', h.pct_comision_trato);
+  setPct('doc-pct-aldia', h.pct_comision_al_dia);
 }
 
 // ── Render pivot table ─────────────────────────────────────────────────
@@ -158,68 +184,104 @@ function renderPivot(columns, rows) {
   });
   const dates = [...dateSet].sort();
 
-  // Group by worker → sum totals per date
+  // Group by worker → sum totals per date (worker pay + commission + billable)
   const groups = new Map();
   rows.forEach(r => {
     const worker = workerCol ? (r[workerCol] ?? '(sin nombre)') : '(sin nombre)';
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
     const value  = Number(r.total_pagar) || 0;
+    const trabajado = Number(r.total_trabajado) || 0;
+    const comision = Number(r.total_contratista) || 0;
 
     if (!groups.has(worker)) {
-      groups.set(worker, { worker, byDate: {} });
+      groups.set(worker, { worker, byDate: {}, tipos: new Set() });
     }
     const g = groups.get(worker);
-    if (fecha) g.byDate[fecha] = (g.byDate[fecha] || 0) + value;
+    const tipos = String(r.tipo_pago || '').split(',').map(s => s.trim()).filter(Boolean);
+    tipos.forEach(t => g.tipos.add(t));
+    if (fecha) {
+      const prev = g.byDate[fecha] || { total: 0, trabajado: 0, comision: 0 };
+      g.byDate[fecha] = {
+        total: prev.total + value,
+        trabajado: prev.trabajado + trabajado,
+        comision: prev.comision + comision,
+      };
+    }
   });
 
   const sorted = [...groups.values()].sort((a, b) =>
     a.worker.localeCompare(b.worker, 'es')
   );
 
-  // Thead
+  function tipoBadgeHtml(tipos) {
+    const seen = new Set();
+    const parts = [];
+    for (const t of tipos) {
+      const isTrato = t.toLowerCase() === 'trato';
+      const key = isTrato ? 'trato' : 'aldia';
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cls = isTrato ? 'badge-trato' : 'badge-aldia';
+      const low = t.toLowerCase();
+      const label = isTrato ? 'Trato' : (low === 'al dia' || low === 'al día' ? 'Al día' : t);
+      parts.push(`<span class="badge ${cls}">${esc(label)}</span>`);
+    }
+    return parts.join(' ');
+  }
+
+  function dateCellHtml(cell) {
+    const val = cell?.trabajado || 0;
+    if (!val) return `<td class="cell-dash">-</td>`;
+    return `<td class="cell-date">${fmtCLP.format(val)}</td>`;
+  }
+
   const thead = document.getElementById('bo-pivot-thead');
   thead.innerHTML = `<tr>
-    <th>Total Trabajador</th>
+    <th>Trabajador</th>
     ${dates.map(d => `<th class="num">${esc(formatShortDate(d))}</th>`).join('')}
-    <th class="num">Suma total</th>
+    <th class="num">Suma</th>
   </tr>`;
 
-  // Tbody + column totals
   const colTotals = {};
   dates.forEach(d => { colTotals[d] = 0; });
+  let grandTrabajado = 0;
+  let grandComision = 0;
   let grandTotal = 0;
 
   let html = '';
   sorted.forEach(g => {
-    const rowTotal = dates.reduce((s, d) => s + (g.byDate[d] || 0), 0);
+    const rowTrabajado = dates.reduce((s, d) => s + (g.byDate[d]?.trabajado || 0), 0);
+    const rowComision = dates.reduce((s, d) => s + (g.byDate[d]?.comision || 0), 0);
+    const rowTotal = dates.reduce((s, d) => s + (g.byDate[d]?.total || 0), 0);
+    grandTrabajado += rowTrabajado;
+    grandComision += rowComision;
     grandTotal += rowTotal;
 
     html += `<tr>`;
-    html += `<td class="cell-worker">${esc(g.worker)}</td>`;
+    html += `<td class="cell-worker">${esc(g.worker)} ${tipoBadgeHtml(g.tipos)}</td>`;
     dates.forEach(d => {
-      const val = g.byDate[d] || 0;
-      colTotals[d] += val;
-      if (val > 0) {
-        html += `<td class="cell-date">${fmtCLP.format(val)}</td>`;
-      } else {
-        html += `<td class="cell-dash">-</td>`;
-      }
+      const cell = g.byDate[d];
+      if (cell) colTotals[d] += cell.trabajado;
+      html += dateCellHtml(cell);
     });
-    html += `<td class="cell-total">${fmtCLP.format(rowTotal)}</td>`;
+    html += `<td class="cell-total">${fmtCLP.format(rowTrabajado)}</td>`;
     html += `</tr>`;
   });
 
-  // Footer totals row
   html += `<tr class="bo-totals-row">`;
-  html += `<td>Suma total</td>`;
+  html += `<td>Subtotal</td>`;
   dates.forEach(d => {
     const v = colTotals[d];
     html += `<td>${v > 0 ? fmtCLP.format(v) : '-'}</td>`;
   });
-  html += `<td>${fmtCLP.format(grandTotal)}</td>`;
+  html += `<td>${fmtCLP.format(grandTrabajado)}</td>`;
   html += `</tr>`;
 
   document.getElementById('bo-pivot-tbody').innerHTML = html;
+  document.getElementById('doc-subtotal').textContent = fmtCLP.format(grandTrabajado);
+  document.getElementById('doc-summary-comision').textContent = fmtCLP.format(grandComision);
+  document.getElementById('doc-summary-total').textContent = fmtCLP.format(grandTotal);
+  setPct('doc-summary-pct-comision', grandTrabajado ? (grandComision / grandTrabajado * 100) : null);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

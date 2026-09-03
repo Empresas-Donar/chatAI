@@ -1006,9 +1006,12 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .totals-row  { border-top: 2px solid #1e293b; }
 .tot-cell    { text-align: center; padding: 8px 6px; width: 33%;
                border-right: 1px solid #e2e8f0; }
+.tot-cell-5  { width: 20%; }
 .tot-cell-hl { background: #fef08a; }
 .tot-label   { font-size: 7pt; font-weight: 700; color: #64748b; text-transform: uppercase; }
 .tot-value   { font-size: 13pt; font-weight: 800; color: #1e293b; margin-top: 2px; }
+.tot-cell-5 .tot-value { font-size: 11pt; }
+.tot-pct     { font-size: 8pt; font-weight: 700; color: #64748b; margin-top: 1px; }
 
 /* ── Pivot table ── */
 .pivot-title { font-size: 9pt; font-weight: bold; margin: 8px 0 4px; color: #1e293b; }
@@ -1026,6 +1029,11 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 }
 .pivot-table tr.foot td:first-child { text-align: left; }
 
+.summary-table { width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1;
+                 margin-top: 8px; }
+.summary-table td { text-align: center; padding: 8px 6px; width: 33%;
+                    border-right: 1px solid #e2e8f0; }
+
 /* ── Detail table (OC / notas print) ── */
 .detail-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; margin-top: 8px; }
 .detail-table thead tr { background: #1d4ed8; color: white; }
@@ -1037,6 +1045,20 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .badge-trato { color: #1d4ed8; font-weight: 700; }
 .badge-aldia { color: #15803d; font-weight: 700; }
 """
+
+
+def _pct(part, base):
+    """Commission or share as percent; None when the base is 0."""
+    if not base:
+        return None
+    return round(100.0 * float(part) / float(base), 1)
+
+
+def _fmt_pct(v) -> str:
+    if v is None:
+        return "—"
+    text = f"{float(v):.1f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",") + "%"
 
 
 def _fmt_clp(v) -> str:
@@ -1068,6 +1090,28 @@ def _fmt_date_display(iso: str) -> str:
         return iso
 
 
+def _tipo_badges_html(tipos) -> str:
+    """Compact Trato / Al día marks for the worker column."""
+    seen: set[str] = set()
+    parts: list[str] = []
+    for raw in tipos:
+        t = (raw or "").strip()
+        if not t:
+            continue
+        is_trato = t.lower() == _PAYMENT_TYPE_TRATO
+        key = "trato" if is_trato else "aldia"
+        if key in seen:
+            continue
+        seen.add(key)
+        if is_trato:
+            parts.append('<span class="badge-trato">Trato</span>')
+        elif t.lower() in ("al dia", "al día"):
+            parts.append('<span class="badge-aldia">Al día</span>')
+        else:
+            parts.append(f'<span class="badge-aldia">{t}</span>')
+    return " ".join(parts)
+
+
 def _fmt_date_short(iso: str) -> str:
     try:
         d = datetime.date.fromisoformat(iso)
@@ -1083,11 +1127,19 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
     so a stored total_pagar of 0 does not hide approved work (issue #156).
     Screen (`billing_order_data`) and PDF (`billing_order_pdf`) share this
     so the two surfaces cannot diverge.
+
+    Pivot columns stay positional: (trabajador, fecha, total_pagar, …)
+    so existing tests that read r[2] as the billable amount keep working.
+    total_trabajado / total_contratista are appended for the worker vs
+    commission split on the Orden de Facturación.
     """
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT tipo_pago, SUM({_BILLABLE_SQL}) AS total_labor
+            SELECT tipo_pago,
+                   SUM({_BILLABLE_SQL}) AS total_labor,
+                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado,
+                   SUM(COALESCE(total_contratista, 0)) AS total_contratista
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
               AND nombre_campo = %s
@@ -1102,7 +1154,10 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
         cur.execute(
             f"""
             SELECT trabajador, fecha::date::text AS fecha,
-                   SUM({_BILLABLE_SQL}) AS total
+                   SUM({_BILLABLE_SQL}) AS total,
+                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado,
+                   SUM(COALESCE(total_contratista, 0)) AS total_contratista,
+                   STRING_AGG(DISTINCT tipo_pago, ',') AS tipos
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
               AND nombre_campo = %s
@@ -1127,6 +1182,32 @@ def _billing_header_from_tipo_rows(
         float(r[1] or 0) for r in tipo_rows if r[0] != _PAYMENT_TYPE_TRATO
     )
     total_pagar = total_trato + total_al_dia
+    total_trabajado = sum(
+        float(r[2] or 0) for r in tipo_rows if len(r) > 2
+    )
+    total_contratista = sum(
+        float(r[3] or 0) for r in tipo_rows if len(r) > 3
+    )
+    trab_trato = sum(
+        float(r[2] or 0)
+        for r in tipo_rows
+        if r[0] == _PAYMENT_TYPE_TRATO and len(r) > 2
+    )
+    com_trato = sum(
+        float(r[3] or 0)
+        for r in tipo_rows
+        if r[0] == _PAYMENT_TYPE_TRATO and len(r) > 3
+    )
+    trab_al_dia = sum(
+        float(r[2] or 0)
+        for r in tipo_rows
+        if r[0] != _PAYMENT_TYPE_TRATO and len(r) > 2
+    )
+    com_al_dia = sum(
+        float(r[3] or 0)
+        for r in tipo_rows
+        if r[0] != _PAYMENT_TYPE_TRATO and len(r) > 3
+    )
     if not tipo_rows and total_pagar == 0:
         return None
     pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
@@ -1139,8 +1220,14 @@ def _billing_header_from_tipo_rows(
         "total_trato": total_trato,
         "total_al_dia": total_al_dia,
         "total": total_pagar,
+        "total_trabajado": total_trabajado,
+        "total_contratista": total_contratista,
         "pct_trato": pct_trato,
         "pct_al_dia": pct_al_dia,
+        "pct_trabajadores": _pct(total_trabajado, total_pagar),
+        "pct_comision": _pct(total_contratista, total_trabajado),
+        "pct_comision_trato": _pct(com_trato, trab_trato),
+        "pct_comision_al_dia": _pct(com_al_dia, trab_al_dia),
     }
 
 
@@ -1183,12 +1270,22 @@ async def billing_order_data(
             "trabajador": r[0],
             "fecha": r[1],
             "total_pagar": _serialize(r[2]),
+            "total_trabajado": _serialize(r[3]),
+            "total_contratista": _serialize(r[4]),
+            "tipo_pago": r[5] if len(r) > 5 else None,
         }
         for r in pivot_rows
     ]
     return {
         "header": header,
-        "columns": ["trabajador", "fecha", "total_pagar"],
+        "columns": [
+            "trabajador",
+            "fecha",
+            "total_pagar",
+            "total_trabajado",
+            "total_contratista",
+            "tipo_pago",
+        ],
         "rows": rows,
         "count": len(rows),
     }
@@ -1218,25 +1315,57 @@ async def billing_order_pdf(
     finally:
         conn.close()
 
-    # Compute totals
-    total_trato = sum(float(r[1] or 0) for r in tipo_rows if r[0] == "trato")
-    total_al_dia = sum(float(r[1] or 0) for r in tipo_rows if r[0] != "trato")
-    total_pagar = total_trato + total_al_dia
+    header = _billing_header_from_tipo_rows(
+        tipo_rows, contratista, empresa, fecha_inicio, fecha_termino
+    )
+    total_trato = header["total_trato"] if header else 0
+    total_al_dia = header["total_al_dia"] if header else 0
+    total_pagar = header["total"] if header else 0
+    total_trabajado = header["total_trabajado"] if header else 0
+    total_contratista = header["total_contratista"] if header else 0
+    pct_comision = header.get("pct_comision") if header else None
+    pct_comision_trato = header.get("pct_comision_trato") if header else None
+    pct_comision_al_dia = header.get("pct_comision_al_dia") if header else None
 
-    # Build pivot structure
+    # Build pivot structure: date → {total, trabajado, comision}
     dates: list[str] = sorted({r[1] for r in pivot_rows if r[1]})
     workers: dict[str, dict] = {}
-    for worker, fecha, total in pivot_rows:
-        w = worker or "(sin nombre)"
+    worker_tipos: dict[str, set[str]] = {}
+    for row in pivot_rows:
+        w = row[0] or "(sin nombre)"
+        fecha = row[1]
         if w not in workers:
             workers[w] = {}
-        workers[w][fecha] = float(total or 0)
+            worker_tipos[w] = set()
+        prev = workers[w].get(fecha, {"total": 0.0, "trabajado": 0.0, "comision": 0.0})
+        workers[w][fecha] = {
+            "total": prev["total"] + float(row[2] or 0),
+            "trabajado": prev["trabajado"] + float(row[3] or 0),
+            "comision": prev["comision"] + float(row[4] or 0),
+        }
+        if len(row) > 5 and row[5]:
+            worker_tipos[w].update(t.strip() for t in str(row[5]).split(",") if t.strip())
 
     sorted_workers = sorted(workers.items())
 
-    # Column totals
-    col_totals = {d: sum(wdata.get(d, 0) for _, wdata in sorted_workers) for d in dates}
-    grand_total = sum(col_totals.values())
+    def _empty_cell():
+        return {"total": 0.0, "trabajado": 0.0, "comision": 0.0}
+
+    col_totals = {
+        d: {
+            "total": sum(wdata.get(d, _empty_cell())["total"] for _, wdata in sorted_workers),
+            "trabajado": sum(
+                wdata.get(d, _empty_cell())["trabajado"] for _, wdata in sorted_workers
+            ),
+            "comision": sum(
+                wdata.get(d, _empty_cell())["comision"] for _, wdata in sorted_workers
+            ),
+        }
+        for d in dates
+    }
+    grand_total = sum(c["total"] for c in col_totals.values())
+    grand_trabajado = sum(c["trabajado"] for c in col_totals.values())
+    grand_comision = sum(c["comision"] for c in col_totals.values())
 
     # ── HTML ──
     d1 = _fmt_date_display(fecha_inicio)
@@ -1248,19 +1377,28 @@ async def billing_order_pdf(
 
     rows_html = ""
     for worker, wdata in sorted_workers:
-        row_total = sum(wdata.get(d, 0) for d in dates)
+        row_trabajado = sum(wdata.get(d, _empty_cell())["trabajado"] for d in dates)
         cells = ""
         for d in dates:
-            v = wdata.get(d, 0)
+            cell = wdata.get(d)
+            v = cell["trabajado"] if cell else 0
             cells += f'<td class="num">{_fmt_clp(v) if v else "-"}</td>'
         even_cls = "even" if len(rows_html) % 2 == 0 else ""
+        badges = _tipo_badges_html(worker_tipos.get(worker, set()))
+        name_cell = f"{worker} {badges}".strip() if badges else worker
         rows_html += (
-            f'<tr class="{even_cls}"><td>{worker}</td>{cells}'
-            f'<td class="tot">{_fmt_clp(row_total)}</td></tr>'
+            f'<tr class="{even_cls}"><td>{name_cell}</td>{cells}'
+            f'<td class="tot">{_fmt_clp(row_trabajado)}</td></tr>'
         )
 
-    foot_cells = "".join(f"<td>{_fmt_clp(col_totals[d])}</td>" for d in dates)
-    foot_html = f'<tr class="foot"><td>Suma total</td>{foot_cells}<td>{_fmt_clp(grand_total)}</td></tr>'
+    foot_cells = "".join(
+        f"<td>{_fmt_clp(col_totals[d]['trabajado']) if col_totals[d]['trabajado'] else '-'}</td>"
+        for d in dates
+    )
+    foot_html = (
+        f'<tr class="foot"><td>Subtotal</td>{foot_cells}'
+        f"<td>{_fmt_clp(grand_trabajado)}</td></tr>"
+    )
 
     logo = _logo_b64()
     logo_html = (
@@ -1303,21 +1441,32 @@ async def billing_order_pdf(
 <!-- Glosa + totals: real table -->
 <table class="glosa-table">
   <tr>
-    <td colspan="3" class="glosa-title">GLOSA</td>
+    <td colspan="5" class="glosa-title">GLOSA</td>
   </tr>
   <tr>
-    <td colspan="3" class="glosa-body">{glosa}</td>
+    <td colspan="5" class="glosa-body">{glosa}</td>
   </tr>
   <tr class="totals-row">
-    <td class="tot-cell">
+    <td class="tot-cell tot-cell-5">
+      <div class="tot-label">Total trabajadores</div>
+      <div class="tot-value">{_fmt_clp(total_trabajado)}</div>
+    </td>
+    <td class="tot-cell tot-cell-5">
+      <div class="tot-label">Adicional</div>
+      <div class="tot-value">{_fmt_clp(total_contratista)}</div>
+      <div class="tot-pct">{_fmt_pct(pct_comision)}</div>
+    </td>
+    <td class="tot-cell tot-cell-5">
       <div class="tot-label">Total a Trato</div>
       <div class="tot-value">{_fmt_clp(total_trato)}</div>
+      <div class="tot-pct">{_fmt_pct(pct_comision_trato)}</div>
     </td>
-    <td class="tot-cell">
+    <td class="tot-cell tot-cell-5">
       <div class="tot-label">Total Al Día</div>
       <div class="tot-value">{_fmt_clp(total_al_dia)}</div>
+      <div class="tot-pct">{_fmt_pct(pct_comision_al_dia)}</div>
     </td>
-    <td class="tot-cell tot-cell-hl">
+    <td class="tot-cell tot-cell-5 tot-cell-hl">
       <div class="tot-label">Total a Pagar</div>
       <div class="tot-value">{_fmt_clp(total_pagar)}</div>
     </td>
@@ -1328,15 +1477,33 @@ async def billing_order_pdf(
 <table class="pivot-table">
   <thead>
     <tr>
-      <th>Total Trabajador</th>
+      <th>Trabajador</th>
       {date_headers}
-      <th class="num">Suma total</th>
+      <th class="num">Suma</th>
     </tr>
   </thead>
   <tbody>
     {rows_html}
     {foot_html}
   </tbody>
+</table>
+
+<table class="summary-table">
+  <tr class="totals-row">
+    <td class="tot-cell">
+      <div class="tot-label">Subtotal</div>
+      <div class="tot-value">{_fmt_clp(grand_trabajado)}</div>
+    </td>
+    <td class="tot-cell">
+      <div class="tot-label">Adicional</div>
+      <div class="tot-value">{_fmt_clp(grand_comision)}</div>
+      <div class="tot-pct">{_fmt_pct(pct_comision)}</div>
+    </td>
+    <td class="tot-cell tot-cell-hl">
+      <div class="tot-label">Total</div>
+      <div class="tot-value">{_fmt_clp(grand_total)}</div>
+    </td>
+  </tr>
 </table>
 
 </body></html>"""
