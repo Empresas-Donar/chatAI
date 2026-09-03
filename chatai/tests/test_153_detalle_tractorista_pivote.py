@@ -303,10 +303,11 @@ class TestSharedBuilderAndFormats:
         assert "fil-campo" in src
         assert "fillSelect('fil-campo'" not in src
 
-    def test_153_detalle_operacional_still_uses_reporte_isolation(self):
+    def test_153_detalle_operacional_exposes_trabajado_isolation(self):
         src = _fn_source("_query_detalle_rows")
-        assert "tarjas_reporte" in src
-        assert "total_labor" in src
+        assert "tarjas_pagos" in src
+        assert "total_trabajado" in src
+        assert "total_pagar" in src
         api_src = _fn_source("get_tarjas_detalle_tractorista")
         assert "tarjas_reporte" not in api_src
         assert "total_labor" not in api_src

@@ -4,7 +4,7 @@
 
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="/static/tarjas_detail.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_detail.css?v={{ static_v }}&c=1" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 {% endblock %}
 
@@ -79,6 +79,7 @@
           <tr>
             <th>Tipo de pago</th>
             <th class="num">Total a pagar</th>
+            <th class="num">Total trabajado</th>
             <th class="num">Jornadas</th>
           </tr>
         </thead>
@@ -87,6 +88,7 @@
           <tr>
             <td><strong>Total</strong></td>
             <td class="num"><strong id="summary-total"></strong></td>
+            <td class="num"><strong id="summary-trabajado"></strong></td>
             <td class="num"><strong id="summary-jornadas"></strong></td>
           </tr>
         </tfoot>
@@ -118,10 +120,12 @@
               <th class="num">Jornadas</th>
               <th class="num">Total unitario</th>
               <th class="num">Costo total</th>
+              <th class="num">Total trabajado</th>
               <th class="num">% del pago</th>
             </tr>
           </thead>
           <tbody id="detail-tbody"></tbody>
+          <tfoot id="detail-tfoot"></tfoot>
         </table>
       </div>
     </div>
@@ -138,5 +142,5 @@
 
 {% block scripts %}
 <script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/tarjas_detail.js?v={{ static_v }}"></script>
+<script src="/static/tarjas_detail.js?v={{ static_v }}&c=2"></script>
 {% endblock %}
