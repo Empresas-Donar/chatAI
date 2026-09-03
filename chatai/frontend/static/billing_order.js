@@ -84,24 +84,27 @@ async function generate() {
   try {
     const params = new URLSearchParams({ contratista, empresa, fecha_inicio, fecha_termino });
 
-    const [headerRes, pivotRes] = await Promise.all([
-      fetch('/api/purchase-orders?' + params),
-      fetch('/api/tarjas/contratista?' + params),
-    ]);
+    // Single source (issue #156): header + pivot from the same Aprobado /
+    // total_pagar query. Do NOT reuse /api/tarjas/contratista here — that
+    // operational report intentionally shows all estados and total_trabajado.
+    const res = await fetch('/api/odoo/facturacion/data?' + params);
+    if (!res.ok) throw new Error('Error en API de facturación');
 
-    if (!headerRes.ok) throw new Error('Error en API de cabecera');
-    if (!pivotRes.ok)  throw new Error('Error en API de pivot');
+    const data = await res.json();
 
-    const headerData = await headerRes.json();
-    const pivotData  = await pivotRes.json();
-
-    if (!headerData.rows?.length && !pivotData.rows?.length) {
+    if (!data.rows?.length) {
       document.getElementById('empty-box').classList.remove('hidden');
       return;
     }
 
-    renderHeader(headerData.header, contratista, empresa, fecha_inicio, fecha_termino);
-    renderPivot(pivotData.columns, pivotData.rows);
+    let header = data.header;
+    if (!header) {
+      const total = data.rows.reduce((s, r) => s + (Number(r.total_pagar) || 0), 0);
+      header = { total, total_trato: 0, total_al_dia: total };
+    }
+
+    renderHeader(header, contratista, empresa, fecha_inicio, fecha_termino);
+    renderPivot(data.columns, data.rows);
     document.getElementById('bo-document').style.display = 'block';
     document.getElementById('btn-pdf').disabled = false;
 
@@ -160,7 +163,7 @@ function renderPivot(columns, rows) {
   rows.forEach(r => {
     const worker = workerCol ? (r[workerCol] ?? '(sin nombre)') : '(sin nombre)';
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
-    const value  = Number(r.total_trabajado) || 0;
+    const value  = Number(r.total_pagar) || 0;
 
     if (!groups.has(worker)) {
       groups.set(worker, { worker, byDate: {} });

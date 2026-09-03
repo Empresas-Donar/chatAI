@@ -9,6 +9,7 @@ Routes:
   GET  /api/purchase-orders               → Order data filtered by params
   GET  /api/purchase-orders/odoo-export   → CSV export for Odoo import
   GET  /odoo/facturacion                  → Billing order UI page
+  GET  /api/odoo/facturacion/data         → Screen header + pivot (same source as PDF)
   GET  /api/odoo/facturacion/pdf          → PDF of billing order (opens in new tab)
   GET  /api/tarjas/cc-status              → CC sync status (archived IDs detection)
   POST /api/tarjas/sync-cc                → Trigger CC sync on demand
@@ -133,6 +134,16 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Exact tipo_pago values from the DB
 _PAYMENT_TYPE_TRATO = "trato"
 _PAYMENT_TYPE_AL_DIA = "Al dia"
+
+# Billable amount for Orden de Facturación / tarjas_reporte.
+# Domain formula (sql/tarjas/01_views_reporte.sql):
+#   total_pagar = total_trabajado + total_contratista
+# AppSheet has been leaving total_pagar at 0 on new rows since ~2026-08-24
+# while still filling the parts (issue #156). Treat 0 as missing.
+_BILLABLE_SQL = (
+    "COALESCE(NULLIF(total_pagar, 0), "
+    "COALESCE(total_trabajado, 0) + COALESCE(total_contratista, 0))"
+)
 
 
 def init(templates: Jinja2Templates) -> None:
@@ -1065,6 +1076,124 @@ def _fmt_date_short(iso: str) -> str:
         return iso
 
 
+def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino):
+    """Header totals + worker×date pivot from one snapshot of tarjas_pagos.
+
+    Same scope as tarjas_reporte (estado='Aprobado') but uses _BILLABLE_SQL
+    so a stored total_pagar of 0 does not hide approved work (issue #156).
+    Screen (`billing_order_data`) and PDF (`billing_order_pdf`) share this
+    so the two surfaces cannot diverge.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT tipo_pago, SUM({_BILLABLE_SQL}) AS total_labor
+            FROM appsheet.tarjas_pagos
+            WHERE contratista  = %s
+              AND nombre_campo = %s
+              AND estado       = 'Aprobado'
+              AND fecha::date BETWEEN %s AND %s
+            GROUP BY tipo_pago
+            """,
+            (contratista, empresa, fecha_inicio, fecha_termino),
+        )
+        tipo_rows = cur.fetchall()
+
+        cur.execute(
+            f"""
+            SELECT trabajador, fecha::date::text AS fecha,
+                   SUM({_BILLABLE_SQL}) AS total
+            FROM appsheet.tarjas_pagos
+            WHERE contratista  = %s
+              AND nombre_campo = %s
+              AND estado       = 'Aprobado'
+              AND fecha::date BETWEEN %s AND %s
+            GROUP BY trabajador, fecha::date
+            ORDER BY trabajador, fecha::date
+            """,
+            (contratista, empresa, fecha_inicio, fecha_termino),
+        )
+        pivot_rows = cur.fetchall()
+    return tipo_rows, pivot_rows
+
+
+def _billing_header_from_tipo_rows(
+    tipo_rows, contratista, empresa, fecha_inicio, fecha_termino
+):
+    total_trato = sum(
+        float(r[1] or 0) for r in tipo_rows if r[0] == _PAYMENT_TYPE_TRATO
+    )
+    total_al_dia = sum(
+        float(r[1] or 0) for r in tipo_rows if r[0] != _PAYMENT_TYPE_TRATO
+    )
+    total_pagar = total_trato + total_al_dia
+    if not tipo_rows and total_pagar == 0:
+        return None
+    pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
+    pct_al_dia = round(total_al_dia / total_pagar * 100, 1) if total_pagar else 0
+    return {
+        "contractor": contratista,
+        "company": empresa,
+        "date_from": fecha_inicio,
+        "date_to": fecha_termino,
+        "total_trato": total_trato,
+        "total_al_dia": total_al_dia,
+        "total": total_pagar,
+        "pct_trato": pct_trato,
+        "pct_al_dia": pct_al_dia,
+    }
+
+
+@router.get("/api/odoo/facturacion/data")
+async def billing_order_data(
+    contratista: str,
+    empresa: str,
+    fecha_inicio: str,
+    fecha_termino: str,
+):
+    """Screen payload for Orden de Facturación: header + pivot from one source.
+
+    Replaces the previous split of GET /api/purchase-orders (header, view,
+    total_pagar) + GET /api/tarjas/contratista (pivot, unfiltered,
+    total_trabajado) that made the two blocks on the same page disagree
+    (issue #156). Does not change /api/tarjas/contratista.
+    """
+    if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    try:
+        tipo_rows, pivot_rows = _fetch_billing_order(
+            conn, contratista, empresa, fecha_inicio, fecha_termino
+        )
+    finally:
+        conn.close()
+
+    header = _billing_header_from_tipo_rows(
+        tipo_rows, contratista, empresa, fecha_inicio, fecha_termino
+    )
+    rows = [
+        {
+            "trabajador": r[0],
+            "fecha": r[1],
+            "total_pagar": _serialize(r[2]),
+        }
+        for r in pivot_rows
+    ]
+    return {
+        "header": header,
+        "columns": ["trabajador", "fecha", "total_pagar"],
+        "rows": rows,
+        "count": len(rows),
+    }
+
+
 @router.get("/api/odoo/facturacion/pdf")
 async def billing_order_pdf(
     contratista: str,
@@ -1083,44 +1212,9 @@ async def billing_order_pdf(
         )
 
     try:
-        with conn.cursor() as cur:
-            # Header totals (same query as get_purchase_order)
-            cur.execute(
-                """
-                SELECT tipo_pago, SUM(total_labor) AS total_labor
-                FROM appsheet.tarjas_reporte
-                WHERE contratista  = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                GROUP BY tipo_pago
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
-            )
-            tipo_rows = cur.fetchall()
-
-            # Pivot data: worker × date.
-            # Must mirror tarjas_reporte's scope (issue #146): total_pagar is
-            # the billable amount (total_pagar = total_trabajado +
-            # total_contratista — see sql/tarjas/01_views_reporte.sql), and
-            # only estado='Aprobado' rows count toward what's actually
-            # invoiced. Using total_trabajado and/or skipping the estado
-            # filter here made this pivot's "Suma total" drift from the
-            # header "Total a Pagar" (and from the on-screen total).
-            cur.execute(
-                """
-                SELECT trabajador, fecha::date::text AS fecha,
-                       SUM(total_pagar) AS total
-                FROM appsheet.tarjas_pagos
-                WHERE contratista  = %s
-                  AND nombre_campo = %s
-                  AND estado       = 'Aprobado'
-                  AND fecha::date BETWEEN %s AND %s
-                GROUP BY trabajador, fecha::date
-                ORDER BY trabajador, fecha::date
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
-            )
-            pivot_rows = cur.fetchall()
+        tipo_rows, pivot_rows = _fetch_billing_order(
+            conn, contratista, empresa, fecha_inicio, fecha_termino
+        )
     finally:
         conn.close()
 
