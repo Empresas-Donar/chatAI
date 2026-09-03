@@ -14,8 +14,8 @@
     <div>
       <h1 style="font-size:22px;font-weight:800;margin:0 0 6px">Orden de facturación — Tarjas contratistas</h1>
       <p style="margin:0;color:var(--text-muted);font-size:14px">
-        Genera la orden de facturación semanal por contratista y empresa. Muestra el desglose diario por trabajador.
-        Diseñada para adjuntar a la factura emitida al cliente.
+        Genera la orden de facturación semanal por contratista y empresa.
+        La tabla muestra lo que recibe cada trabajador; abajo el subtotal, el adicional y el total.
       </p>
     </div>
   </div>
@@ -83,14 +83,25 @@
     <div class="oc-glosa">
       <div class="oc-glosa-title">GLOSA</div>
       <div class="oc-glosa-body" id="doc-glosa"></div>
-      <div class="oc-totals">
+      <div class="oc-totals bo-totals">
+        <div class="oc-total-cell">
+          <div class="oc-total-label">Total trabajadores</div>
+          <div class="oc-total-value" id="doc-total-trabajadores"></div>
+        </div>
+        <div class="oc-total-cell">
+          <div class="oc-total-label">Adicional</div>
+          <div class="oc-total-value" id="doc-total-comision"></div>
+          <div class="oc-total-pct" id="doc-pct-comision"></div>
+        </div>
         <div class="oc-total-cell">
           <div class="oc-total-label">Total a Trato</div>
           <div class="oc-total-value" id="doc-total-trato"></div>
+          <div class="oc-total-pct" id="doc-pct-trato"></div>
         </div>
         <div class="oc-total-cell">
           <div class="oc-total-label">Total Al Día</div>
           <div class="oc-total-value" id="doc-total-aldia"></div>
+          <div class="oc-total-pct" id="doc-pct-aldia"></div>
         </div>
         <div class="oc-total-cell highlight">
           <div class="oc-total-label">Total a Pagar</div>
@@ -100,11 +111,27 @@
     </div>
 
     <!-- Worker pivot table -->
+    <p class="bo-pivot-title">ORDEN DE FACTURACIÓN</p>
     <div class="oc-table-wrap bo-pivot-wrap">
       <table class="oc-table bo-pivot" id="bo-pivot-table">
         <thead id="bo-pivot-thead"></thead>
         <tbody id="bo-pivot-tbody"></tbody>
       </table>
+    </div>
+    <div class="bo-summary" id="bo-pivot-summary">
+      <div class="oc-total-cell">
+        <div class="oc-total-label">Subtotal</div>
+        <div class="oc-total-value" id="doc-subtotal"></div>
+      </div>
+      <div class="oc-total-cell">
+        <div class="oc-total-label">Adicional</div>
+        <div class="oc-total-value" id="doc-summary-comision"></div>
+        <div class="oc-total-pct" id="doc-summary-pct-comision"></div>
+      </div>
+      <div class="oc-total-cell highlight">
+        <div class="oc-total-label">Total</div>
+        <div class="oc-total-value" id="doc-summary-total"></div>
+      </div>
     </div>
 
   </div>
