@@ -218,6 +218,7 @@ function renderDetail(rows, count) {
       <td><span class="${cls}">${esc(label)}</span></td>
       <td>${esc(r.labor ?? '')}</td>
       <td>${esc(String(r.centro_costo ?? ''))}</td>
+      <td>${esc(r.centro_costo_nombre || '—')}</td>
       <td class="num">${r.costo_hora != null ? fmtCLP.format(r.costo_hora) : '—'}</td>
       <td class="num">${r.jornadas ?? '—'}</td>
       <td class="num">${r.total_unitario != null ? fmtCLP.format(r.total_unitario) : '—'}</td>
@@ -231,7 +232,7 @@ function renderDetail(rows, count) {
   const sumCosto = rows.reduce((s, r) => s + Number(r.costo_total || 0), 0);
   const sumTrab = rows.reduce((s, r) => s + Number(r.total_trabajado || 0), 0);
   document.getElementById('detail-tfoot').innerHTML = `<tr>
-    <td colspan="3"><strong>Total</strong></td>
+    <td colspan="4"><strong>Total</strong></td>
     <td></td>
     <td class="num"><strong>${fmtNum.format(sumJornadas)}</strong></td>
     <td></td>
