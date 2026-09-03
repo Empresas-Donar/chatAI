@@ -2523,6 +2523,7 @@ async def download_tarjas_detalle_excel(
             "Tipo de pago",
             "Labor",
             "CC",
+            "Nombre CC",
             "Costo por hora",
             "Jornadas",
             "Total unitario",
@@ -2537,30 +2538,31 @@ async def download_tarjas_detalle_excel(
         ws.cell(i, 1, r["tipo_pago"])
         ws.cell(i, 2, r["labor"])
         ws.cell(i, 3, r["centro_costo"])
-        c4 = ws.cell(
-            i, 4, float(r["costo_hora"]) if r["costo_hora"] is not None else None
+        ws.cell(i, 4, r["centro_costo_nombre"] or "—")
+        c5 = ws.cell(
+            i, 5, float(r["costo_hora"]) if r["costo_hora"] is not None else None
         )
-        c4.number_format = money
-        ws.cell(i, 5, r["jornadas"])
-        c6 = ws.cell(i, 6, float(r["total_unitario"] or 0))
-        c6.number_format = money
-        c7 = ws.cell(i, 7, float(r["costo_total"] or 0))
+        c5.number_format = money
+        ws.cell(i, 6, r["jornadas"])
+        c7 = ws.cell(i, 7, float(r["total_unitario"] or 0))
         c7.number_format = money
-        c8 = ws.cell(i, 8, float(r["total_trabajado"] or 0))
+        c8 = ws.cell(i, 8, float(r["costo_total"] or 0))
         c8.number_format = money
-        ws.cell(i, 9, float(r["pct_pago"] or 0))
-        ws.cell(i, 10, r["nombre_campo"])
+        c9 = ws.cell(i, 9, float(r["total_trabajado"] or 0))
+        c9.number_format = money
+        ws.cell(i, 10, float(r["pct_pago"] or 0))
+        ws.cell(i, 11, r["nombre_campo"])
     last = len(rows) + 2
     ws.cell(last, 1, "Total")
-    ws.cell(last, 5, sum(float(r["jornadas"] or 0) for r in rows))
-    c7t = ws.cell(last, 7, sum(float(r["costo_total"] or 0) for r in rows))
-    c7t.number_format = money
-    c8t = ws.cell(last, 8, sum(float(r.get("total_trabajado") or 0) for r in rows))
+    ws.cell(last, 6, sum(float(r["jornadas"] or 0) for r in rows))
+    c8t = ws.cell(last, 8, sum(float(r["costo_total"] or 0) for r in rows))
     c8t.number_format = money
-    ws.cell(last, 9, 100 if any(float(r["costo_total"] or 0) for r in rows) else None)
-    for col in range(1, 11):
+    c9t = ws.cell(last, 9, sum(float(r.get("total_trabajado") or 0) for r in rows))
+    c9t.number_format = money
+    ws.cell(last, 10, 100 if any(float(r["costo_total"] or 0) for r in rows) else None)
+    for col in range(1, 12):
         ws.cell(last, col).font = Font(bold=True)
-    for col, w in zip("ABCDEFGHIJ", [14, 28, 10, 14, 10, 14, 14, 16, 12, 20]):
+    for col, w in zip("ABCDEFGHIJK", [14, 28, 10, 28, 14, 10, 14, 14, 16, 12, 20]):
         ws.column_dimensions[col].width = w
     return _excel_response(wb, f"tarjas_detalle_{fecha_inicio}_{fecha_termino}.xlsx")
 

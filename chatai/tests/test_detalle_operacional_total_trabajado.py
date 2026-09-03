@@ -89,6 +89,17 @@ def test_detalle_ui_has_total_trabajado_column():
     assert "fmtCLP.format(sumTrab)" in js
 
 
+def test_detalle_ui_shows_centro_costo_nombre():
+    html = DETAIL_HTML.read_text(encoding="utf-8")
+    assert "<th>Nombre CC</th>" in html
+    js = DETAIL_JS.read_text(encoding="utf-8")
+    assert "centro_costo_nombre" in js
+    assert 'colspan="4"' in js
+    excel_src = _fn_source("download_tarjas_detalle_excel")
+    assert '"Nombre CC"' in excel_src
+    assert 'r["centro_costo_nombre"]' in excel_src
+
+
 def test_detalle_pdf_html_has_detail_tfoot():
     src = _fn_source("_build_detalle_html")
     assert "foot_html" in src
