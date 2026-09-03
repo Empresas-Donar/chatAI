@@ -1,17 +1,12 @@
 -- =============================================================================
--- TARJAS: Vista reporte semanal por contratista
--- Reemplaza los reportes dinámicos de Google Sheets
--- total_pagar = total_trabajado + total_contratista (lo que paga la empresa)
+-- Fix 1: tarjas_reporte usaba total_pagar directamente, pero desde ~2026-08-24
+-- AppSheet deja total_pagar=0 en filas nuevas aunque total_trabajado y
+-- total_contratista están correctos (issue #156).
 --
--- pagar_efectivo: desde ~2026-08-24 AppSheet deja total_pagar en 0 aunque
--- total_trabajado/total_contratista están correctos.  Usamos el mismo
--- fallback que la Orden de Facturación para que ambas superficies cuadren
--- y el export a Odoo tenga montos correctos (issue #156).
---
--- id_labor: algunos registros de la misma partición (contratista/campo/fecha/
--- tipo_pago/cc/labor) tienen id_labor distinto (NULL vs un valor).  Usar
--- MAX() OVER hace que todos los registros de la partición compartan el mismo
--- id_labor antes del DISTINCT, evitando la duplicación del total_labor.
+-- Fix 2: SELECT DISTINCT duplicaba filas cuando dentro de la misma partición
+-- (contratista/campo/fecha/tipo_pago/cc/labor) había registros con id_labor
+-- diferente (NULL vs un valor). Esto inflaba total_labor en la Orden de Compra.
+-- Solución: MAX(id_labor) OVER (partition) para unificar el valor antes del DISTINCT.
 -- =============================================================================
 CREATE OR REPLACE VIEW appsheet.tarjas_reporte AS
 WITH raw AS (
