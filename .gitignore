@@ -1,6 +1,7 @@
 # Environment
 .env
 .mcp.json
+.codex/config.toml
 
 # Python
 __pycache__/
