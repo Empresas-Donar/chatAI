@@ -78,18 +78,22 @@
         <thead>
           <tr>
             <th>Tipo de pago</th>
-            <th class="num">Total a pagar</th>
-            <th class="num">Total trabajado</th>
+            <th class="num">Total trabajadores</th>
+            <th class="num">Recargo</th>
+            <th class="num">Costo Empresa</th>
             <th class="num">Jornadas</th>
+            <th class="num">%</th>
           </tr>
         </thead>
         <tbody id="summary-tbody"></tbody>
         <tfoot>
           <tr>
             <td><strong>Total</strong></td>
-            <td class="num"><strong id="summary-total"></strong></td>
             <td class="num"><strong id="summary-trabajado"></strong></td>
+            <td class="num"><strong id="summary-recargo">—</strong></td>
+            <td class="num"><strong id="summary-empresa"></strong></td>
             <td class="num"><strong id="summary-jornadas"></strong></td>
+            <td class="num"><strong id="summary-pct"></strong></td>
           </tr>
         </tfoot>
       </table>
@@ -120,8 +124,8 @@
               <th class="num">Costo por hora</th>
               <th class="num">Jornadas</th>
               <th class="num">Total unitario</th>
-              <th class="num">Costo total</th>
-              <th class="num">Total trabajado</th>
+              <th class="num">Total trabajadores</th>
+              <th class="num">Costo Empresa</th>
               <th class="num">% del pago</th>
             </tr>
           </thead>
@@ -143,5 +147,5 @@
 
 {% block scripts %}
 <script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/tarjas_detail.js?v={{ static_v }}&c=3"></script>
+<script src="/static/tarjas_detail.js?v={{ static_v }}&c=9"></script>
 {% endblock %}

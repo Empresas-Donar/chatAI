@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
 from db import get_connection
+from tarjas_empresa import fold_costo_empresa
 
 logger = logging.getLogger("controllers.dashboard")
 
@@ -43,6 +44,34 @@ def _serialize(v):
 def _rows_to_dicts(cur):
     cols = [d[0] for d in cur.description]
     return [{k: _serialize(v) for k, v in zip(cols, r)} for r in cur.fetchall()]
+
+
+def _pagos_date_sql(fecha_inicio, fecha_termino):
+    if fecha_inicio and fecha_termino:
+        return "fecha::date BETWEEN %s AND %s", [fecha_inicio, fecha_termino]
+    return (
+        "fecha::date >= date_trunc('month', CURRENT_DATE)::date "
+        "AND fecha::date < (date_trunc('month', CURRENT_DATE) + interval '1 month')::date",
+        [],
+    )
+
+
+def _fold_by_key(rows, key):
+    """rows: (key, tipo_pago, total_trabajado, extra...). Return dict key -> costo."""
+    grouped = {}
+    extras = {}
+    for r in rows:
+        k, tipo, trab = r[0], r[1], r[2]
+        grouped.setdefault(k, []).append((tipo, trab))
+        if len(r) > 3:
+            extras[k] = r[3]
+    out = []
+    for k, pairs in grouped.items():
+        item = {key: k, "total": fold_costo_empresa(pairs)}
+        if k in extras:
+            item["jornadas"] = extras[k]
+        out.append(item)
+    return out
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -72,32 +101,46 @@ async def get_dashboard_data(
     data = {}
     try:
         with conn.cursor() as cur:
-            # Build date WHERE clause
-            if fecha_inicio and fecha_termino:
-                date_filter = "fecha BETWEEN %s AND %s"
-                date_params = [fecha_inicio, fecha_termino]
-            else:
-                date_filter = "fecha >= date_trunc('month', CURRENT_DATE) AND fecha < date_trunc('month', CURRENT_DATE) + interval '1 month'"
-                date_params = []
+            date_filter, date_params = _pagos_date_sql(fecha_inicio, fecha_termino)
+            pagos_scope = f"estado = 'Aprobado' AND {date_filter}"
 
-            # ── Tarjas summary for selected range ─────────────────────
-            cur.execute(f"""
+            # ── Tarjas summary for selected range (Costo Empresa) ─────
+            cur.execute(
+                f"""
                 SELECT
-                    COUNT(DISTINCT contratista)                      AS contratistas_activos,
-                    COUNT(DISTINCT nombre_campo)                     AS campos_activos,
-                    COUNT(DISTINCT "Nombre Labor")                   AS labores_distintas,
-                    COALESCE(SUM(total_labor), 0)                    AS total_periodo,
-                    COALESCE(SUM(CASE WHEN tipo_pago = 'trato'
-                        THEN total_labor ELSE 0 END), 0)            AS total_trato,
-                    COALESCE(SUM(CASE WHEN tipo_pago IN ('Al dia', 'Al día')
-                        THEN total_labor ELSE 0 END), 0)            AS total_al_dia,
-                    COALESCE(SUM(jornadas), 0)                       AS jornadas_periodo
-                FROM appsheet.tarjas_reporte
-                WHERE {date_filter}
-            """, date_params)
-            row = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            data["tarjas_period"] = {k: _serialize(v) for k, v in zip(cols, row)}
+                    COUNT(DISTINCT contratista) AS contratistas_activos,
+                    COUNT(DISTINCT nombre_campo) AS campos_activos,
+                    COUNT(DISTINCT labor) AS labores_distintas,
+                    COUNT(*) AS jornadas_periodo
+                FROM appsheet.tarjas_pagos
+                WHERE {pagos_scope}
+                """,
+                date_params,
+            )
+            counts = {k: _serialize(v) for k, v in zip(
+                [d[0] for d in cur.description], cur.fetchone()
+            )}
+            cur.execute(
+                f"""
+                SELECT tipo_pago, COALESCE(SUM(total_trabajado), 0)
+                FROM appsheet.tarjas_pagos
+                WHERE {pagos_scope}
+                GROUP BY tipo_pago
+                """,
+                date_params,
+            )
+            tipo_pairs = cur.fetchall()
+            total_periodo = fold_costo_empresa(tipo_pairs)
+            total_trato = fold_costo_empresa(
+                [(t, a) for t, a in tipo_pairs if t == "trato"]
+            )
+            total_al_dia = total_periodo - total_trato
+            data["tarjas_period"] = {
+                **counts,
+                "total_periodo": total_periodo,
+                "total_trato": total_trato,
+                "total_al_dia": total_al_dia,
+            }
 
             # ── Previous equivalent period (for comparison) ───────────
             if fecha_inicio and fecha_termino:
@@ -106,57 +149,89 @@ async def get_dashboard_data(
                 span = (d1 - d0).days + 1
                 prev_end = d0 - datetime.timedelta(days=1)
                 prev_start = prev_end - datetime.timedelta(days=span - 1)
-                prev_filter = "fecha BETWEEN %s AND %s"
+                prev_filter = "fecha::date BETWEEN %s AND %s"
                 prev_params = [str(prev_start), str(prev_end)]
             else:
-                prev_filter = "fecha >= date_trunc('month', CURRENT_DATE) - interval '1 month' AND fecha < date_trunc('month', CURRENT_DATE)"
+                prev_filter = (
+                    "fecha::date >= (date_trunc('month', CURRENT_DATE) - interval '1 month')::date "
+                    "AND fecha::date < date_trunc('month', CURRENT_DATE)::date"
+                )
                 prev_params = []
 
-            cur.execute(f"""
-                SELECT COALESCE(SUM(total_labor), 0) AS total_anterior
-                FROM appsheet.tarjas_reporte
-                WHERE {prev_filter}
-            """, prev_params)
-            data["tarjas_period"]["total_anterior"] = _serialize(cur.fetchone()[0])
+            cur.execute(
+                f"""
+                SELECT tipo_pago, COALESCE(SUM(total_trabajado), 0)
+                FROM appsheet.tarjas_pagos
+                WHERE estado = 'Aprobado' AND {prev_filter}
+                GROUP BY tipo_pago
+                """,
+                prev_params,
+            )
+            data["tarjas_period"]["total_anterior"] = fold_costo_empresa(
+                cur.fetchall()
+            )
 
             # ── Tarjas: daily totals within range ─────────────────────
-            cur.execute(f"""
-                SELECT
-                    fecha::date AS dia,
-                    COALESCE(SUM(total_labor), 0) AS total
-                FROM appsheet.tarjas_reporte
-                WHERE {date_filter}
-                GROUP BY fecha::date
+            cur.execute(
+                f"""
+                SELECT fecha::date AS dia, tipo_pago,
+                       COALESCE(SUM(total_trabajado), 0)
+                FROM appsheet.tarjas_pagos
+                WHERE {pagos_scope}
+                GROUP BY fecha::date, tipo_pago
                 ORDER BY dia
-            """, date_params)
-            data["tarjas_daily"] = _rows_to_dicts(cur)
+                """,
+                date_params,
+            )
+            by_day = {}
+            for dia, tipo, trab in cur.fetchall():
+                key = str(dia)
+                by_day.setdefault(key, []).append((tipo, trab))
+            data["tarjas_daily"] = [
+                {"dia": dia, "total": fold_costo_empresa(pairs)}
+                for dia, pairs in by_day.items()
+            ]
 
             # ── Tarjas: top 5 contractors in range ────────────────────
-            cur.execute(f"""
-                SELECT
-                    contratista,
-                    COALESCE(SUM(total_labor), 0) AS total
-                FROM appsheet.tarjas_reporte
-                WHERE {date_filter}
-                GROUP BY contratista
-                ORDER BY total DESC
-                LIMIT 5
-            """, date_params)
-            data["top_contratistas"] = _rows_to_dicts(cur)
+            cur.execute(
+                f"""
+                SELECT contratista, tipo_pago, COALESCE(SUM(total_trabajado), 0)
+                FROM appsheet.tarjas_pagos
+                WHERE {pagos_scope}
+                GROUP BY contratista, tipo_pago
+                """,
+                date_params,
+            )
+            contractors = _fold_by_key(cur.fetchall(), "contratista")
+            contractors.sort(key=lambda r: r["total"], reverse=True)
+            data["top_contratistas"] = contractors[:5]
 
             # ── Tarjas: top 5 labores in range ────────────────────────
-            cur.execute(f"""
-                SELECT
-                    "Nombre Labor" AS labor,
-                    COALESCE(SUM(jornadas), 0) AS jornadas,
-                    COALESCE(SUM(total_labor), 0) AS total
-                FROM appsheet.tarjas_reporte
-                WHERE {date_filter}
-                GROUP BY "Nombre Labor"
-                ORDER BY jornadas DESC
-                LIMIT 5
-            """, date_params)
-            data["top_labores"] = _rows_to_dicts(cur)
+            cur.execute(
+                f"""
+                SELECT labor, tipo_pago, COALESCE(SUM(total_trabajado), 0),
+                       COUNT(*) AS jornadas
+                FROM appsheet.tarjas_pagos
+                WHERE {pagos_scope}
+                GROUP BY labor, tipo_pago
+                """,
+                date_params,
+            )
+            labor_pairs = {}
+            labor_jornadas = {}
+            for labor, tipo, trab, jornadas in cur.fetchall():
+                labor_pairs.setdefault(labor, []).append((tipo, trab))
+                labor_jornadas[labor] = labor_jornadas.get(labor, 0) + int(jornadas or 0)
+            labores = [
+                {
+                    "labor": labor,
+                    "jornadas": labor_jornadas[labor],
+                    "total": fold_costo_empresa(pairs),
+                }
+                for labor, pairs in labor_pairs.items()
+            ]
+            labores.sort(key=lambda r: r["jornadas"], reverse=True)
+            data["top_labores"] = labores[:5]
 
             # ── Sensors summary ───────────────────────────────────────
             cur.execute("""

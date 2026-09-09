@@ -1,0 +1,34 @@
+---
+description: Costo Empresa for tarjas company-pay reports — never AppSheet total_pagar
+alwaysApply: true
+---
+
+# Costo Empresa (tarjas)
+
+What the **company pays** for labores is **not** AppSheet `total_pagar` or `total_trabajado + total_contratista`. Those recargos are swapped (trato ~45%, al día ~50%) and `total_pagar` is often 0.
+
+Use `chatai/backend/tarjas_empresa.py` only:
+
+- Al Día → `total_trabajado × 1.45`
+- Trato → `total_trabajado × 1.50`
+- Bono / Tractorista / other → factor `1.0`
+- Round CLP with `total_empresa()` (`ROUND_HALF_UP`)
+- Source rows: `appsheet.tarjas_pagos` + `estado = 'Aprobado'`
+- Web and PDF must share the same helper so they cannot drift
+
+**Must square** (same week / contratista / empresa): Detalle operacional Costo Empresa, Orden de compra (`/odoo/tarjas`), Orden de facturación (`/odoo/facturacion`), Nota de crédito, Dashboard tarjas totals, bulk `/reportes` Detalle.
+
+**Stay on `total_trabajado`:** General operacional, Por persona, ranking, Resumen persona (worker pay). Tractorista OC uses its own view (factor 1.0).
+
+**Do not use for billed company cost:** `tarjas_reporte.total_labor`, `_BILLABLE_SQL`, `SUM(total_pagar)`, `SUM(total_contratista)`.
+
+Odoo CSV (`tarjas_reporte_odoo`) is an import template — do not silently mix it with Costo Empresa without an explicit change.
+
+```python
+# BAD — AppSheet commission (swapped vs platform)
+SUM(COALESCE(NULLIF(total_pagar,0), total_trabajado + total_contratista))
+
+# GOOD
+from tarjas_empresa import total_empresa
+billed = total_empresa(tipo_pago, sum_total_trabajado)
+```

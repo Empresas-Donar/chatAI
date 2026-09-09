@@ -50,16 +50,18 @@ class TestTipoPagoHelpers:
 class TestSummaryTableHtml:
     def test_96_renders_rows_badge_and_total(self):
         resumen = [
-            {"tipo_pago": "trato", "total_pagar": 1000000, "jornadas": 10},
-            {"tipo_pago": "Al dia", "total_pagar": 500000, "jornadas": 5},
+            {"tipo_pago": "trato", "total_trabajado": 1000000, "jornadas": 10},
+            {"tipo_pago": "Al dia", "total_trabajado": 500000, "jornadas": 5},
         ]
         html = tc._summary_table_html(resumen, 1500000, 15)
         assert "Trato" in html
         assert "Al Día" in html
         assert "badge-trato" in html
         assert "badge-aldia" in html
-        assert "$1.000.000" in html
-        assert "$1.500.000" in html  # Total row
+        assert "$1.000.000" in html  # trato Total trabajadores
+        assert "$1.500.000" in html  # trato Costo Empresa (×1.50)
+        assert "Costo Empresa" in html
+        assert "Total a pagar" not in html
 
 
 class TestDownloadPdfIntegration:
@@ -119,7 +121,8 @@ class TestDownloadPdfIntegration:
         text = doc[0].get_text()
         assert "Resumen" in text
         assert "Tipo de pago" in text
-        assert "Total a pagar" in text
+        assert "Costo Empresa" in text
+        assert "Total a pagar" not in text
         assert "Jornadas" in text
         assert "Detalle" in text  # detail section title still present
 
@@ -162,8 +165,8 @@ class TestCampoIsolation:
         resumen_a = self._resumen_for_campo("ISLA DE MAIPO")
         resumen_b = self._resumen_for_campo("TALAGANTE")
 
-        total_a = sum(float(r["total_pagar"] or 0) for r in resumen_a)
-        total_b = sum(float(r["total_pagar"] or 0) for r in resumen_b)
+        total_a = sum(float(r["total_trabajado"] or 0) for r in resumen_a)
+        total_b = sum(float(r["total_trabajado"] or 0) for r in resumen_b)
 
         # Both campos have data in this range (fixture data verified against
         # the real DB) and must not be equal to each other nor to the
@@ -180,7 +183,7 @@ class TestCampoIsolation:
                 resumen_all = tc._query_detalle_resumen(cur, where, params)
         finally:
             conn.close()
-        total_all = sum(float(r["total_pagar"] or 0) for r in resumen_all)
+        total_all = sum(float(r["total_trabajado"] or 0) for r in resumen_all)
 
         assert total_a < total_all
         assert total_b < total_all

@@ -7,12 +7,9 @@ Regression tests for issue #122: the "Detalle Operacional" PDF
   test_96_pdf_detalle_resumen_grafico.py, which no longer applies).
 - The Detalle table drops the "Horas" and "Unitario" columns and gains a
   "Nombre CC" column (appsheet.tarjas_cc.cultivo, joined by id_cc).
-- The Detalle table's "% pago" is now the row's total divided by
-  (Al Día + Trato) only — not partitioned by the row's own tipo_pago as
-  before, and not including other tipo_pago values that exist in
-  appsheet.tarjas_reporte (e.g. "Bono", "Tractorista"). This formula
-  change is in the query shared with the on-screen page and the Excel
-  export, so it applies to all three.
+- The Detalle table's "% pago" is the row's total_trabajado divided by
+  (Al Día + Trato) total_trabajado — not total_pagar / costo_total, which
+  AppSheet leaves at 0 on most rows.
 """
 
 import os
@@ -30,19 +27,26 @@ from db import get_connection
 class TestSummaryTableHtmlPercentColumn:
     def test_122_renders_percent_column_and_values(self):
         resumen = [
-            {"tipo_pago": "trato", "total_pagar": 1000000, "jornadas": 10},
-            {"tipo_pago": "Al dia", "total_pagar": 500000, "jornadas": 5},
+            {"tipo_pago": "trato", "total_trabajado": 1000000, "jornadas": 10},
+            {"tipo_pago": "Al dia", "total_trabajado": 500000, "jornadas": 5},
         ]
         html = tc._summary_table_html(resumen, 1500000, 15)
         # issue #132 added an explicit width style to this <th>; match the
         # header text loosely instead of the exact (now wider) tag.
         assert ">%</th>" in html
-        assert "66.7 %" in html  # 1,000,000 / 1,500,000
+        assert "66.7 %" in html  # 1,000,000 / 1,500,000 of total_trabajado
         assert "33.3 %" in html  # 500,000 / 1,500,000
         assert "100.0 %" in html  # Total row
 
     def test_122_zero_total_does_not_divide_by_zero(self):
-        resumen = [{"tipo_pago": "trato", "total_pagar": 0, "jornadas": 0}]
+        resumen = [
+            {
+                "tipo_pago": "trato",
+                "total_pagar": 0,
+                "total_trabajado": 0,
+                "jornadas": 0,
+            }
+        ]
         html = tc._summary_table_html(resumen, 0, 0)
         assert "—" in html
 
@@ -86,12 +90,14 @@ class TestQueryDetalleRowsColumns:
         finally:
             conn.close()
         al_dia_trato_total = sum(
-            float(r["total_pagar"] or 0)
+            float(r["total_trabajado"] or 0)
             for r in resumen
             if r["tipo_pago"] in ("trato", "Al dia", "Al día")
         )
         trato_row = next(r for r in rows if r["tipo_pago"] == "trato")
-        expected = round(float(trato_row["costo_total"]) / al_dia_trato_total * 100, 2)
+        expected = round(
+            float(trato_row["total_trabajado"]) / al_dia_trato_total * 100, 2
+        )
         assert abs(float(trato_row["pct_pago"]) - expected) < 0.01
 
 

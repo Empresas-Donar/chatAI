@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import controllers.purchase_orders_controller as poc
+import tarjas_empresa as te
 
 # Real reported case (issue #88): as of writing, tarjas_reporte has
 #   tipo_pago='Al dia' -> 50 rows / $4,780,200
@@ -68,28 +69,33 @@ def conn():
     c.close()
 
 
-def _full_sum_total_labor(conn, contratista, empresa, fecha_inicio, fecha_termino):
-    """The ground truth: SUM(total_labor) across ALL tipo_pago values, with no
-    filtering at all. Screen and PDF totals must both equal this."""
+def _full_sum_costo_empresa(conn, contratista, empresa, fecha_inicio, fecha_termino):
+    """Ground truth: Costo Empresa from every Aprobado row, all tipo_pago.
+
+    Screen and PDF must both equal this — including Bono (factor 1.0), which
+    the pre-#88 exact-match on 'Al dia' used to drop.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT COALESCE(SUM(total_labor), 0)
-            FROM appsheet.tarjas_reporte
-            WHERE contratista = %s AND nombre_campo = %s
-              AND fecha BETWEEN %s AND %s
+            SELECT tipo_pago, COALESCE(SUM(total_trabajado), 0)
+            FROM appsheet.tarjas_pagos
+            WHERE estado = 'Aprobado'
+              AND contratista = %s AND nombre_campo = %s
+              AND fecha::date BETWEEN %s AND %s
+            GROUP BY tipo_pago, cuartel_cc, labor
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
-        return float(cur.fetchone()[0] or 0)
+        return sum(float(te.total_empresa(tipo, amt)) for tipo, amt in cur.fetchall())
 
 
 class TestScreenTotalMatchesFullSum:
     def test_88_screen_pdf_total_mismatch_regression(self, conn):
-        """The on-screen header total must equal the full, unfiltered
-        SUM(total_labor) — it must not silently drop rows whose tipo_pago is
+        """The on-screen header total must equal Costo Empresa across every
+        tipo_pago — it must not silently drop rows whose tipo_pago is
         neither 'trato' nor exactly 'Al dia' (e.g. 'Bono')."""
-        expected_full_total = _full_sum_total_labor(
+        expected_full_total = _full_sum_costo_empresa(
             conn, CONTRATISTA, EMPRESA, FECHA_INICIO, FECHA_TERMINO
         )
         assert expected_full_total > 0, "expected data for this known dataset"
@@ -124,33 +130,16 @@ class TestScreenTotalMatchesFullSum:
         )
         screen_total = screen["header"]["total"]
 
-        # purchase_order_print_pdf computes total_pagar from the same view
-        # using its own catch-all query; recompute it the same way here to
-        # assert equality without depending on parsing rendered PDF bytes.
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT tipo_pago, "CC", "Nombre Labor",
-                       SUM(jornadas) AS jornadas,
-                       NULL AS total_unitario,
-                       SUM(total_labor) AS total_labor
-                FROM appsheet.tarjas_reporte
-                WHERE contratista = %s AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                GROUP BY tipo_pago, "CC", "Nombre Labor"
-                """,
-                (CONTRATISTA, EMPRESA, FECHA_INICIO, FECHA_TERMINO),
+            pdf_rows = poc._purchase_order_lines(
+                cur, CONTRATISTA, EMPRESA, FECHA_INICIO, FECHA_TERMINO
             )
-            rows = cur.fetchall()
-        pdf_total_trato = sum(
-            float(r[5] or 0) for r in rows if r[0] == poc._PAYMENT_TYPE_TRATO
+        pdf_header = poc._purchase_order_header(
+            pdf_rows, FECHA_INICIO, FECHA_TERMINO
         )
-        pdf_total_al_dia = sum(
-            float(r[5] or 0) for r in rows if r[0] != poc._PAYMENT_TYPE_TRATO
-        )
-        pdf_total = pdf_total_trato + pdf_total_al_dia
-
-        assert screen_total == pytest.approx(pdf_total, abs=0.01)
+        assert screen_total == pytest.approx(pdf_header["total"], abs=0.01)
+        src = __import__("inspect").getsource(poc.purchase_order_print_pdf)
+        assert "_purchase_order_lines" in src
 
     def test_88_print_pdf_still_renders(self):
         """purchase_order_print_pdf (unchanged by this fix) must keep working."""
@@ -225,3 +214,42 @@ class TestCrossFarmIsolation:
             assert c == CONTRATISTA
         for c, _e in rows_b:
             assert c == other_contratista
+
+
+def test_purchase_order_js_computes_pct_from_total_labor():
+    from pathlib import Path
+
+    js = (
+        Path(__file__).parent.parent
+        / "frontend"
+        / "static"
+        / "purchase_orders.js"
+    ).read_text(encoding="utf-8")
+    render_src = js.split("function renderDocument")[1].split("function renderChart")[0]
+    assert "total_labor" in render_src
+    assert "grand > 0" in render_src
+    assert "row['% Tipo de pago']" not in render_src
+
+
+class TestPurchaseOrderPctDelTotal:
+    def test_pct_pago_is_share_of_grand_total(self, conn):
+        result = run(
+            poc.get_purchase_order(
+                contratista="MULTISERVICIOS BONHOMIA SPA",
+                empresa="ZUÑIGA",
+                fecha_inicio="2026-09-02",
+                fecha_termino="2026-09-08",
+            )
+        )
+        rows = result["rows"]
+        assert rows
+        grand = sum(float(r["total_labor"] or 0) for r in rows)
+        assert grand > 0
+        for r in rows:
+            expected = round(float(r["total_labor"] or 0) / grand * 100, 2)
+            assert abs(float(r["pct_pago"] or 0) - expected) < 0.02
+        assert abs(sum(float(r["pct_pago"] or 0) for r in rows) - 100.0) < 0.15
+        import inspect
+
+        src = inspect.getsource(poc._purchase_order_lines)
+        assert "PARTITION BY tipo_pago" not in src

@@ -112,13 +112,17 @@ function renderDocument(h, rows) {
 
   renderChart(h.pct_trato, h.pct_al_dia);
 
+  const grand = rows.reduce((s, r) => s + (Number(r.total_labor) || 0), 0);
   const tbody = document.getElementById('doc-tbody');
   tbody.innerHTML = '';
   for (const row of rows) {
     const tipo     = row.tipo_pago || '';
     const label    = PAYMENT_TYPE_LABELS[tipo] || tipo;
     const badgeCls = PAYMENT_TYPE_BADGE[tipo]  || 'badge-aldia';
-    const pctVal   = row['% Tipo de pago'];
+    const amount   = Number(row.total_labor) || 0;
+    const pctVal   = grand > 0
+      ? amount / grand * 100
+      : (row.pct_pago != null ? row.pct_pago : null);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -127,7 +131,7 @@ function renderDocument(h, rows) {
       <td>${esc(row['Nombre Labor'] ?? '')}</td>
       <td class="num">${row.jornadas ?? ''}</td>
       <td class="num">${fmtCLP.format(row.total_unitario ?? 0)}</td>
-      <td class="num">${fmtCLP.format(row.total_labor ?? 0)}</td>
+      <td class="num">${fmtCLP.format(amount)}</td>
       <td class="num">${fmtPct(pctVal)}</td>
     `;
     tbody.appendChild(tr);

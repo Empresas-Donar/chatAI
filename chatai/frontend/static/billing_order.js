@@ -125,7 +125,7 @@ async function generate() {
     }
 
     renderHeader(header, contratista, empresa, fecha_inicio, fecha_termino);
-    renderPivot(data.columns, data.rows);
+    renderPivot(data.columns, data.rows, header);
     document.getElementById('bo-document').style.display = 'block';
     document.getElementById('btn-pdf').disabled = false;
 
@@ -171,8 +171,9 @@ function renderHeader(header, contratista, empresa, fechaFrom, fechaTo) {
 }
 
 // ── Render pivot table ─────────────────────────────────────────────────
-function renderPivot(columns, rows) {
+function renderPivot(columns, rows, header) {
   if (!rows?.length) return;
+  const h = header || {};
 
   const workerCol = detectWorkerCol(columns);
 
@@ -278,10 +279,13 @@ function renderPivot(columns, rows) {
   html += `</tr>`;
 
   document.getElementById('bo-pivot-tbody').innerHTML = html;
-  document.getElementById('doc-subtotal').textContent = fmtCLP.format(grandTrabajado);
-  document.getElementById('doc-summary-comision').textContent = fmtCLP.format(grandComision);
-  document.getElementById('doc-summary-total').textContent = fmtCLP.format(grandTotal);
-  setPct('doc-summary-pct-comision', grandTrabajado ? (grandComision / grandTrabajado * 100) : null);
+  const subtotal = h.total_trabajado ?? grandTrabajado;
+  const adicional = h.total_contratista ?? grandComision;
+  const billed = h.total ?? grandTotal;
+  document.getElementById('doc-subtotal').textContent = fmtCLP.format(subtotal);
+  document.getElementById('doc-summary-comision').textContent = fmtCLP.format(adicional);
+  document.getElementById('doc-summary-total').textContent = fmtCLP.format(billed);
+  setPct('doc-summary-pct-comision', h.pct_comision ?? (subtotal ? (adicional / subtotal * 100) : null));
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

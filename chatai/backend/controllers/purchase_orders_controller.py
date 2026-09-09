@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
 from db import get_connection
+from tarjas_empresa import total_empresa
 
 logger = logging.getLogger("controllers.purchase_orders")
 
@@ -160,6 +161,82 @@ def _serialize(v):
     return v
 
 
+def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
+    """OC lines from Aprobado tarjas_pagos, billed as Costo Empresa.
+
+    Detalle, OC and facturación share tarjas_empresa.total_empresa.
+    AppSheet billable (trabajado + comisión) swapped those markups, so
+    the old visor total did not square with Detalle. Facturación screen
+    uses the same helper; the Odoo CSV export stays on billable amounts.
+    """
+    cur.execute(
+        """
+        SELECT
+            tipo_pago,
+            cuartel_cc AS "CC",
+            labor AS "Nombre Labor",
+            COUNT(*) AS jornadas,
+            COALESCE(SUM(total_trabajado), 0) AS total_trabajado
+        FROM appsheet.tarjas_pagos
+        WHERE estado = 'Aprobado'
+          AND contratista = %s
+          AND nombre_campo = %s
+          AND fecha::date BETWEEN %s AND %s
+        GROUP BY tipo_pago, cuartel_cc, labor
+        ORDER BY tipo_pago DESC, cuartel_cc, labor
+        """,
+        (contratista, empresa, fecha_inicio, fecha_termino),
+    )
+    columns = [d[0] for d in cur.description]
+    rows = [
+        {k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()
+    ]
+    for r in rows:
+        emp = float(total_empresa(r.get("tipo_pago"), r.get("total_trabajado")))
+        jornadas = float(r.get("jornadas") or 0)
+        r["contratista"] = contratista
+        r["nombre_campo"] = empresa
+        r["total_labor"] = emp
+        r["total_unitario"] = round(emp / jornadas, 2) if jornadas else None
+    grand = sum(float(r["total_labor"] or 0) for r in rows)
+    for r in rows:
+        amount = float(r["total_labor"] or 0)
+        r["pct_pago"] = round(amount / grand * 100, 2) if grand else 0.0
+    return rows
+
+
+def _purchase_order_header(rows, fecha_inicio, fecha_termino):
+    if not rows:
+        return None
+    total_trato = sum(
+        r["total_labor"] or 0
+        for r in rows
+        if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
+    )
+    # Catch-all (not an exact "== _PAYMENT_TYPE_AL_DIA" match): tipo_pago
+    # values other than "trato" (e.g. "Bono") still count toward the total,
+    # so screen and PDF cannot drop rows (issue #88).
+    total_al_dia = sum(
+        r["total_labor"] or 0
+        for r in rows
+        if r.get("tipo_pago") != _PAYMENT_TYPE_TRATO
+    )
+    total_pagar = total_trato + total_al_dia
+    pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
+    pct_al_dia = round(total_al_dia / total_pagar * 100, 1) if total_pagar else 0
+    return {
+        "contractor": rows[0]["contratista"],
+        "company": rows[0]["nombre_campo"],
+        "date_from": fecha_inicio,
+        "date_to": fecha_termino,
+        "total_trato": total_trato,
+        "total_al_dia": total_al_dia,
+        "total": total_pagar,
+        "pct_trato": pct_trato,
+        "pct_al_dia": pct_al_dia,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -219,8 +296,9 @@ async def get_purchase_order(
 ):
     """
     Return purchase order data for a contractor + company within a date range.
-    The view tarjas_reporte partitions by (contratista, nombre_campo, fecha),
-    so we aggregate totals here across the full range.
+
+    Amounts are Costo Empresa (total_trabajado × platform factor), the same
+    as Detalle operacional — not AppSheet pagar_efectivo on tarjas_reporte.
     """
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
@@ -234,70 +312,19 @@ async def get_purchase_order(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    contratista,
-                    nombre_campo,
-                    tipo_pago,
-                    "CC",
-                    "Nombre Labor",
-                    SUM(jornadas)                                              AS jornadas,
-                    CASE WHEN SUM(jornadas) > 0
-                         THEN ROUND(SUM(total_labor)::numeric / SUM(jornadas), 2)
-                         ELSE NULL END                                         AS total_unitario,
-                    SUM(total_labor)                                           AS total_labor,
-                    ROUND(
-                        SUM(total_labor)::numeric
-                        / NULLIF(SUM(SUM(total_labor)) OVER (PARTITION BY tipo_pago), 0) * 100,
-                        2
-                    )                                                          AS pct_pago
-                FROM appsheet.tarjas_reporte
-                WHERE contratista  = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                GROUP BY contratista, nombre_campo, tipo_pago, "CC", "Nombre Labor"
-                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
+            data = _purchase_order_lines(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
             )
-            rows = cur.fetchall()
-            columns = [d[0] for d in cur.description]
     finally:
         conn.close()
 
-    if not rows:
+    if not data:
         return {"rows": [], "header": None}
 
-    data = [{k: _serialize(v) for k, v in zip(columns, r)} for r in rows]
-
-    total_trato = sum(
-        r["total_labor"] or 0 for r in data if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
-    )
-    # Catch-all (not an exact "== _PAYMENT_TYPE_AL_DIA" match): tipo_pago values
-    # other than "trato" and "Al dia" (e.g. "Bono") must still count toward the
-    # total, exactly like purchase_order_print_pdf and billing_order_pdf already
-    # do — otherwise the on-screen total silently drops rows that the PDF
-    # includes, producing a mismatch between screen and PDF (issue #88).
-    total_al_dia = sum(
-        r["total_labor"] or 0 for r in data if r.get("tipo_pago") != _PAYMENT_TYPE_TRATO
-    )
-    total_pagar = total_trato + total_al_dia
-    pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
-    pct_al_dia = round(total_al_dia / total_pagar * 100, 1) if total_pagar else 0
-
-    header = {
-        "contractor": data[0]["contratista"],
-        "company": data[0]["nombre_campo"],
-        "date_from": fecha_inicio,
-        "date_to": fecha_termino,
-        "total_trato": total_trato,
-        "total_al_dia": total_al_dia,
-        "total": total_pagar,
-        "pct_trato": pct_trato,
-        "pct_al_dia": pct_al_dia,
+    return {
+        "header": _purchase_order_header(data, fecha_inicio, fecha_termino),
+        "rows": data,
     }
-    return {"header": header, "rows": data}
 
 
 @router.get("/api/purchase-orders/odoo-export")
@@ -1120,26 +1147,29 @@ def _fmt_date_short(iso: str) -> str:
         return iso
 
 
+def _billing_costo_parts(tipo_pago, total_trabajado):
+    """Costo Empresa, trabajadores, adicional — same factors as Detalle/OC."""
+    trab = float(total_trabajado or 0)
+    emp = float(total_empresa(tipo_pago, trab))
+    return emp, trab, emp - trab
+
+
 def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino):
     """Header totals + worker×date pivot from one snapshot of tarjas_pagos.
 
-    Same scope as tarjas_reporte (estado='Aprobado') but uses _BILLABLE_SQL
-    so a stored total_pagar of 0 does not hide approved work (issue #156).
-    Screen (`billing_order_data`) and PDF (`billing_order_pdf`) share this
-    so the two surfaces cannot diverge.
+    Same scope as Detalle (estado='Aprobado'). Billable amount is Costo
+    Empresa (total_trabajado × platform factor), not AppSheet
+    trabajado+comisión — those markups were swapped vs Detalle/OC.
 
     Pivot columns stay positional: (trabajador, fecha, total_pagar, …)
-    so existing tests that read r[2] as the billable amount keep working.
-    total_trabajado / total_contratista are appended for the worker vs
-    commission split on the Orden de Facturación.
+    so existing tests that read r[2] as the billed amount keep working.
+    total_trabajado / total_contratista are the worker pay and adicional.
     """
     with conn.cursor() as cur:
         cur.execute(
-            f"""
+            """
             SELECT tipo_pago,
-                   SUM({_BILLABLE_SQL}) AS total_labor,
-                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado,
-                   SUM(COALESCE(total_contratista, 0)) AS total_contratista
+                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
               AND nombre_campo = %s
@@ -1149,26 +1179,29 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
-        tipo_rows = cur.fetchall()
+        tipo_rows = [
+            (tipo,) + _billing_costo_parts(tipo, trab)
+            for tipo, trab in cur.fetchall()
+        ]
 
         cur.execute(
-            f"""
-            SELECT trabajador, fecha::date::text AS fecha,
-                   SUM({_BILLABLE_SQL}) AS total,
-                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado,
-                   SUM(COALESCE(total_contratista, 0)) AS total_contratista,
-                   STRING_AGG(DISTINCT tipo_pago, ',') AS tipos
+            """
+            SELECT trabajador, fecha::date::text AS fecha, tipo_pago,
+                   SUM(COALESCE(total_trabajado, 0)) AS total_trabajado
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
               AND nombre_campo = %s
               AND estado       = 'Aprobado'
               AND fecha::date BETWEEN %s AND %s
-            GROUP BY trabajador, fecha::date
-            ORDER BY trabajador, fecha::date
+            GROUP BY trabajador, fecha::date, tipo_pago
+            ORDER BY trabajador, fecha::date, tipo_pago
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
-        pivot_rows = cur.fetchall()
+        pivot_rows = []
+        for trabajador, fecha, tipo, trab in cur.fetchall():
+            emp, trab_f, com = _billing_costo_parts(tipo, trab)
+            pivot_rows.append((trabajador, fecha, emp, trab_f, com, tipo))
     return tipo_rows, pivot_rows
 
 
@@ -1363,9 +1396,7 @@ async def billing_order_pdf(
         }
         for d in dates
     }
-    grand_total = sum(c["total"] for c in col_totals.values())
     grand_trabajado = sum(c["trabajado"] for c in col_totals.values())
-    grand_comision = sum(c["comision"] for c in col_totals.values())
 
     # ── HTML ──
     d1 = _fmt_date_display(fecha_inicio)
@@ -1496,12 +1527,12 @@ async def billing_order_pdf(
     </td>
     <td class="tot-cell">
       <div class="tot-label">Adicional</div>
-      <div class="tot-value">{_fmt_clp(grand_comision)}</div>
+      <div class="tot-value">{_fmt_clp(total_contratista)}</div>
       <div class="tot-pct">{_fmt_pct(pct_comision)}</div>
     </td>
     <td class="tot-cell tot-cell-hl">
       <div class="tot-label">Total</div>
-      <div class="tot-value">{_fmt_clp(grand_total)}</div>
+      <div class="tot-value">{_fmt_clp(total_pagar)}</div>
     </td>
   </tr>
 </table>
@@ -1547,24 +1578,9 @@ async def purchase_order_print_pdf(
 
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT tipo_pago, "CC", "Nombre Labor",
-                       SUM(jornadas)                                              AS jornadas,
-                       CASE WHEN SUM(jornadas) > 0
-                            THEN ROUND(SUM(total_labor)::numeric / SUM(jornadas), 2)
-                            ELSE NULL END                                         AS total_unitario,
-                       SUM(total_labor)                                           AS total_labor
-                FROM appsheet.tarjas_reporte
-                WHERE contratista  = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                GROUP BY tipo_pago, "CC", "Nombre Labor"
-                ORDER BY tipo_pago DESC, "CC", "Nombre Labor"
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
+            rows = _purchase_order_lines(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
             )
-            rows = cur.fetchall()
     finally:
         conn.close()
 
@@ -1573,9 +1589,10 @@ async def purchase_order_print_pdf(
             status_code=404, detail="Sin datos para los filtros indicados"
         )
 
-    total_trato = sum(float(r[5] or 0) for r in rows if r[0] == _PAYMENT_TYPE_TRATO)
-    total_al_dia = sum(float(r[5] or 0) for r in rows if r[0] != _PAYMENT_TYPE_TRATO)
-    total_pagar = total_trato + total_al_dia
+    header = _purchase_order_header(rows, fecha_inicio, fecha_termino)
+    total_trato = header["total_trato"]
+    total_al_dia = header["total_al_dia"]
+    total_pagar = header["total"]
 
     d1 = _fmt_date_display(fecha_inicio)
     d2 = _fmt_date_display(fecha_termino)
@@ -1583,18 +1600,20 @@ async def purchase_order_print_pdf(
     semana = f"Semana desde {d1} al {d2}"
 
     rows_html = ""
-    for i, (tipo, cc, labor, jornadas, unitario, total) in enumerate(rows):
+    for i, r in enumerate(rows):
+        tipo = r.get("tipo_pago")
         is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
         tipo_label = "Trato" if is_trato else "Al día"
         tipo_cls = "badge-trato" if is_trato else "badge-aldia"
         even_cls = "even" if i % 2 == 0 else ""
+        jornadas = r.get("jornadas")
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
-          <td>{cc or ""}</td>
-          <td>{labor or ""}</td>
+          <td>{r.get("CC") or ""}</td>
+          <td>{r.get("Nombre Labor") or ""}</td>
           <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
-          <td class="num">{_fmt_clp(unitario)}</td>
-          <td class="num">{_fmt_clp(total)}</td>
+          <td class="num">{_fmt_clp(r.get("total_unitario"))}</td>
+          <td class="num">{_fmt_clp(r.get("total_labor"))}</td>
         </tr>"""
 
     logo = _logo_b64()

@@ -5,6 +5,68 @@ const fmtCLP = new Intl.NumberFormat('es-CL', {
 });
 const fmtNum = new Intl.NumberFormat('es-CL');
 const fmtPct = v => v != null ? Number(v).toFixed(2) + ' %' : '—';
+const fmtResumenPct = v => v != null ? Number(v).toFixed(1) + ' %' : '—';
+// Must match chatai/backend/tarjas_empresa.py — screen derives money from
+// total_trabajado even if the API still returns total_pagar zeros.
+const FACTOR_EMPRESA_AL_DIA = 1.45;
+const FACTOR_EMPRESA_TRATO = 1.5;
+const FACTOR_EMPRESA_DEFAULT = 1;
+
+function tipoKey(tipo) {
+  return String(tipo || '').trim().toLowerCase();
+}
+function isTrato(tipo) { return tipoKey(tipo) === 'trato'; }
+function isAlDia(tipo) {
+  const k = tipoKey(tipo);
+  return k === 'al dia' || k === 'al día';
+}
+function factorEmpresa(tipo) {
+  if (isTrato(tipo)) return FACTOR_EMPRESA_TRATO;
+  if (isAlDia(tipo)) return FACTOR_EMPRESA_AL_DIA;
+  return FACTOR_EMPRESA_DEFAULT;
+}
+
+function recargoLabel(r) {
+  const factor = factorEmpresa(r.tipo_pago);
+  const recargoPct = Math.round((factor - 1) * 100);
+  if (recargoPct === 0) return '—';
+  return '+' + recargoPct + ' %';
+}
+
+function enrichResumen(resumen) {
+  const grand = resumen.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0);
+  return resumen.map(r => {
+    const trab = Number(r.total_trabajado) || 0;
+    const factor = factorEmpresa(r.tipo_pago);
+    const recargoPct = Math.round((factor - 1) * 100);
+    return Object.assign({}, r, {
+      total_trabajado: trab,
+      total_empresa: Math.round(trab * factor),
+      recargo_pct: recargoPct,
+      recargo: recargoLabel(r),
+      pct: grand > 0 ? trab / grand * 100 : null,
+    });
+  });
+}
+
+function enrichDetalle(rows) {
+  const grand = rows
+    .filter(r => isTrato(r.tipo_pago) || isAlDia(r.tipo_pago))
+    .reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0);
+  return rows.map(r => {
+    const trab = Number(r.total_trabajado) || 0;
+    const jornadas = Number(r.jornadas) || 0;
+    const hours = Number(r.horas_trabajadas) || 0;
+    const factor = factorEmpresa(r.tipo_pago);
+    return Object.assign({}, r, {
+      total_trabajado: trab,
+      total_empresa: Math.round(trab * factor),
+      total_unitario: jornadas > 0 ? trab / jornadas : null,
+      costo_hora: hours > 0 ? Math.round(trab / hours) : null,
+      pct_pago: grand > 0 ? trab / grand * 100 : null,
+    });
+  });
+}
 
 function esc(str) {
   return String(str ?? '')
@@ -124,9 +186,16 @@ async function queryData() {
     }
 
     document.getElementById('empty-state').style.display = 'none';
-    renderSummary(data.resumen, data.total, data.total_trabajado, data.jornadas);
-    renderChart(data.resumen, data.total);
-    renderDetail(data.rows, data.count);
+    const resumen = enrichResumen(data.resumen || []);
+    const rows = enrichDetalle(data.rows || []);
+    const totalTrab = resumen.reduce((s, r) => s + r.total_trabajado, 0);
+    const totalEmp = resumen.reduce((s, r) => s + r.total_empresa, 0);
+    const jornadas = data.jornadas != null
+      ? data.jornadas
+      : resumen.reduce((s, r) => s + (Number(r.jornadas) || 0), 0);
+    renderSummary(resumen, totalEmp, totalTrab, jornadas);
+    renderChart(resumen, totalTrab);
+    renderDetail(rows, rows.length);
     document.getElementById('summary-section').style.display = '';
     document.getElementById('detail-section').style.display = '';
     _hasData = true;
@@ -140,7 +209,7 @@ async function queryData() {
 }
 
 // ── Render summary table ─────────────────────────────────────────────
-function renderSummary(resumen, total, totalTrabajado, jornadas) {
+function renderSummary(resumen, totalEmpresa, totalTrabajado, jornadas) {
   const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono' };
   const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono' };
 
@@ -150,15 +219,19 @@ function renderSummary(resumen, total, totalTrabajado, jornadas) {
     const cls = TIPO_CLASS[r.tipo_pago] || '';
     return `<tr>
       <td><span class="${cls}">${esc(label)}</span></td>
-      <td class="num">${fmtCLP.format(r.total_pagar)}</td>
       <td class="num">${fmtCLP.format(r.total_trabajado)}</td>
+      <td class="num">${esc(recargoLabel(r))}</td>
+      <td class="num">${fmtCLP.format(r.total_empresa)}</td>
       <td class="num">${fmtNum.format(r.jornadas)}</td>
+      <td class="num">${fmtResumenPct(r.pct)}</td>
     </tr>`;
   }).join('');
 
-  document.getElementById('summary-total').textContent = fmtCLP.format(total);
   document.getElementById('summary-trabajado').textContent = fmtCLP.format(totalTrabajado || 0);
+  document.getElementById('summary-empresa').textContent = fmtCLP.format(totalEmpresa || 0);
   document.getElementById('summary-jornadas').textContent = fmtNum.format(jornadas);
+  document.getElementById('summary-pct').textContent =
+    (Number(totalTrabajado) || 0) > 0 ? '100.0 %' : '—';
 }
 
 // ── Render pie chart ─────────────────────────────────────────────────
@@ -171,7 +244,7 @@ function renderChart(resumen, total) {
     if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return 'Bono';
     return r.tipo_pago;
   });
-  const values = resumen.map(r => r.total_pagar);
+  const values = resumen.map(r => r.total_trabajado);
   const colors = resumen.map(r => {
     if (r.tipo_pago === 'trato') return '#3b82f6';
     if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return '#10b981';
@@ -223,25 +296,25 @@ function renderDetail(rows, count) {
       <td>${esc(String(r.centro_costo ?? ''))}</td>
       <td>${esc(r.centro_costo_nombre || '—')}</td>
       <td class="num">${r.costo_hora != null ? fmtCLP.format(r.costo_hora) : '—'}</td>
-      <td class="num">${r.jornadas ?? '—'}</td>
+      <td class="num">${fmtNum.format(r.jornadas ?? 0)}</td>
       <td class="num">${r.total_unitario != null ? fmtCLP.format(r.total_unitario) : '—'}</td>
-      <td class="num">${r.costo_total != null ? fmtCLP.format(r.costo_total) : '—'}</td>
       <td class="num">${r.total_trabajado != null ? fmtCLP.format(r.total_trabajado) : '—'}</td>
+      <td class="num">${fmtCLP.format(r.total_empresa || 0)}</td>
       <td class="num">${fmtPct(r.pct_pago)}</td>
     </tr>`;
   }).join('');
 
   const sumJornadas = rows.reduce((s, r) => s + Number(r.jornadas || 0), 0);
-  const sumCosto = rows.reduce((s, r) => s + Number(r.costo_total || 0), 0);
+  const sumEmpresa = rows.reduce((s, r) => s + Number(r.total_empresa || 0), 0);
   const sumTrab = rows.reduce((s, r) => s + Number(r.total_trabajado || 0), 0);
   document.getElementById('detail-tfoot').innerHTML = `<tr>
     <td colspan="4"><strong>Total</strong></td>
     <td></td>
     <td class="num"><strong>${fmtNum.format(sumJornadas)}</strong></td>
     <td></td>
-    <td class="num"><strong>${fmtCLP.format(sumCosto)}</strong></td>
     <td class="num"><strong>${fmtCLP.format(sumTrab)}</strong></td>
-    <td class="num"><strong>${sumCosto > 0 ? '100.00 %' : '—'}</strong></td>
+    <td class="num"><strong>${fmtCLP.format(sumEmpresa)}</strong></td>
+    <td class="num"><strong>${sumTrab > 0 ? '100.00 %' : '—'}</strong></td>
   </tr>`;
 }
 

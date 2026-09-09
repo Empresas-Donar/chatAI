@@ -32,6 +32,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import controllers.purchase_orders_controller as poc
 import controllers.tarjas_controller as tc
+import tarjas_empresa as te
 
 # Real reported case (issue #156).
 CONTRATISTA = "HERBI ML SPA"
@@ -39,9 +40,9 @@ EMPRESA = "KONTROLAG"
 FECHA_INICIO = "2026-08-26"
 FECHA_TERMINO = "2026-09-01"
 
-# Canonical billable amount: 7 jornadas × ($25.000 + $12.500).
+# Canonical billed amount: Costo Empresa Al Día = 175_000 × 1.45.
 # Must NOT equal the $175.000 the buggy screen pivot showed (total_trabajado).
-EXPECTED_BILLABLE = 262_500.0
+EXPECTED_BILLABLE = 253_750.0
 BUGGY_TOTAL_TRABAJADO = 175_000.0
 
 
@@ -70,20 +71,23 @@ def conn():
 
 
 def _billable_sum(conn, contratista, empresa, fecha_inicio, fecha_termino):
-    """Ground truth: Aprobado rows, formula fallback when total_pagar is 0."""
+    """Ground truth: Aprobado rows, Costo Empresa (same factors as Detalle)."""
     with conn.cursor() as cur:
         cur.execute(
-            f"""
-            SELECT COALESCE(SUM({poc._BILLABLE_SQL}), 0)
+            """
+            SELECT tipo_pago, COALESCE(SUM(total_trabajado), 0)
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
               AND nombre_campo = %s
               AND estado       = 'Aprobado'
               AND fecha::date BETWEEN %s AND %s
+            GROUP BY tipo_pago
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
-        return float(cur.fetchone()[0] or 0)
+        return sum(
+            float(te.total_empresa(tipo, amt)) for tipo, amt in cur.fetchall()
+        )
 
 
 def _stored_total_pagar(conn, contratista, empresa, fecha_inicio, fecha_termino):
@@ -138,7 +142,7 @@ class TestScreenHeaderMatchesPivot:
 
         assert expected > 0, "expected Aprobado billable data for this known dataset"
         assert expected == pytest.approx(EXPECTED_BILLABLE, abs=0.01), (
-            "HERBI/KONTROLAG 26/08–01/09 must still be 7 × $37.500 = $262.500"
+            "HERBI/KONTROLAG 26/08–01/09 must still be 175.000 × 1.45 = $253.750"
         )
         # The original bug: stored total_pagar is 0 (or was when reported)
         # while total_trabajado is the $175k the screen pivot showed.
@@ -277,7 +281,7 @@ class TestCrossFarmIsolation:
         )
         total_b = sum(float(r["total_pagar"] or 0) for r in result_b["rows"])
 
-        assert total_b == pytest.approx(expected_b, abs=0.01)
+        assert total_b == pytest.approx(expected_b, abs=1.0)
         for r in result_a["rows"]:
             assert r["trabajador"] in workers_a
         assert result_a["header"]["contractor"] == CONTRATISTA

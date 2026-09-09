@@ -5,10 +5,10 @@ The pivot and Total a Pagar already include contractor commission
 (total_pagar = total_trabajado + total_contratista). The contractor needs
 to see both: what goes to the worker and the billed total with commission.
 
-Known dataset (HERBI ML SPA / KONTROLAG / 2026-08-26..2026-09-01):
-  total_trabajado   = 175_000
-  total_contratista =  87_500
-  total_pagar       = 262_500
+KNOWN dataset (HERBI ML SPA / KONTROLAG / 2026-08-26..2026-09-01):
+  total_trabajado   = 175_000  (Al Día)
+  Costo Empresa     = 253_750  (×1.45)
+  adicional         =  78_750
 """
 
 import asyncio
@@ -31,8 +31,8 @@ FECHA_INICIO = "2026-08-26"
 FECHA_TERMINO = "2026-09-01"
 
 EXPECTED_TRABAJADO = 175_000.0
-EXPECTED_COMISION = 87_500.0
-EXPECTED_BILLABLE = 262_500.0
+EXPECTED_COMISION = 78_750.0
+EXPECTED_BILLABLE = 253_750.0
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -79,8 +79,8 @@ class TestWorkerCommissionSplit:
         assert header["total"] == pytest.approx(
             header["total_trabajado"] + header["total_contratista"], abs=0.01
         )
-        assert header["pct_comision"] == pytest.approx(50.0, abs=0.01)
-        assert header["pct_comision_al_dia"] == pytest.approx(50.0, abs=0.01)
+        assert header["pct_comision"] == pytest.approx(45.0, abs=0.01)
+        assert header["pct_comision_al_dia"] == pytest.approx(45.0, abs=0.01)
         assert header["pct_comision_trato"] is None
 
         assert "total_trabajado" in result["columns"]
@@ -136,6 +136,7 @@ class TestWorkerCommissionSplit:
         assert poc._fmt_pct(33.3) == "33,3%"
         assert poc._fmt_pct(None) == "—"
         assert poc._pct(87_500, 175_000) == 50.0
+        assert poc._pct(78_750, 175_000) == 45.0
         assert poc._pct(0, 0) is None
         html = poc._tipo_badges_html(["trato"])
         assert "Trato" in html
@@ -160,6 +161,8 @@ class TestWorkerCommissionSplit:
         assert "function toISO" in js
         assert "badge-trato" in js
         assert "badge-aldia" in js
+        assert "renderPivot(data.columns, data.rows, header)" in js
+        assert "h.total_contratista" in js
 
 
 class TestCrossFarmIsolation:

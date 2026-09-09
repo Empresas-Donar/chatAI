@@ -76,16 +76,20 @@ def test_detalle_queries_both_amounts_from_pagos():
         assert "total_labor" not in src
     assert "total_pagar" in rows_src
     assert "costo_total" in rows_src
+    assert "SUM(p.total_trabajado) / COUNT(*)" in rows_src
+    assert "SUM(p.total_trabajado) / SUM(p.horas_trabajadas)" in rows_src
 
 
 def test_detalle_ui_has_total_trabajado_column():
     html = DETAIL_HTML.read_text(encoding="utf-8")
-    assert html.count("Total trabajado") >= 2  # resumen + detalle headers
+    assert html.count("Total trabajadores") >= 2  # resumen + detalle headers
+    assert html.count("Costo Empresa") >= 2  # resumen + detalle headers
     assert 'id="detail-tfoot"' in html
     js = DETAIL_JS.read_text(encoding="utf-8")
     assert "total_trabajado" in js
     assert "summary-trabajado" in js
     assert "detail-tfoot" in js
+    assert "r.total_empresa" in js
     assert "fmtCLP.format(sumTrab)" in js
 
 
@@ -104,22 +108,23 @@ def test_detalle_pdf_html_has_detail_tfoot():
     src = _fn_source("_build_detalle_html")
     assert "foot_html" in src
     assert "<tfoot>" in src
-    assert "Total trabajado" in src
+    assert "Total trabajadores" in src
 
 
 def test_detalle_pdf_summary_has_trabajado_column():
     html = tc._summary_table_html(
         [
-            {"tipo_pago": "trato", "total_pagar": 1000000, "total_trabajado": 800000, "jornadas": 10},
-            {"tipo_pago": "Al dia", "total_pagar": 500000, "total_trabajado": 400000, "jornadas": 5},
+            {"tipo_pago": "trato", "total_trabajado": 800000, "jornadas": 10},
+            {"tipo_pago": "Al dia", "total_trabajado": 400000, "jornadas": 5},
         ],
-        1500000,
+        0,
         15,
     )
-    assert "Total trabajado" in html
+    assert "Total trabajadores" in html
     assert "$800.000" in html
-    assert "$1.200.000" in html  # footer trabajado
-    assert "Total a pagar" in html
+    assert "$1.200.000" in html  # footer trabajadores
+    assert "Costo Empresa" in html
+    assert "Total a pagar" not in html
 
 
 def test_detalle_herbi_talagante_week_both_totals(conn):
