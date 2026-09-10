@@ -26,6 +26,9 @@ const CHART_COLORS = [
 ];
 
 function initDates() {
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
   const now = new Date();
   const day = now.getDay();
   const monday = new Date(now);
@@ -42,8 +45,6 @@ async function loadFilters() {
     const data = await res.json();
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
-    fillSelect('fil-contratista', data.contratistas, 'Todos');
-    fillSelect('fil-empresa', data.empresas, 'Todas');
     if (data.maquinas && data.maquinas.length) {
       fillSelect('fil-maquina', data.maquinas, 'Todas');
       document.getElementById('maquina-filter-wrap').style.display = '';
@@ -225,6 +226,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-cc', 'fil-labor', 'fil-maquina', 'fil-contratista', 'fil-empresa'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);

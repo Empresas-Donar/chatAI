@@ -296,8 +296,14 @@ class TestSharedBuilderAndFormats:
             / "templates"
             / "tarjas_detalle_tractorista.html"
         ).read_text(encoding="utf-8")
-        assert 'id="fil-empresa"' in html
-        assert "Empresa / Campo" in html
+        base = (
+            Path(__file__).parent.parent
+            / "frontend"
+            / "templates"
+            / "base.html"
+        ).read_text(encoding="utf-8")
+        assert 'id="fil-empresa"' in base
+        assert 'id="fil-empresa"' not in html
         assert 'id="fil-campo"' not in html
         src = DETALLE_JS.read_text(encoding="utf-8")
         assert "fil-campo" in src

@@ -2,6 +2,17 @@
 
 {% block title %}Orden de Compra Tractorista — Empresas Donar{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-sep"></div>
+<div class="global-filter-field">
+  <label>Campo</label>
+  <select id="sel-campo"><option value="">Seleccione campo…</option></select>
+</div>
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-generate">Generar orden</button>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
 {% endblock %}
@@ -20,28 +31,6 @@
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="filter-card">
-    <div class="filter-group">
-      <label>Contratista</label>
-      <select id="sel-contractor"><option value="">Seleccione contratista…</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Campo</label>
-      <select id="sel-campo"><option value="">Seleccione campo…</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Fecha Inicio</label>
-      <input lang="es-CL" type="date" id="inp-date-from" />
-    </div>
-    <div class="filter-group">
-      <label>Fecha Término</label>
-      <input lang="es-CL" type="date" id="inp-date-to" />
-    </div>
-    <div>
-      <button class="btn btn-primary" id="btn-generate">Generar orden</button>
-    </div>
-  </div>
 
   <div id="error-box" class="error-box hidden"></div>
 

@@ -14,37 +14,21 @@
   const repCount    = document.getElementById('rep-count');
   const loadingEl   = document.getElementById('rep-loading');
 
-  // ── Default dates: current week Mon–Sun ───────────────────────────────────
+  // ── Default dates: owned by global bar (week Mon–Sun fallback) ─────────────
   function setDefaultDates() {
-    const today = new Date();
-    const day = today.getDay();
-    const diffMon = (day === 0 ? -6 : 1 - day);
-    const mon = new Date(today);
-    mon.setDate(today.getDate() + diffMon);
-    const sun = new Date(mon);
-    sun.setDate(mon.getDate() + 6);
-
-    filFrom.value = mon.toISOString().slice(0, 10);
-    filTo.value   = sun.toISOString().slice(0, 10);
+    const fromEl = document.getElementById('fil-from');
+    const toEl = document.getElementById('fil-to');
+    if (fromEl && fromEl.value && toEl && toEl.value) return;
+    if (typeof currentWeekRange === 'function') {
+      const w = currentWeekRange();
+      fromEl.value = w.from;
+      toEl.value = w.to;
+    }
   }
 
-  // ── Load empresas ─────────────────────────────────────────────────────────
   async function loadFilters() {
-    try {
-      const res = await fetch('/api/tarjas/general/filters');
-      if (!res.ok) return;
-      const data = await res.json();
-      (data.empresas || []).forEach(e => {
-        const opt = document.createElement('option');
-        opt.value = e; opt.textContent = e;
-        filEmpresa.appendChild(opt);
-      });
-      (data.contratistas || []).forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c; opt.textContent = c;
-        filContratista.appendChild(opt);
-      });
-    } catch (_) { /* non-fatal */ }
+    if (window.globalFiltersReady) await window.globalFiltersReady;
+    setDefaultDates();
   }
 
   // ── Checkbox / card selection ─────────────────────────────────────────────
@@ -146,7 +130,6 @@
   });
 
   // ── Init ──────────────────────────────────────────────────────────────────
-  setDefaultDates();
   loadFilters().then(() => {
     // Restore URL params after selects are populated; no auto-trigger (download is manual)
     loadFiltersFromURL(FILTER_IDS);

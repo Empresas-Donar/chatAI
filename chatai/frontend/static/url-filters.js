@@ -7,8 +7,39 @@
 //
 // id array entries: strings matching element IDs on the page.
 // Empty values are omitted from the URL.
+// Global IDs (fil-from, fil-to, fil-empresa, fil-contratista) are always merged in.
+// Legacy aliases (inp-date-*, sel-contractor, sel-company, fil-date-*) map onto canonical IDs.
 
 'use strict';
+
+const _GLOBAL_FILTER_IDS = ['fil-from', 'fil-to', 'fil-empresa', 'fil-contratista'];
+
+const FILTER_ALIASES = {
+  'inp-date-from': 'fil-from',
+  'inp-date-to': 'fil-to',
+  'sel-contractor': 'fil-contratista',
+  'sel-company': 'fil-empresa',
+  'fil-date-from': 'fil-from',
+  'fil-date-to': 'fil-to',
+  'inp-contratista': 'fil-contratista',
+  'inp-empresa': 'fil-empresa',
+};
+
+function _mergeFilterIds(ids) {
+  const extra = Array.isArray(ids) ? ids : [];
+  return [...new Set([..._GLOBAL_FILTER_IDS, ...extra])];
+}
+
+function _paramsWithAliases() {
+  const params = new URLSearchParams(location.search);
+  Object.keys(FILTER_ALIASES).forEach(alias => {
+    const canonical = FILTER_ALIASES[alias];
+    if (!params.has(canonical) && params.has(alias)) {
+      params.set(canonical, params.get(alias));
+    }
+  });
+  return params;
+}
 
 const _BANNER_ID = 'url-load-banner';
 
@@ -51,6 +82,7 @@ function _hideLoadingBanner() {
  * @param {string[]} ids - Element IDs to serialize
  */
 function syncFiltersToURL(ids) {
+  ids = _mergeFilterIds(ids);
   const params = new URLSearchParams();
   ids.forEach(id => {
     const el = document.getElementById(id);
@@ -61,6 +93,7 @@ function syncFiltersToURL(ids) {
   const qs = params.toString();
   const newUrl = qs ? `${location.pathname}?${qs}` : location.pathname;
   history.pushState(null, '', newUrl);
+  if (typeof saveGlobalFilters === 'function') saveGlobalFilters();
 }
 
 /**
@@ -72,7 +105,8 @@ function syncFiltersToURL(ids) {
  * @returns {boolean} true if at least one param was found and applied
  */
 function loadFiltersFromURL(ids) {
-  const params = new URLSearchParams(location.search);
+  ids = _mergeFilterIds(ids);
+  const params = _paramsWithAliases();
   let found = false;
   ids.forEach(id => {
     const val = params.get(id);
@@ -84,6 +118,7 @@ function loadFiltersFromURL(ids) {
       }
     }
   });
+  if (found && typeof saveGlobalFilters === 'function') saveGlobalFilters();
   return found;
 }
 
@@ -95,6 +130,7 @@ function loadFiltersFromURL(ids) {
  * @param {Function} triggerFn - The query function to call (may return a Promise)
  */
 function autoTriggerFromURL(ids, triggerFn) {
+  ids = _mergeFilterIds(ids);
   if (!loadFiltersFromURL(ids)) return;
   _showLoadingBanner();
   const result = triggerFn();
@@ -111,6 +147,7 @@ function autoTriggerFromURL(ids, triggerFn) {
  * @param {Function} triggerFn - The query function to call after restoring
  */
 function bindPopstate(ids, triggerFn) {
+  ids = _mergeFilterIds(ids);
   window.addEventListener('popstate', () => {
     loadFiltersFromURL(ids);
     triggerFn();

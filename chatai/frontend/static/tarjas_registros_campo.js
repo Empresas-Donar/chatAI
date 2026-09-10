@@ -108,11 +108,22 @@ function apiDetail(data, status) {
 }
 
 function initDates() {
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange === 'function') {
+    const w = currentWeekRange();
+    fromEl.value = w.from;
+    toEl.value = w.to;
+    return;
+  }
   const to = new Date();
-  const from = new Date();
-  from.setDate(to.getDate() - 6);
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  from.setDate(from.getDate() - (from.getDay() === 0 ? 6 : from.getDay() - 1));
+  const sunday = new Date(from);
+  sunday.setDate(from.getDate() + 6);
   document.getElementById('fil-from').value = toISO(from);
-  document.getElementById('fil-to').value = toISO(to);
+  document.getElementById('fil-to').value = toISO(sunday);
 }
 
 function fillSelect(id, values, emptyLabel) {
@@ -127,10 +138,8 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/registros-campo/filters');
     const data = await res.json();
-    fillSelect('fil-empresa', data.empresas || [], 'Todas');
     fillSelect('fil-labor', data.labores || [], 'Todas');
     fillSelect('fil-estado', data.estados || [], 'Todos');
-    fillSelect('fil-contratista', data.contratistas || [], 'Todos');
     fillSelect('fil-supervisor', data.supervisores || [], 'Todos');
   } catch (e) {
     console.error('Error loading filters:', e);
@@ -428,6 +437,7 @@ async function saveTimelineRegistro(id, card) {
 }
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   if (location.search) {

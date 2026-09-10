@@ -32,7 +32,12 @@ function setPct(id, v) {
   if (el) el.textContent = fmtPct(v);
 }
 
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 // Worker column candidates (AppSheet names vary)
 const WORKER_CANDIDATES = [
@@ -46,44 +51,40 @@ function detectWorkerCol(cols) {
 
 // ── Init dates (current week Mon–Sun) ─────────────────────────────────
 function initDates() {
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange === 'function') {
+    const w = currentWeekRange();
+    fromEl.value = w.from;
+    toEl.value = w.to;
+    return;
+  }
   const now = new Date();
   const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
-  document.getElementById('inp-date-from').value = toISO(monday);
-  document.getElementById('inp-date-to').value   = toISO(sunday);
+  fromEl.value = toISO(monday);
+  toEl.value   = toISO(sunday);
 }
 
 // ── Load filter dropdowns ──────────────────────────────────────────────
 async function loadFilters() {
-  try {
-    const res  = await fetch('/api/purchase-orders/filters');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    fillSelect('sel-contractor', data.contratistas, '-- Seleccionar --');
-    fillSelect('sel-company',    data.empresas,      '-- Seleccionar --');
-  } catch (e) {
-    console.error('Error loading filters:', e);
-    fillSelect('sel-contractor', [], '-- Error al cargar --');
-    fillSelect('sel-company',    [], '-- Error al cargar --');
-  }
+  if (window.globalFiltersReady) await window.globalFiltersReady;
 }
 
-function fillSelect(id, items, defaultLabel) {
-  const sel = document.getElementById(id);
-  const list = Array.isArray(items) ? items : [];
-  sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    list.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+function globalVal(id) {
+  return document.getElementById(id)?.value || '';
 }
 
 // ── Generate ───────────────────────────────────────────────────────────
 async function generate() {
-  const contratista  = document.getElementById('sel-contractor').value;
-  const empresa      = document.getElementById('sel-company').value;
-  const fecha_inicio = document.getElementById('inp-date-from').value;
-  const fecha_termino= document.getElementById('inp-date-to').value;
+  const contratista  = globalVal('fil-contratista');
+  const empresa      = globalVal('fil-empresa');
+  const fecha_inicio = globalVal('fil-from');
+  const fecha_termino= globalVal('fil-to');
 
   if (!contratista || !empresa || !fecha_inicio || !fecha_termino) {
     showError('Seleccione contratista, empresa y rango de fechas.');
@@ -303,22 +304,22 @@ function showError(msg) {
 }
 
 // ── URL filter sync ───────────────────────────────────────────────────
-const FILTER_IDS = ['inp-date-from', 'inp-date-to', 'sel-contractor', 'sel-company'];
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa'];
 
 // ── Events ────────────────────────────────────────────────────────────
 document.getElementById('btn-generate').addEventListener('click', () => {
   generate().then(() => {
-    if (document.getElementById('sel-contractor').value && document.getElementById('sel-company').value) {
+    if (globalVal('fil-contratista') && globalVal('fil-empresa')) {
       syncFiltersToURL(FILTER_IDS);
     }
   });
 });
 
 document.getElementById('btn-pdf').addEventListener('click', () => {
-  const contratista  = document.getElementById('sel-contractor').value;
-  const empresa      = document.getElementById('sel-company').value;
-  const fecha_inicio = document.getElementById('inp-date-from').value;
-  const fecha_termino= document.getElementById('inp-date-to').value;
+  const contratista  = globalVal('fil-contratista');
+  const empresa      = globalVal('fil-empresa');
+  const fecha_inicio = globalVal('fil-from');
+  const fecha_termino= globalVal('fil-to');
   if (!contratista || !empresa || !fecha_inicio || !fecha_termino) return;
   const params = new URLSearchParams({ contratista, empresa, fecha_inicio, fecha_termino });
   window.open('/api/odoo/facturacion/pdf?' + params, '_blank');
@@ -326,5 +327,5 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 
 // ── Init ──────────────────────────────────────────────────────────────
 initDates();
-// Populate selects, then restore URL params; no auto-trigger (document requires deliberate action)
+// Restore URL params; no auto-trigger (document requires deliberate action)
 loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

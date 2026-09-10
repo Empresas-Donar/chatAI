@@ -186,10 +186,18 @@ function copyPanelToMain() {
     const b = document.getElementById(main);
     if (a && b) b.value = a.value;
   });
+  if (typeof saveGlobalFilters === 'function') saveGlobalFilters();
 }
 
 function initMonth() {
-  document.getElementById('fil-month').value = toMonthValue(new Date());
+  const el = document.getElementById('fil-month');
+  if (el.value) return;
+  const from = document.getElementById('fil-from')?.value;
+  if (from && from.length >= 7) {
+    el.value = from.slice(0, 7);
+    return;
+  }
+  el.value = toMonthValue(new Date());
 }
 
 function fillSelect(id, values, emptyLabel) {
@@ -204,10 +212,8 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/registros-campo/filters');
     const data = await res.json();
-    fillSelect('fil-empresa', data.empresas || [], 'Todas');
     fillSelect('fil-labor', data.labores || [], 'Todas');
     fillSelect('fil-estado', data.estados || [], 'Todos');
-    fillSelect('fil-contratista', data.contratistas || [], 'Todos');
     fillSelect('fil-supervisor', data.supervisores || [], 'Todos');
     fillSelect('pan-empresa', data.empresas || [], 'Todas');
     fillSelect('pan-labor', data.labores || [], 'Todas');
@@ -754,10 +760,13 @@ async function openDay(fecha, opts = {}) {
 }
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initMonth();
   await loadFilters();
+  copyMainToPanel();
   if (location.search && typeof loadFiltersFromURL === 'function') {
     loadFiltersFromURL(FILTER_IDS);
+    copyMainToPanel();
   }
   queryData();
 }

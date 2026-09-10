@@ -2,6 +2,19 @@
 
 {% block title %}Dashboard — Donar Integraciones{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-sep"></div>
+<div class="dash-filter-presets global-filter-actions" style="margin-left:0">
+  <button class="preset-btn" data-days="7">7 días</button>
+  <button class="preset-btn" data-days="14">14 días</button>
+  <button class="preset-btn" data-days="30">Este mes</button>
+  <button class="preset-btn" data-days="90">3 meses</button>
+</div>
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply-filter">Aplicar</button>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="/static/dashboard.css?v={{ static_v }}" />
@@ -15,24 +28,6 @@
     <p>Resumen operacional — Empresas Donar</p>
   </div>
 
-  <!-- ── Date filter ───────────────────────────────────────────────── -->
-  <div class="dash-filter-bar">
-    <div class="dash-filter-group">
-      <label>Desde</label>
-      <input lang="es-CL" type="date" id="fil-date-from" />
-    </div>
-    <div class="dash-filter-group">
-      <label>Hasta</label>
-      <input lang="es-CL" type="date" id="fil-date-to" />
-    </div>
-    <div class="dash-filter-presets">
-      <button class="preset-btn" data-days="7">7 días</button>
-      <button class="preset-btn" data-days="14">14 días</button>
-      <button class="preset-btn active" data-days="30">Este mes</button>
-      <button class="preset-btn" data-days="90">3 meses</button>
-    </div>
-    <button class="btn btn-primary btn-sm" id="btn-apply-filter">Aplicar</button>
-  </div>
 
   <!-- ── KPI Cards ─────────────────────────────────────────────────── -->
   <div class="kpi-grid" id="kpi-grid">

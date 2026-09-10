@@ -19,14 +19,16 @@ const CALIDAD_COLORS = {
 let chartTendencia = null;
 let chartCalidad   = null;
 
-// ── Default dates: last 90 days ───────────────────────────────────────────
+// ── Default dates: owned by global bar (week Mon–Sun fallback) ─────────────
 function setDefaultDates() {
-  const to   = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 90);
-  const fmt = d => d.toISOString().slice(0, 10);
-  document.getElementById('fil-from').value = fmt(from);
-  document.getElementById('fil-to').value   = fmt(to);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange === 'function') {
+    const w = currentWeekRange();
+    fromEl.value = w.from;
+    toEl.value = w.to;
+  }
 }
 
 // ── Load filter dropdowns ─────────────────────────────────────────────────
@@ -197,6 +199,9 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
 // Populate dynamic select first so restored value finds its <option>
-loadFilters().then(() => {
+(async function initResumen() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+  setDefaultDates();
+  await loadFilters();
   autoTriggerFromURL(FILTER_IDS, fetchDashboard);
-});
+})();

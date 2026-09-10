@@ -23,36 +23,26 @@ let _lastParams = null;
 
 // ── Load filter dropdowns ────────────────────────────────────────────────
 async function loadFilters() {
-  try {
-    const res = await fetch('/api/purchase-orders/filters');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { contratistas, empresas } = await res.json();
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+}
 
-    const selC = document.getElementById('sel-contractor');
-    selC.innerHTML = '<option value="">Seleccione contratista…</option>' +
-      contratistas.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-
-    const selE = document.getElementById('sel-company');
-    selE.innerHTML = '<option value="">Seleccione empresa…</option>' +
-      empresas.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
-  } catch (err) {
-    showError('Error cargando filtros: ' + err.message);
-  }
+function globalVal(id) {
+  return document.getElementById(id)?.value || '';
 }
 
 // ── Generate button ──────────────────────────────────────────────────────
 document.getElementById('btn-generate').addEventListener('click', async () => {
-  const contractor = document.getElementById('sel-contractor').value;
-  const company    = document.getElementById('sel-company').value;
-  const dateFrom   = document.getElementById('inp-date-from').value;
-  const dateTo     = document.getElementById('inp-date-to').value;
+  const contractor = globalVal('fil-contratista');
+  const company    = globalVal('fil-empresa');
+  const dateFrom   = globalVal('fil-from');
+  const dateTo     = globalVal('fil-to');
 
   hideError();
   document.getElementById('oc-document').style.display = 'none';
   document.getElementById('empty-box').classList.add('hidden');
 
   if (!contractor || !company || !dateFrom || !dateTo) {
-    showError('Complete todos los filtros antes de generar la orden.');
+    showError('Seleccione contratista, empresa y rango de fechas.');
     return;
   }
   if (dateFrom > dateTo) {
@@ -421,15 +411,15 @@ document.getElementById('btn-print-pdf').addEventListener('click', () => {
 });
 
 // ── URL filter sync ───────────────────────────────────────────────────────
-const FILTER_IDS = ['inp-date-from', 'inp-date-to', 'sel-contractor', 'sel-company'];
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa'];
 
 // Sync URL when user generates a document (secondary listener on btn-generate)
 document.getElementById('btn-generate').addEventListener('click', () => {
-  if (document.getElementById('sel-contractor').value && document.getElementById('sel-company').value) {
+  if (globalVal('fil-contratista') && globalVal('fil-empresa')) {
     syncFiltersToURL(FILTER_IDS);
   }
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────
-// Populate selects, then restore URL params; no auto-trigger (document requires deliberate action)
+// Restore URL params; no auto-trigger (document requires deliberate action)
 loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));

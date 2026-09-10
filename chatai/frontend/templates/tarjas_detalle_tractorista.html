@@ -2,6 +2,25 @@
 
 {% block title %}Detalle de la semana tractorista — Tarjas{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+  <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+  <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label>Centro costo</label>
+  <select id="fil-cc"><option value="">Todos</option></select>
+</div>
+<div class="adv-modal-field">
+  <label>Labor</label>
+  <select id="fil-labor"><option value="">Todas</option></select>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_detail.css?v={{ static_v }}" />
 <link rel="stylesheet" href="/static/tarjas_detalle_tractorista.css?v={{ static_v }}&f=5" />
@@ -22,37 +41,6 @@
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
 
-  <div class="filter-bar tdt-filter-bar">
-    <div>
-      <label>Desde</label>
-      <input lang="es-CL" type="date" id="fil-from" />
-    </div>
-    <div>
-      <label>Hasta</label>
-      <input lang="es-CL" type="date" id="fil-to" />
-    </div>
-    <div>
-      <label>Empresa / Campo</label>
-      <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Contratista</label>
-      <select id="fil-contratista"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Centro costo</label>
-      <select id="fil-cc"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Labor</label>
-      <select id="fil-labor"><option value="">Todas</option></select>
-    </div>
-    <div class="filter-actions">
-      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
-      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
-      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
-    </div>
-  </div>
 
   <div id="pivot-section" class="tdt-pivot-section" style="display:none"></div>
 
@@ -65,6 +53,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/tarjas_detalle_tractorista.js?v={{ static_v }}&f=6"></script>
 {% endblock %}

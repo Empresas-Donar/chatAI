@@ -2,6 +2,28 @@
 
 {% block title %}Registros de campo — Tarjas{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+  <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label>Labor</label>
+  <select id="fil-labor"><option value="">Todas</option></select>
+</div>
+<div class="adv-modal-field">
+  <label>Estado</label>
+  <select id="fil-estado"><option value="">Todos</option></select>
+</div>
+<div class="adv-modal-field">
+  <label>Supervisor</label>
+  <select id="fil-supervisor"><option value="">Todos</option></select>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_registros_campo.css?v={{ static_v }}-edit" />
 {% endblock %}
@@ -16,42 +38,6 @@
     </div>
   </div>
 
-  <div class="filter-bar trc-filter-bar">
-    <div>
-      <label>Desde</label>
-      <input lang="es-CL" type="date" id="fil-from" />
-    </div>
-    <div>
-      <label>Hasta</label>
-      <input lang="es-CL" type="date" id="fil-to" />
-    </div>
-    <div>
-      <label>Empresa / Campo</label>
-      <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Labor</label>
-      <select id="fil-labor"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Estado</label>
-      <select id="fil-estado"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Contratista</label>
-      <select id="fil-contratista"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Supervisor</label>
-      <select id="fil-supervisor"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
-    </div>
-    <div class="filter-actions">
-      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
-    </div>
-  </div>
 
   <div id="meta-bar" class="trc-meta" style="display:none"></div>
 
@@ -75,6 +61,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/tarjas_registros_campo.js?v={{ static_v }}-edit"></script>
 {% endblock %}

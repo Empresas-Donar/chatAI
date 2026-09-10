@@ -142,7 +142,7 @@ def test_136_ui_dates_are_dd_mm_yyyy():
     assert "DD/MM/YYYY" in js
     assert "${m[3]}/${m[2]}/${m[1]}" in js
     html = _page_html()
-    assert 'lang="es-CL"' in html
+    assert 'lang="es-CL"' in _base_html() or 'lang="es-CL"' in html
     excel_block = _registros_campo_ctrl_block()
     assert "%d/%m/%Y" in excel_block
 
@@ -151,9 +151,10 @@ def test_136_template_and_js_exist():
     assert PAGE_HTML.exists()
     assert PAGE_JS.exists()
     html = _page_html()
-    assert "url-filters.js" in html
-    assert "fil-from" in html
-    assert "fil-to" in html
+    base = BASE_HTML.read_text(encoding="utf-8")
+    assert "url-filters.js" in base
+    assert "fil-from" in base
+    assert "fil-to" in base
     assert "Sin resultados" in html
     js = _page_js()
     assert "syncFiltersToURL" in js
@@ -318,9 +319,10 @@ def test_136_calendario_reuses_registros_filters():
     assert "day-panel" in js
     assert "mal digitado" in js.lower() or "mal_digitado" in js
     html = CAL_HTML.read_text(encoding="utf-8")
+    base = _base_html()
     assert "fil-month" in html
-    assert "fil-empresa" in html
-    assert "url-filters.js" in html
+    assert "fil-empresa" in base
+    assert "url-filters.js" in base
     assert "day-panel" in html
     assert "fil-solo-sospechosos" in html
     assert "pan-fecha" in html

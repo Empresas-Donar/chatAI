@@ -24,6 +24,9 @@ function formatDate(iso) {
 }
 
 function initDates() {
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
   const now = new Date();
   const day = now.getDay();
   const monday = new Date(now);
@@ -37,8 +40,6 @@ function initDates() {
 
 function applyFilterOptions(data) {
   if (!data) return;
-  fillSelect('fil-contratista', data.contratistas, 'Todos');
-  fillSelect('fil-empresa', data.empresas, 'Todas');
   fillSelect('fil-cc', data.centros_costo, 'Todos');
   fillSelect('fil-labor', data.labores, 'Todas');
 }
@@ -385,6 +386,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-labor'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   const params = new URLSearchParams(location.search);

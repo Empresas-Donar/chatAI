@@ -22,6 +22,9 @@ function formatShortDate(isoStr) {
 }
 
 function initDates() {
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
   const now = new Date();
   const day = now.getDay();
   const monday = new Date(now);
@@ -47,18 +50,6 @@ async function loadFilters() {
     selTipo.innerHTML = '<option value="">Todos</option>' +
       data.tipos_pago.map(t =>
         `<option value="${esc(t)}">${esc(t)}</option>`
-      ).join('');
-
-    const selCont = document.getElementById('fil-contratista');
-    selCont.innerHTML = '<option value="">Todos</option>' +
-      data.contratistas.map(c =>
-        `<option value="${esc(c)}">${esc(c)}</option>`
-      ).join('');
-
-    const selEmp = document.getElementById('fil-empresa');
-    selEmp.innerHTML = '<option value="">Todas</option>' +
-      data.empresas.map(e =>
-        `<option value="${esc(e)}">${esc(e)}</option>`
       ).join('');
 
     if (data.maquinas && data.maquinas.length) {
@@ -263,6 +254,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-trabajador', 'fil-tipo', 'fil-contratista', 'fil-empresa', 'fil-maquina'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);

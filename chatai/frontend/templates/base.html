@@ -272,6 +272,46 @@
   </div>
 </nav>
 
+{% set _gf_path = request.url.path %}
+{% set show_global_filters = _gf_path.startswith('/tarjas') or _gf_path.startswith('/dashboard') or _gf_path.startswith('/reportes') or _gf_path.startswith('/odoo') or _gf_path.startswith('/despacho') %}
+{% if show_global_filters %}
+<div class="global-filter-bar" id="global-filter-bar">
+  <div class="global-filter-field">
+    <label for="fil-empresa">Empresa</label>
+    <select id="fil-empresa"><option value="">Todas</option></select>
+  </div>
+  <div class="global-filter-field">
+    <label for="fil-contratista">Contratista</label>
+    <select id="fil-contratista"><option value="">Todos</option></select>
+  </div>
+  <div class="global-filter-field">
+    <label for="fil-from">Desde</label>
+    <input lang="es-CL" type="date" id="fil-from" />
+  </div>
+  <div class="global-filter-field">
+    <label for="fil-to">Hasta</label>
+    <input lang="es-CL" type="date" id="fil-to" />
+  </div>
+  {% block page_filters %}{% endblock %}
+  <button class="btn btn-secondary btn-sm gf-adv-btn" id="btn-adv-filters" style="display:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg><span id="adv-btn-label">Filtros</span></button>
+</div>
+
+<div class="adv-modal-overlay" id="adv-modal-overlay" hidden></div>
+<div class="adv-modal" id="adv-modal" role="dialog" aria-modal="true" aria-labelledby="adv-modal-title" hidden>
+  <div class="adv-modal-head">
+    <span id="adv-modal-title">Filtros avanzados</span>
+    <button class="adv-modal-close" id="adv-modal-close" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="adv-modal-body">
+    {% block advanced_filters %}{% endblock %}
+  </div>
+  <div class="adv-modal-foot">
+    <button class="btn btn-primary btn-sm" id="btn-adv-apply">Consultar</button>
+    <button class="btn btn-secondary btn-sm" id="btn-adv-cancel">Cancelar</button>
+  </div>
+</div>
+{% endif %}
+
 {# ── Mobile drawer ── #}
 <div class="mobile-overlay" id="mobileOverlay"></div>
 <div class="mobile-drawer" id="mobileDrawer">
@@ -359,6 +399,51 @@ if (userMenu) {
   document.addEventListener('click', () => userMenu.classList.remove('open'));
 }
 </script>
+{% if show_global_filters %}
+<script src="/static/url-filters.js?v={{ static_v }}"></script>
+<script src="/static/global-filters.js?v={{ static_v }}"></script>
+<script>
+(function () {
+  const panel   = document.getElementById('adv-modal');
+  const overlay = document.getElementById('adv-modal-overlay');
+  const openBtn = document.getElementById('btn-adv-filters');
+  const closeBtn = document.getElementById('adv-modal-close');
+  const cancelBtn = document.getElementById('btn-adv-cancel');
+  const applyBtn  = document.getElementById('btn-adv-apply');
+  const body      = panel && panel.querySelector('.adv-modal-body');
+
+  if (!panel || !body || body.children.length === 0) return;
+
+  openBtn.style.display = '';
+
+  function _countActive() {
+    let n = 0;
+    body.querySelectorAll('select, input').forEach(el => { if (el.value) n++; });
+    return n;
+  }
+  function _refreshBtn() {
+    const n = _countActive();
+    openBtn.classList.toggle('has-active', n > 0);
+    document.getElementById('adv-btn-label').textContent = n > 0 ? `Filtros (${n})` : 'Filtros';
+  }
+
+  function openModal()  { panel.hidden = false; overlay.hidden = false; }
+  function closeModal() { panel.hidden = true;  overlay.hidden = true;  _refreshBtn(); }
+
+  openBtn.addEventListener('click', openModal);
+  overlay.addEventListener('click', closeModal);
+  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', closeModal);
+  applyBtn.addEventListener('click', () => {
+    closeModal();
+    const mainApply = document.getElementById('btn-apply') || document.getElementById('btn-generate') || document.getElementById('btn-apply-filter');
+    if (mainApply) mainApply.click();
+  });
+  body.addEventListener('change', _refreshBtn);
+  _refreshBtn();
+})();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

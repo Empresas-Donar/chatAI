@@ -2,6 +2,29 @@
 
 {% block title %}Detalle trabajador tractorista — Tarjas{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+  <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+  <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div id="maquina-filter-wrap" class="adv-modal-field" style="display:none">
+  <label>Máquina</label>
+  <select id="fil-maquina"><option value="">Todas</option></select>
+</div>
+<div class="adv-modal-field">
+  <label>Tipo de pago</label>
+  <select id="fil-tipo"><option value="">Todos</option></select>
+</div>
+<div class="adv-modal-field">
+  <label>Trabajador</label>
+  <select id="fil-trabajador"><option value="">Todos</option></select>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v={{ static_v }}" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
@@ -20,45 +43,6 @@
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
 
-  <!-- Filters -->
-  <div class="filter-bar trp-filter-bar">
-    <div>
-      <label>Desde</label>
-      <input lang="es-CL" type="date" id="fil-from" />
-    </div>
-    <div>
-      <label>Hasta</label>
-      <input lang="es-CL" type="date" id="fil-to" />
-    </div>
-    <div>
-      <label>Empresa</label>
-      <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-
-    <div id="maquina-filter-wrap" style="display:none">
-      <label>Máquina</label>
-      <select id="fil-maquina"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Tipo de pago</label>
-      <select id="fil-tipo"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Trabajador</label>
-      <select id="fil-trabajador"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Contratista</label>
-      <select id="fil-contratista"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
-    </div>
-    <div class="filter-actions">
-      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
-      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
-    </div>
-  </div>
 
   <!-- Pivot table -->
   <div class="trp-pivot-section" id="pivot-section" style="display:none">
@@ -81,6 +65,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/tarjas_resumen_persona_tractorista.js?v={{ static_v }}&c=1"></script>
 {% endblock %}
