@@ -29,15 +29,17 @@ SELECT
     r."Nombre Labor"                                     AS "Lineas del pedido/Producto/Nombre",
     r.jornadas                                           AS "Lineas del pedido/Cantidad",
     r."CC"                                               AS "Lineas del pedido/Código de Distribución Analítica/Código",
-    r.total_unitario                                     AS "Lineas del pedido/Precio un.",
+    r.total_unitario_empresa                             AS "Lineas del pedido/Precio un.",
     r.contratista                                        AS "partner_id",
 
     -- order_line/product_id: l0 (id_labor directo) gana sobre los fallbacks de texto
     COALESCE(l0.codigo_labor, l1.codigo_labor, l2.codigo_labor, l3.codigo_labor) AS "order_line/product_id",
     r.jornadas                                           AS "order_line/product_qty",
     (SELECT jsonb_object_agg(k, ROUND(v::numeric, 2))
-     FROM jsonb_each_text(cc.valor_odoo) AS t(k,v))::text AS "order_line/analytic_distribution",
-    r.total_unitario                                     AS "order_line/price_unit",
+     FROM jsonb_each_text(cc.valor_odoo) AS t(k,v)
+     WHERE v IS NOT NULL AND v != '')::text AS "order_line/analytic_distribution",
+    -- price_unit usa Costo Empresa (issue #163): total_trabajado × factor, no pagar_efectivo
+    r.total_unitario_empresa                             AS "order_line/price_unit",
 
     -- campos para filtrar en consultas (no se exportan, solo para WHERE)
     r.fecha,
