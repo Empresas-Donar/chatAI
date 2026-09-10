@@ -27,7 +27,8 @@ SELECT
     COALESCE(l0.codigo_labor, l1.codigo_labor, l2.codigo_labor, l3.codigo_labor) AS "order_line/product_id",
     agg.jornadas                                             AS "order_line/product_qty",
     (SELECT jsonb_object_agg(k, ROUND(v::numeric, 2))
-     FROM jsonb_each_text(cc.valor_odoo) AS t(k,v))::text    AS "order_line/analytic_distribution",
+     FROM jsonb_each_text(cc.valor_odoo) AS t(k,v)
+     WHERE v IS NOT NULL AND v != '')::text    AS "order_line/analytic_distribution",
     agg.total_unitario                                       AS "order_line/price_unit",
 
     -- campos de filtro (no se exportan, solo para WHERE en el endpoint)
