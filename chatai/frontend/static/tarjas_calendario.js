@@ -764,11 +764,7 @@ async function loadFiltersAndRestore() {
   initMonth();
   await loadFilters();
   copyMainToPanel();
-  if (location.search && typeof loadFiltersFromURL === 'function') {
-    loadFiltersFromURL(FILTER_IDS);
-    copyMainToPanel();
-  }
-  queryData();
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 document.getElementById('btn-apply').addEventListener('click', () => {

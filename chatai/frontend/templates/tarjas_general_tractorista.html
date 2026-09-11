@@ -12,15 +12,15 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Centro costo</label>
+  <label for="fil-cc">Centro costo</label>
   <select id="fil-cc"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Labor</label>
+  <label for="fil-labor">Labor</label>
   <select id="fil-labor"><option value="">Todas</option></select>
 </div>
 <div id="maquina-filter-wrap" class="adv-modal-field" style="display:none">
-  <label>Máquina</label>
+  <label for="fil-maquina">Máquina</label>
   <select id="fil-maquina"><option value="">Todas</option></select>
 </div>
 {% endblock %}
@@ -44,6 +44,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <!-- Two-column tables -->

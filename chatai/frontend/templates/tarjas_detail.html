@@ -3,11 +3,6 @@
 {% block title %}Detalle Semanal — Tarjas{% endblock %}
 
 {% block page_filters %}
-<div class="global-filter-sep"></div>
-<div class="global-filter-field">
-  <label>Campo</label>
-  <select id="fil-campo"><option value="">Todos</option></select>
-</div>
 <div class="global-filter-actions">
   <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
   <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
@@ -17,11 +12,15 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Centro Costo</label>
+  <label for="fil-campo">Campo</label>
+  <select id="fil-campo"><option value="">Todos</option></select>
+</div>
+<div class="adv-modal-field">
+  <label for="fil-cc">Centro costo</label>
   <select id="fil-cc"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Tipo de Pago</label>
+  <label for="fil-tipo">Tipo de pago</label>
   <select id="fil-tipo">
     <option value="">Todos</option>
     <option value="trato">Trato</option>
@@ -29,7 +28,7 @@
   </select>
 </div>
 <div class="adv-modal-field">
-  <label>Labor</label>
+  <label for="fil-labor">Labor</label>
   <select id="fil-labor"><option value="">Todas</option></select>
 </div>
 {% endblock %}
@@ -52,6 +51,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <!-- Summary -->

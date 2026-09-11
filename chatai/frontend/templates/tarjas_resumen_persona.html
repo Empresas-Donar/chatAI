@@ -12,11 +12,11 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Trabajador</label>
+  <label for="fil-trabajador">Trabajador</label>
   <select id="fil-trabajador"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Tipo de pago</label>
+  <label for="fil-tipo">Tipo de pago</label>
   <select id="fil-tipo"><option value="">Todos</option></select>
 </div>
 {% endblock %}
@@ -38,6 +38,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <!-- Pivot table -->

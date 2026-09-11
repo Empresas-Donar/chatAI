@@ -310,6 +310,5 @@ function renderAlerts(alerts, sources) {
 (async function initDashboard() {
   if (window.globalFiltersReady) await window.globalFiltersReady;
   initDateFilter();
-  if (typeof loadFiltersFromURL === 'function') loadFiltersFromURL([]);
-  loadDashboard();
+  autoTriggerFromURL([], loadDashboard);
 })();

@@ -12,19 +12,19 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Tipo de pago</label>
+  <label for="fil-tipo">Tipo de pago</label>
   <select id="fil-tipo"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Labor</label>
+  <label for="fil-labor">Labor</label>
   <select id="fil-labor"><option value="">Todas</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Centro costo</label>
+  <label for="fil-cc">Centro costo</label>
   <select id="fil-cc"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label class="tc-checkbox-label" style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;font-weight:400;cursor:pointer">
+  <label class="tc-checkbox-label" style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500;color:var(--text);cursor:pointer">
     <input type="checkbox" id="chk-merge-labores" />
     Unir labores
   </label>
@@ -48,6 +48,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <!-- Pivot table -->

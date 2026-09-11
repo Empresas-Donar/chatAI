@@ -1,15 +1,19 @@
 {% extends "base.html" %}
 
+{% block gf_attrs %}data-skip-auto-report{% endblock %}
+
 {% block title %}Notas de Crédito — Empresas Donar{% endblock %}
 
 {% block page_filters %}
-<div class="global-filter-sep"></div>
-<div class="global-filter-field">
-  <label>Campo</label>
-  <select id="fil-campo"><option value="">Todos</option></select>
-</div>
 <div class="global-filter-actions">
   <button class="btn btn-primary btn-sm" id="btn-apply">Generar nota</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label for="fil-campo">Campo</label>
+  <select id="fil-campo"><option value="">Todos</option></select>
 </div>
 {% endblock %}
 

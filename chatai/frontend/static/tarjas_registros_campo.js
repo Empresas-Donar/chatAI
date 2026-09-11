@@ -440,11 +440,7 @@ async function loadFiltersAndRestore() {
   if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
-  if (location.search) {
-    autoTriggerFromURL(FILTER_IDS, queryData);
-  } else {
-    queryData();
-  }
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 document.getElementById('btn-apply').addEventListener('click', () => {

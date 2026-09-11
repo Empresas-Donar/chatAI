@@ -8,14 +8,17 @@
   <label>Mes</label>
   <input lang="es-CL" type="month" id="fil-mes" />
 </div>
-<div class="global-filter-field">
-  <label>Campo</label>
-  <select id="fil-campo"><option value="">Todos</option></select>
-</div>
 <div class="global-filter-actions">
   <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
   <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
   <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label for="fil-campo">Campo</label>
+  <select id="fil-campo"><option value="">Todos</option></select>
 </div>
 {% endblock %}
 
@@ -40,6 +43,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <!-- Table -->

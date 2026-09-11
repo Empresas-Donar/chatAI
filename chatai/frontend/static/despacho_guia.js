@@ -410,5 +410,5 @@ setDefaultDates();
   if (window.globalFiltersReady) await window.globalFiltersReady;
   setDefaultDates();
   await loadFilters();
-  loadFiltersFromURL(FILTER_IDS);
+  autoTriggerFromURL(FILTER_IDS, fetchGuias);
 })();

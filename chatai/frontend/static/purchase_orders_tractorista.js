@@ -44,7 +44,7 @@ function hideError() {
 }
 
 // ── Generate button ───────────────────────────────────────────────────────
-document.getElementById('btn-generate').addEventListener('click', async () => {
+async function generate() {
   const contractor = document.getElementById('fil-contratista').value;
   const campo      = document.getElementById('sel-campo').value;
   const dateFrom   = document.getElementById('fil-from').value;
@@ -62,6 +62,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     return;
   }
 
+  if (typeof showReportLoading === 'function') showReportLoading();
   const btn = document.getElementById('btn-generate');
   btn.disabled = true;
   btn.textContent = 'Generando…';
@@ -94,13 +95,18 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 
     renderDocument(data);
-    loadPivotTable();
+    await loadPivotTable();
   } catch (err) {
     showError('Error al generar: ' + err.message);
   } finally {
+    if (typeof hideReportLoading === 'function') hideReportLoading();
     btn.disabled = false;
     btn.textContent = 'Generar orden';
   }
+}
+
+document.getElementById('btn-generate').addEventListener('click', () => {
+  generate();
 });
 
 // ── Tabla por operador (misma data que el Excel "Tabla por operador") ────
@@ -419,5 +425,12 @@ document.getElementById('btn-cc-proceed').addEventListener('click', async () => 
 // ── Init ──────────────────────────────────────────────────────────────────
 loadFilters().then(async () => {
   if (window.globalFiltersReady) await window.globalFiltersReady;
-  if (typeof loadFiltersFromURL === 'function') loadFiltersFromURL(['sel-campo']);
+  autoTriggerFromURL(['sel-campo'], () => {
+    const contractor = document.getElementById('fil-contratista')?.value;
+    const campo = document.getElementById('sel-campo')?.value;
+    const dateFrom = document.getElementById('fil-from')?.value;
+    const dateTo = document.getElementById('fil-to')?.value;
+    if (!contractor || !campo || !dateFrom || !dateTo) return;
+    return generate();
+  });
 });

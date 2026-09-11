@@ -5,7 +5,7 @@
 {% block page_filters %}
 <div class="global-filter-sep"></div>
 <div class="global-filter-field tcal-month-nav">
-  <label>Mes</label>
+  <label for="fil-month">Mes</label>
   <div style="display:flex;align-items:center;gap:3px">
     <button type="button" class="btn btn-secondary btn-sm" id="btn-prev" aria-label="Mes anterior">‹</button>
     <input lang="es-CL" type="month" id="fil-month" style="min-width:120px" />
@@ -19,15 +19,15 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Labor</label>
+  <label for="fil-labor">Labor</label>
   <select id="fil-labor"><option value="">Todas</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Estado</label>
+  <label for="fil-estado">Estado</label>
   <select id="fil-estado"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Supervisor</label>
+  <label for="fil-supervisor">Supervisor</label>
   <select id="fil-supervisor"><option value="">Todos</option></select>
 </div>
 {% endblock %}

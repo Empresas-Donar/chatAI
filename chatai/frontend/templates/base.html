@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/styles.css?v={{ static_v }}" />
+  <link rel="stylesheet" href="/static/styles.css?v={{ static_v }}&r=5" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -275,7 +275,7 @@
 {% set _gf_path = request.url.path %}
 {% set show_global_filters = _gf_path.startswith('/tarjas') or _gf_path.startswith('/dashboard') or _gf_path.startswith('/reportes') or _gf_path.startswith('/odoo') or _gf_path.startswith('/despacho') %}
 {% if show_global_filters %}
-<div class="global-filter-bar" id="global-filter-bar">
+<div class="global-filter-bar" id="global-filter-bar" {% block gf_attrs %}{% endblock %}>
   <div class="global-filter-field">
     <label for="fil-empresa">Empresa</label>
     <select id="fil-empresa"><option value="">Todas</option></select>
@@ -292,8 +292,9 @@
     <label for="fil-to">Hasta</label>
     <input lang="es-CL" type="date" id="fil-to" />
   </div>
+  <div class="gf-bar-spacer"></div>
+  <button class="btn btn-secondary btn-sm gf-adv-btn" id="btn-adv-filters" style="display:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg><span id="adv-btn-label">Filtros</span></button>
   {% block page_filters %}{% endblock %}
-  <button class="btn btn-secondary btn-sm gf-adv-btn" id="btn-adv-filters" style="display:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg><span id="adv-btn-label">Filtros</span></button>
 </div>
 
 <div class="adv-modal-overlay" id="adv-modal-overlay" hidden></div>
@@ -306,9 +307,16 @@
     {% block advanced_filters %}{% endblock %}
   </div>
   <div class="adv-modal-foot">
-    <button class="btn btn-primary btn-sm" id="btn-adv-apply">Consultar</button>
     <button class="btn btn-secondary btn-sm" id="btn-adv-cancel">Cancelar</button>
+    <button class="btn btn-primary btn-sm" id="btn-adv-apply">Consultar</button>
   </div>
+</div>
+<div id="report-inline-loading" class="report-inline-loading" hidden role="status" aria-live="polite">
+  <div class="report-loader" aria-hidden="true">
+    <span class="report-loader-ring"></span>
+    <span class="report-loader-ring report-loader-ring--inner"></span>
+  </div>
+  <p>Cargando reporte…</p>
 </div>
 {% endif %}
 
@@ -400,8 +408,8 @@ if (userMenu) {
 }
 </script>
 {% if show_global_filters %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/global-filters.js?v={{ static_v }}"></script>
+<script src="/static/url-filters.js?v={{ static_v }}&r=6"></script>
+<script src="/static/global-filters.js?v={{ static_v }}&r=4"></script>
 <script>
 (function () {
   const panel   = document.getElementById('adv-modal');
@@ -418,7 +426,13 @@ if (userMenu) {
 
   function _countActive() {
     let n = 0;
-    body.querySelectorAll('select, input').forEach(el => { if (el.value) n++; });
+    body.querySelectorAll('select, input').forEach(el => {
+      if (el.type === 'checkbox' || el.type === 'radio') {
+        if (el.checked) n++;
+      } else if (el.value) {
+        n++;
+      }
+    });
     return n;
   }
   function _refreshBtn() {
@@ -427,13 +441,26 @@ if (userMenu) {
     document.getElementById('adv-btn-label').textContent = n > 0 ? `Filtros (${n})` : 'Filtros';
   }
 
-  function openModal()  { panel.hidden = false; overlay.hidden = false; }
-  function closeModal() { panel.hidden = true;  overlay.hidden = true;  _refreshBtn(); }
+  function openModal()  {
+    panel.hidden = false;
+    overlay.hidden = false;
+    const first = body.querySelector('select, input:not([type="checkbox"])');
+    if (first) first.focus();
+  }
+  function closeModal() {
+    panel.hidden = true;
+    overlay.hidden = true;
+    _refreshBtn();
+    openBtn.focus();
+  }
 
   openBtn.addEventListener('click', openModal);
   overlay.addEventListener('click', closeModal);
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);
+  document.addEventListener('keydown', evt => {
+    if (evt.key === 'Escape' && !panel.hidden) closeModal();
+  });
   applyBtn.addEventListener('click', () => {
     closeModal();
     const mainApply = document.getElementById('btn-apply') || document.getElementById('btn-generate') || document.getElementById('btn-apply-filter');

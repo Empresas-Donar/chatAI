@@ -91,6 +91,7 @@ async function generate() {
     return;
   }
 
+  if (typeof showReportLoading === 'function') showReportLoading();
   const btn = document.getElementById('btn-generate');
   btn.disabled = true;
   btn.textContent = 'Cargando…';
@@ -129,11 +130,13 @@ async function generate() {
     renderPivot(data.columns, data.rows, header);
     document.getElementById('bo-document').style.display = 'block';
     document.getElementById('btn-pdf').disabled = false;
+    if (typeof syncFiltersToURL === 'function') syncFiltersToURL(FILTER_IDS);
 
   } catch (e) {
     showError('Error al generar la orden: ' + e.message);
     console.error(e);
   } finally {
+    if (typeof hideReportLoading === 'function') hideReportLoading();
     btn.disabled = false;
     btn.textContent = 'Generar orden';
   }
@@ -327,5 +330,7 @@ document.getElementById('btn-pdf').addEventListener('click', () => {
 
 // ── Init ──────────────────────────────────────────────────────────────
 initDates();
-// Restore URL params; no auto-trigger (document requires deliberate action)
-loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));
+loadFilters().then(() => autoTriggerFromURL(FILTER_IDS, () => {
+  if (!globalVal('fil-contratista') || !globalVal('fil-empresa') || !globalVal('fil-from') || !globalVal('fil-to')) return;
+  return generate();
+}));

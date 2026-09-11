@@ -1,0 +1,57 @@
+---
+description: Barra global, modal avanzado y overlay único al crear o tocar reportes
+globs: chatai/frontend/**/*
+alwaysApply: true
+---
+
+# Reportes frontend (filtros + loading)
+
+Nueva página de reporte (`/tarjas`, `/dashboard`, `/reportes`, `/odoo`, `/despacho`) reutiliza el chrome de `base.html`. No copiar Empresa / Contratista / fechas, ni un spinner, ni un overlay.
+
+## Barra y modal
+
+IDs canónicos en `base.html`: `fil-empresa`, `fil-contratista`, `fil-from`, `fil-to`. Persistencia: `global-filters.js` (`donar.globalFilters`) + URL.
+
+| Bloque | Qué va ahí |
+|---|---|
+| `{% block page_filters %}` | Consultar / Excel / PDF y controles de período locales (`fil-mes`) |
+| `{% block advanced_filters %}` | Campo, CC, labor, tipo, trabajador, etc. (modal) |
+| `{% block gf_attrs %}` | Solo opt-out: `data-skip-auto-report` |
+
+No duplicar `fil-empresa` / `fil-contratista` / `fil-from` / `fil-to` en el template de la página. Aliases legacy (`inp-date-*`, `sel-contractor`, …) los resuelve `url-filters.js`.
+
+## Consulta al entrar
+
+```javascript
+await window.globalFiltersReady;
+autoTriggerFromURL(FILTER_IDS, queryData); // page-specific IDs only
+```
+
+Eso cubre: carga inicial, cambio de barra global, Consultar (`#btn-apply` / `#btn-apply-filter`). No esperar Consultar. No hacer `pushState` en cada `change` de la barra (`saveGlobalFilters` ya hace `replaceState`).
+
+**Opt-out** (`data-skip-auto-report`): Notas de crédito y descarga masiva PDF. Ahí el usuario pulsa Generar.
+
+**Odoo** (OC / facturación): auto-generar solo si empresa + contratista + fechas están set. Tractorista OC también exige Campo. `generate()` usa el overlay compartido.
+
+## Overlay de loading
+
+Un solo `#report-inline-loading` en `base.html`. `url-filters.js` expone `runReportQuery` / `showReportLoading` / `hideReportLoading` (refcount).
+
+```javascript
+// BAD — spinner por página, hide de .container, loader HTML copiado
+<div class="page-loader">…</div>
+container.querySelectorAll(':scope > *').forEach(el => el.classList.add('is-report-loading-hidden'));
+
+// GOOD — tarjas / dashboard / despacho
+autoTriggerFromURL(FILTER_IDS, queryData);
+
+// GOOD — generate() de OC / facturación (no hijack de #btn-generate)
+showReportLoading();
+try { /* await fetch… */ } finally { hideReportLoading(); }
+```
+
+No ocultar hijos de `.container` a mano. No clonar el markup del overlay.
+
+## Fechas
+
+UI `DD/MM/YYYY`. Inputs `type="date"` → `YYYY-MM-DD`. Default de barra: lunes–domingo de la semana actual. `fil-mes` / `fil-month` siguen locales; hidratar desde `fil-from` (YYYY-MM).

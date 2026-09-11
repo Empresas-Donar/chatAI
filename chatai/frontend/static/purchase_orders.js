@@ -30,8 +30,8 @@ function globalVal(id) {
   return document.getElementById(id)?.value || '';
 }
 
-// ── Generate button ──────────────────────────────────────────────────────
-document.getElementById('btn-generate').addEventListener('click', async () => {
+// ── Generate ─────────────────────────────────────────────────────────────
+async function generate() {
   const contractor = globalVal('fil-contratista');
   const company    = globalVal('fil-empresa');
   const dateFrom   = globalVal('fil-from');
@@ -53,6 +53,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
   btn.disabled = true;
   btn.textContent = 'Generando…';
+  if (typeof showReportLoading === 'function') showReportLoading();
 
   try {
     const params = new URLSearchParams({
@@ -75,12 +76,18 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 
     renderDocument(header, rows);
+    if (typeof syncFiltersToURL === 'function') syncFiltersToURL(FILTER_IDS);
   } catch (err) {
     showError('Error al generar: ' + err.message);
   } finally {
+    if (typeof hideReportLoading === 'function') hideReportLoading();
     btn.disabled = false;
     btn.textContent = 'Generar orden';
   }
+}
+
+document.getElementById('btn-generate').addEventListener('click', () => {
+  generate();
 });
 
 // ── Render document ──────────────────────────────────────────────────────
@@ -421,5 +428,9 @@ document.getElementById('btn-generate').addEventListener('click', () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────
-// Restore URL params; no auto-trigger (document requires deliberate action)
-loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));
+loadFilters().then(() => {
+  autoTriggerFromURL(FILTER_IDS, () => {
+    if (!globalVal('fil-contratista') || !globalVal('fil-empresa') || !globalVal('fil-from') || !globalVal('fil-to')) return;
+    return generate();
+  });
+});

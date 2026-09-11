@@ -12,11 +12,11 @@
 
 {% block advanced_filters %}
 <div class="adv-modal-field">
-  <label>Centro costo</label>
+  <label for="fil-cc">Centro costo</label>
   <select id="fil-cc"><option value="">Todos</option></select>
 </div>
 <div class="adv-modal-field">
-  <label>Labor</label>
+  <label for="fil-labor">Labor</label>
   <select id="fil-labor"><option value="">Todas</option></select>
 </div>
 {% endblock %}
@@ -40,6 +40,7 @@
 
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
+
 
 
   <div id="pivot-section" class="tdt-pivot-section" style="display:none"></div>
