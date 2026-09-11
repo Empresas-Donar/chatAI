@@ -1,24 +1,30 @@
 """Platform factors for company-side tarjas money (Costo Empresa).
 
-Al Día ×1.45 and Trato ×1.50 on SUM(total_trabajado). Other tipo_pago
-values (Bono, Tractorista, …) keep factor 1.0 — do not invent a markup.
+Trato ×1.45 (+45 %) and Al Día ×1.50 (+50 %) on SUM(total_trabajado).
+Other tipo_pago values (Bono, Tractorista, …) keep factor 1.0 — do not
+invent a markup. NEVER invert these percentages.
 
 MUST use these helpers for any report that shows what the company pays
 for labores: Detalle Costo Empresa, Orden de compra, Orden de facturación,
-Nota de crédito, Dashboard tarjas totals. Never AppSheet total_pagar or
-total_trabajado+total_contratista — those markups are swapped vs these
-constants and total_pagar is often 0.
+Nota de crédito, Dashboard tarjas totals. Never AppSheet total_pagar
+(often 0) nor total_trabajado+total_contratista as billed company cost —
+billed cost is always total_trabajado × factor via total_empresa().
+AppSheet total_contratista happens to use the same percentages
+(~45 % trato / ~50 % al día); still never bill from those columns.
 
 Worker-pay reports (General, Por persona, ranking) stay on total_trabajado.
-Odoo CSV (`tarjas_reporte_odoo`) is a separate import format.
+The Odoo xlsx is priced by calling these helpers from
+`costo_empresa_odoo_lines` (purchase_orders_controller). Do not copy the
+factors into JS, SQL views, or controllers — change FACTOR_EMPRESA_* here
+only.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
-FACTOR_EMPRESA_AL_DIA = Decimal("1.45")
-FACTOR_EMPRESA_TRATO = Decimal("1.50")
+FACTOR_EMPRESA_AL_DIA = Decimal("1.50")
+FACTOR_EMPRESA_TRATO = Decimal("1.45")
 FACTOR_EMPRESA_DEFAULT = Decimal("1")
 
 _AL_DIA = frozenset({"al dia", "al día"})
@@ -65,7 +71,7 @@ def format_pct(pct: Decimal | float | None) -> str:
 
 
 def markup_pct(tipo_pago: str | None) -> Decimal:
-    """Added percentage on Total trabajado: 45 Al Día, 50 Trato, 0 otherwise."""
+    """Added percentage on Total trabajado: 50 Al Día, 45 Trato, 0 otherwise."""
     return (factor_empresa(tipo_pago) - FACTOR_EMPRESA_DEFAULT) * 100
 
 

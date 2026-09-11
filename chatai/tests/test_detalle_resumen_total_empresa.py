@@ -84,17 +84,17 @@ def _run(coro):
 
 class TestEmpresaFactors:
     def test_al_dia_and_trato_constants(self):
-        assert te.FACTOR_EMPRESA_AL_DIA == Decimal("1.45")
-        assert te.FACTOR_EMPRESA_TRATO == Decimal("1.50")
+        assert te.FACTOR_EMPRESA_AL_DIA == Decimal("1.50")
+        assert te.FACTOR_EMPRESA_TRATO == Decimal("1.45")
         assert te.FACTOR_EMPRESA_DEFAULT == Decimal("1")
 
     def test_factor_al_dia_variants(self):
-        assert te.factor_empresa("Al dia") == Decimal("1.45")
-        assert te.factor_empresa("Al día") == Decimal("1.45")
+        assert te.factor_empresa("Al dia") == Decimal("1.50")
+        assert te.factor_empresa("Al día") == Decimal("1.50")
 
     def test_factor_trato_variants(self):
-        assert te.factor_empresa("trato") == Decimal("1.50")
-        assert te.factor_empresa("Trato") == Decimal("1.50")
+        assert te.factor_empresa("trato") == Decimal("1.45")
+        assert te.factor_empresa("Trato") == Decimal("1.45")
 
     def test_factor_default_does_not_invent_markup(self):
         assert te.factor_empresa("Bono") == Decimal("1")
@@ -102,12 +102,12 @@ class TestEmpresaFactors:
         assert te.total_empresa("Bono", 250_413) == Decimal("250413")
 
     def test_total_empresa_amounts(self):
-        assert te.total_empresa("Al dia", 3_341_833) == Decimal("4845658")
-        assert te.total_empresa("trato", 2_018_000) == Decimal("3027000")
+        assert te.total_empresa("Al dia", 3_341_833) == Decimal("5012750")
+        assert te.total_empresa("trato", 2_018_000) == Decimal("2926100")
 
     def test_markup_pct_is_the_added_percentage(self):
-        assert te.markup_pct("Al dia") == Decimal("45")
-        assert te.markup_pct("trato") == Decimal("50")
+        assert te.markup_pct("Al dia") == Decimal("50")
+        assert te.markup_pct("trato") == Decimal("45")
         assert te.markup_pct("Bono") == Decimal("0")
         assert te.format_markup(45) == "+45 %"
         assert te.format_markup(50) == "+50 %"
@@ -120,13 +120,14 @@ class TestEmpresaFactors:
             assert "1.45" not in blob
             assert "1.50" not in blob
 
-    def test_js_factors_match_python(self):
+    def test_js_does_not_duplicate_factors(self):
         js = DETAIL_JS.read_text(encoding="utf-8")
-        assert "FACTOR_EMPRESA_AL_DIA = 1.45" in js
-        assert "FACTOR_EMPRESA_TRATO = 1.5" in js
+        assert "FACTOR_EMPRESA" not in js
+        assert "1.45" not in js
+        assert "1.50" not in js
         assert "function enrichDetalle" in js
-        assert te.FACTOR_EMPRESA_AL_DIA == Decimal("1.45")
-        assert te.FACTOR_EMPRESA_TRATO == Decimal("1.50")
+        assert "Number(r.total_empresa)" in js
+        assert "r.recargo" in js
 
 
 class TestSummaryTableHtml:
@@ -153,9 +154,9 @@ class TestSummaryTableHtml:
         assert ">%</th>" in html
         assert "$3.341.833" in html
         assert "$2.018.000" in html
-        assert "$4.845.658" in html  # 3_341_833 * 1.45 rounded
-        assert "$3.027.000" in html  # 2_018_000 * 1.50
-        assert "$7.872.658" in html  # sum of row Costo Empresa
+        assert "$5.012.750" in html  # 3_341_833 * 1.50 rounded
+        assert "$2.926.100" in html  # 2_018_000 * 1.45
+        assert "$7.938.850" in html  # sum of row Costo Empresa
         assert "+45 %" in html
         assert "+50 %" in html
         assert "62.3 %" in html
@@ -181,14 +182,14 @@ class TestSummaryTableHtml:
                 {"tipo_pago": "trato", "total_trabajado": 200},
             ]
         )
-        assert rows[0]["total_empresa"] == 145
-        assert rows[0]["recargo_pct"] == 45.0
-        assert rows[0]["recargo"] == "+45 %"
-        assert rows[1]["total_empresa"] == 300
-        assert rows[1]["recargo_pct"] == 50.0
-        assert rows[1]["recargo"] == "+50 %"
+        assert rows[0]["total_empresa"] == 150
+        assert rows[0]["recargo_pct"] == 50.0
+        assert rows[0]["recargo"] == "+50 %"
+        assert rows[1]["total_empresa"] == 290
+        assert rows[1]["recargo_pct"] == 45.0
+        assert rows[1]["recargo"] == "+45 %"
         footer = sum(r["total_empresa"] for r in rows)
-        assert footer == 445
+        assert footer == 440
         grand_trab = 300
         assert footer != float(grand_trab * te.FACTOR_EMPRESA_AL_DIA)
         assert footer != float(grand_trab * te.FACTOR_EMPRESA_TRATO)
@@ -230,7 +231,7 @@ class TestUiContract:
             "function renderChart"
         )[0]
         assert "r.total_empresa" in summary_src
-        assert "recargoLabel" in summary_src
+        assert "r.recargo" in summary_src
         assert "r.total_pagar" not in summary_src
         assert "fmtResumenPct" in summary_src
 

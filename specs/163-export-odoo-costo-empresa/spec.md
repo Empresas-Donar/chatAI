@@ -5,13 +5,13 @@
 El export Odoo (`tarjas_reporte_odoo`) usaba `pagar_efectivo` (total_trabajado +
 total_contratista) como `order_line/price_unit`, produciendo montos ~$65.290 más
 altos que el header de la Orden de Compra. El fix aplica los factores Costo Empresa
-(×1.45 al día, ×1.50 trato) directamente sobre `total_trabajado` — la misma base
+(×1.45 trato, ×1.50 al día) directamente sobre `total_trabajado` — la misma base
 que usa el header de la OC.
 
 ## Acceptance criteria
 
 - Agregar columna `total_unitario_empresa` a `tarjas_reporte` con fórmula:
-  `ROUND(AVG(total_trabajado × factor), 2)` donde factor = 1.50 trato, 1.45 al día, 1.0 otros.
+  `ROUND(AVG(total_trabajado × factor), 2)` donde factor = 1.45 trato, 1.50 al día, 1.0 otros.
 - La vista `tarjas_reporte_odoo` usa `total_unitario_empresa` como `order_line/price_unit`.
 - El endpoint `GET /api/tarjas/export-preview` devuelve `total_ok_clp`.
 - El modal de exportación muestra el total CLP exportable junto al total de jornadas.
@@ -23,12 +23,12 @@ que usa el header de la OC.
 - `sql/tarjas/02_views_odoo.sql` — vista `tarjas_reporte_odoo`; cambiar `order_line/price_unit`
 - `chatai/backend/controllers/purchase_orders_controller.py` — endpoint export-preview (~línea 590); agregar `total_ok_clp` en respuesta
 - `chatai/frontend/static/purchase_orders.js` — tfoot del modal; mostrar total CLP
-- `chatai/backend/tarjas_empresa.py` — factores de referencia: FACTOR_EMPRESA_AL_DIA=1.45, FACTOR_EMPRESA_TRATO=1.50
+- `chatai/backend/tarjas_empresa.py` — factores de referencia: FACTOR_EMPRESA_AL_DIA=1.50, FACTOR_EMPRESA_TRATO=1.45
 
 ## Decisions
 
 - Se agrega `total_unitario_empresa` directamente en `tarjas_reporte` (no solo en `tarjas_reporte_odoo`) para que la columna quede disponible para futuras superficies sin duplicar la lógica del CASE.
-- El CASE en SQL replica exactamente los factores de `tarjas_empresa.py` (1.50 trato, 1.45 al día, 1.0 resto) para no importar código Python en la vista.
+- El CASE en SQL replica exactamente los factores de `tarjas_empresa.py` (1.45 trato, 1.50 al día, 1.0 resto). El xlsx facturado sale de `costo_empresa_odoo_lines()` → `total_empresa()`.
 - `total_ok_clp` es un alias de `total_ok` en la respuesta del endpoint — misma variable, clave adicional para que el front pueda evolucionar sin romper código que ya use `total_ok`.
 - El test #130 `test_130_visor_and_excel_totals_match_within_rounding` fue reemplazado por `test_130_odoo_export_row_count_not_inflated` porque el cambio de precio_unit hace que los totales monetarios de `tarjas_reporte` y `tarjas_reporte_odoo` sean intencionalmente distintos. El invariante correcto para #130 es el conteo de filas, no el monto.
 

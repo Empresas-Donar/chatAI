@@ -107,47 +107,78 @@ class TestSqlViewNullFilter:
 
 
 class TestExportEndpointNullFilter:
-    """The export endpoint must filter ': null' as well as '"": ' from
-    analytic_distribution before including rows in the xlsx export."""
+    """xlsx export groups Costo Empresa lines and must drop empty-key and
+    null-value analytic_distribution the same way the old SQL LIKE did."""
 
     def test_162_export_excludes_null_value_pattern_regression(self):
         """
-        Regression: the export query must include NOT LIKE '%%: null%%' so that
-        rows with {"410": null} in analytic_distribution are excluded from the xlsx.
+        Regression: group_odoo_export_rows must treat {"410": null} as excluded
+        so those rows never land in the xlsx (issue #164).
         """
         src = _ctrl_source()
-        assert "'%%: null%%'" in src, (
-            "export_odoo_csv must filter rows where analytic_distribution LIKE '%%: null%%'"
+        helper = src[
+            src.find("def _analytic_has_empty_key") : src.find(
+                "def group_odoo_export_rows"
+            )
+        ]
+        assert ": null" in helper, (
+            "_analytic_has_empty_key must detect ': null' in analytic JSON"
         )
+        export_src = src[
+            src.find("def export_odoo_csv") : src.find("def get_cc_status")
+        ]
+        assert "group_odoo_export_rows" in export_src
 
     def test_162_excluded_amount_counts_null_value_rows_regression(self):
-        """
-        Regression: the excluded_amount query must also count rows with null-value
-        entries (': null' pattern) in the total monto excluido shown to the user.
-        """
-        src = _ctrl_source()
-        # Both patterns must appear together in the excluded amount query section
-        excl_block_start = src.find("Detect excluded rows")
-        excl_block_end = src.find("excluded_amount = float", excl_block_start)
-        excl_block = src[excl_block_start : excl_block_end + 100]
-        assert "'%%: null%%'" in excl_block, (
-            "The excluded_amount query must detect ': null' analytic entries"
+        """Null-value analytics must add to excluded_amount, not the xlsx."""
+        import controllers.purchase_orders_controller as poc
+
+        rows, excluded = poc.group_odoo_export_rows(
+            [
+                {
+                    "partner_id": "A",
+                    "product_id": "4.1",
+                    "analytic": '{"410": null}',
+                    "qty": 1,
+                    "total": 150,
+                }
+            ]
         )
+        assert rows == []
+        assert excluded == 150
 
     def test_both_empty_key_and_null_value_filtered_from_export(self):
         """Both the empty-key pattern and the null-value pattern must be excluded."""
-        src = _ctrl_source()
-        # In the main export query (NOT LIKE), both patterns must appear
-        export_query_region = src[
-            src.find("export_odoo_csv") : src.find("def _cc_status")
-        ]
-        assert (
-            'NOT LIKE \'%%"":' in export_query_region
-            or "NOT LIKE '%%\"\": %%'" in export_query_region
-        ), "export query must still exclude empty-key pattern"
-        assert "NOT LIKE '%%: null%%'" in export_query_region, (
-            "export query must exclude null-value pattern"
+        import controllers.purchase_orders_controller as poc
+
+        rows, excluded = poc.group_odoo_export_rows(
+            [
+                {
+                    "partner_id": "A",
+                    "product_id": "3.1",
+                    "analytic": '{"": 100}',
+                    "qty": 1,
+                    "total": 10,
+                },
+                {
+                    "partner_id": "A",
+                    "product_id": "4.1",
+                    "analytic": '{"410": null}',
+                    "qty": 1,
+                    "total": 20,
+                },
+                {
+                    "partner_id": "A",
+                    "product_id": "5.1",
+                    "analytic": '{"406": 100}',
+                    "qty": 2,
+                    "total": 200,
+                },
+            ]
         )
+        assert excluded == 30
+        assert len(rows) == 1
+        assert rows[0][1] == "5.1"
 
 
 # ---------------------------------------------------------------------------

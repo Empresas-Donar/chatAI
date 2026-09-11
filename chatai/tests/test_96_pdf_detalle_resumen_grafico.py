@@ -59,7 +59,7 @@ class TestSummaryTableHtml:
         assert "badge-trato" in html
         assert "badge-aldia" in html
         assert "$1.000.000" in html  # trato Total trabajadores
-        assert "$1.500.000" in html  # trato Costo Empresa (×1.50)
+        assert "$1.450.000" in html  # trato Costo Empresa (×1.45)
         assert "Costo Empresa" in html
         assert "Total a pagar" not in html
 

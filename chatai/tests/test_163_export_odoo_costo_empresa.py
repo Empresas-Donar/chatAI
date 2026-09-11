@@ -5,13 +5,13 @@ Regression test for issue #163: tarjas_reporte_odoo used pagar_efectivo
 (total_trabajado + total_contratista) as order_line/price_unit, producing
 export totals that differed from the Orden de Compra header by ~$65.290.
 
-Fix: the SQL view now exposes total_unitario_empresa = AVG(total_trabajado ×
-factor) where factor = 1.50 para trato, 1.45 al día, 1.0 para el resto.
-The view uses total_unitario_empresa as price_unit so the export total cuadra
-with the OC Costo Empresa total.
+Fix: billed export is priced with tarjas_empresa.total_empresa() via
+costo_empresa_odoo_lines (same grain as the OC). SQL still exposes
+total_unitario_empresa = AVG(total_trabajado × factor) where factor =
+1.45 trato / 1.50 al día / 1.0 resto, but that column is mapping metadata.
 
 Invariant under test:
-    SUM("order_line/product_qty" * "order_line/price_unit")  (tarjas_reporte_odoo)
+    SUM(costo_empresa_odoo_lines.total)
     ≈
     SUM(total_trabajado * factor)  (tarjas_pagos, mismo filtro)
 
@@ -48,6 +48,7 @@ if _db_url and not os.environ.get("DB_HOST"):
 
 from db import get_connection  # noqa: E402
 from tarjas_empresa import total_empresa  # noqa: E402
+import controllers.purchase_orders_controller as poc  # noqa: E402
 
 # Concrete case from the original bug report (a week with the $65.290 delta)
 CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
@@ -116,29 +117,34 @@ class TestIssue163ExportCostoEmpresa:
             "tarjas_reporte view must have column 'total_unitario_empresa' (issue #163)"
         )
 
+    def test_163_sql_factors_match_tarjas_empresa(self):
+        """Repo SQL CASE must not invert Trato ×1.45 / Al Día ×1.50."""
+        sql_file = (
+            Path(__file__).parent.parent.parent / "sql" / "tarjas" / "01_views_reporte.sql"
+        )
+        src = sql_file.read_text(encoding="utf-8")
+        start = src.find("total_unitario_empresa")
+        block = src[start : start + 900]
+        trato = block.find("= 'trato'")
+        al_dia = block.find("IN ('al dia', 'al día')")
+        assert trato != -1 and al_dia != -1, block[:400]
+        assert "THEN 1.45" in block[trato : trato + 80]
+        assert "THEN 1.50" in block[al_dia : al_dia + 80]
+
     def test_163_export_odoo_costo_empresa_regression(self, db):
         """
-        Regression: SUM(qty * price_unit) in tarjas_reporte_odoo must match
-        SUM(total_trabajado * factor) computed directly from tarjas_pagos.
+        Regression: SUM of costo_empresa_odoo_lines must match
+        SUM(total_trabajado * factor) from tarjas_pagos.
 
-        Before the fix both used pagar_efectivo; the OC used Costo Empresa.
-        That delta ($65.290 in the bug report) must now be zero (within rounding).
+        Before #163 the xlsx used pagar_efectivo; the OC used Costo Empresa.
+        That delta ($65.290 in the bug report) must stay zero (within rounding).
         """
         with db.cursor() as cur:
-            # Export total: what goes into the xlsx
-            cur.execute(
-                """
-                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"  = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                """,
-                (CONTRATISTA, NOMBRE_CAMPO, FECHA_INICIO, FECHA_TERMINO),
+            lines = poc.costo_empresa_odoo_lines(
+                cur, CONTRATISTA, NOMBRE_CAMPO, FECHA_INICIO, FECHA_TERMINO
             )
-            (export_total,) = cur.fetchone()
+            export_f = sum(float(line.get("total") or 0) for line in lines)
 
-            # OC total: same formula as _purchase_order_lines in the controller
             cur.execute(
                 """
                 SELECT tipo_pago, SUM(COALESCE(total_trabajado, 0)) AS trab
@@ -155,29 +161,12 @@ class TestIssue163ExportCostoEmpresa:
                 float(total_empresa(tipo, trab)) for tipo, trab in cur.fetchall()
             )
 
-        assert export_total is not None, "export_total should not be None"
-
-        export_f = float(export_total)
         delta = abs(export_f - oc_total)
-
-        # Fetch row count for per-line tolerance
-        with db.cursor() as cur:
-            cur.execute(
-                """
-                SELECT COUNT(*) FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"  = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                """,
-                (CONTRATISTA, NOMBRE_CAMPO, FECHA_INICIO, FECHA_TERMINO),
-            )
-            (row_count,) = cur.fetchone()
-
-        tolerance = max(TOLERANCE_PER_LINE * (row_count or 1), 1.0)
+        tolerance = max(TOLERANCE_PER_LINE * max(len(lines), 1), 1.0)
         assert delta <= tolerance, (
             f"Export total ({export_f:,.0f} CLP) differs from OC Costo Empresa "
             f"({oc_total:,.0f} CLP) by {delta:,.0f} CLP — exceeds tolerance {tolerance:.0f}. "
-            "price_unit must be total_unitario_empresa, not pagar_efectivo (issue #163)."
+            "xlsx must be priced via total_empresa(), not pagar_efectivo (issue #163)."
         )
 
     def test_163_total_unitario_empresa_less_than_or_equal_total_unitario(self, db):
