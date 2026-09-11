@@ -173,38 +173,39 @@ class TestIssue130NoFanoutRegression:
             f"'ASEO Y ORNATO' still duplicated in tarjas_reporte_odoo: {duplicates}"
         )
 
-    def test_130_visor_and_excel_totals_match_within_rounding(self, db):
+    def test_130_odoo_export_row_count_not_inflated(self, db):
         """
-        Regression: the on-screen total (tarjas_reporte, what GET
-        /api/purchase-orders shows) and the Odoo export total
-        (tarjas_reporte_odoo, what gets downloaded/imported) must match to
-        within a few cents of rounding — not off by hundreds of thousands of
-        pesos from a doubled labor.
+        Regression (simplified from original visor-vs-excel total check):
+        tarjas_reporte_odoo must have the same row count as tarjas_reporte for
+        this date range — a fan-out join would produce more rows.
+
+        Note: since issue #163 the export price_unit uses Costo Empresa
+        (total_unitario_empresa) instead of pagar_efectivo, so the monetary
+        totals of the two views legitimately differ. The fan-out invariant
+        (row count) is the correct proxy for issue #130 correctness here.
         """
         with db.cursor() as cur:
             cur.execute(
                 """
-                SELECT SUM(total_labor) FROM appsheet.tarjas_reporte
+                SELECT COUNT(*) FROM appsheet.tarjas_reporte
                 WHERE contratista = %s AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
                 """,
                 (CONTRATISTA, NOMBRE_CAMPO, FECHA_INICIO, FECHA_TERMINO),
             )
-            (visor_total,) = cur.fetchone()
+            (reporte_count,) = cur.fetchone()
 
             cur.execute(
                 """
-                SELECT SUM("order_line/product_qty" * "order_line/price_unit")
-                FROM appsheet.tarjas_reporte_odoo
+                SELECT COUNT(*) FROM appsheet.tarjas_reporte_odoo
                 WHERE "Vendedor" = %s AND nombre_campo = %s
                   AND fecha BETWEEN %s AND %s
                 """,
                 (CONTRATISTA, NOMBRE_CAMPO, FECHA_INICIO, FECHA_TERMINO),
             )
-            (excel_total,) = cur.fetchone()
+            (odoo_count,) = cur.fetchone()
 
-        assert visor_total is not None and excel_total is not None
-        assert abs(float(visor_total) - float(excel_total)) < 1.0, (
-            f"visor total ({visor_total}) and Excel export total ({excel_total}) "
-            "differ by more than rounding — a join is duplicating rows again"
+        assert odoo_count == reporte_count, (
+            f"tarjas_reporte_odoo has {odoo_count} rows but tarjas_reporte has "
+            f"{reporte_count} — a join is fanning out rows again (issue #130 regression)"
         )

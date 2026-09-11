@@ -296,10 +296,14 @@ async function loadExportPreview() {
       ccModal.previewTfoot().innerHTML = '';
     } else {
       ccModal.previewTbody().innerHTML = okHtml + exclHtml;
+      const totalClp = data.total_ok_clp ?? 0;
+      const totalClpFmt = Math.round(totalClp).toLocaleString('es-CL');
       ccModal.previewTfoot().innerHTML = `<tr>
         <td><strong>Total exportable</strong></td>
         <td class="num">${totalQty}</td>
-        <td></td><td></td><td></td>
+        <td></td>
+        <td class="num"><strong>$${totalClpFmt}</strong></td>
+        <td></td>
       </tr>`;
     }
 

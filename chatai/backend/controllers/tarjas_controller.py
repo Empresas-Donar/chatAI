@@ -480,8 +480,8 @@ async def get_tarjas_general_filters():
             labores = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
             empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
@@ -672,7 +672,7 @@ async def get_tarjas_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_reporte ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_reporte ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -1507,8 +1507,8 @@ async def get_tarjas_contractor_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -1629,9 +1629,9 @@ async def get_tarjas_contractor_tractorista_filters():
             base_where = f" FROM appsheet.tarjas_pagos WHERE {_TRACTORISTA_PAGOS_SQL} "
 
             cur.execute(
-                "SELECT DISTINCT contratista "
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista "
                 + base_where
-                + "AND contratista IS NOT NULL ORDER BY contratista"
+                + "AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -1777,8 +1777,8 @@ async def get_tarjas_resumen_persona_filters():
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
             empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
@@ -2009,8 +2009,8 @@ async def get_tarjas_resumen_horas_filters():
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
             empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
@@ -2139,8 +2139,8 @@ async def get_tarjas_resumen_persona_tractorista_filters():
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                f"WHERE {_TRACTORISTA_PAGOS_SQL} AND contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                f"WHERE {_TRACTORISTA_PAGOS_SQL} AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -2252,9 +2252,9 @@ async def get_tarjas_general_tractorista_filters():
             labores = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista "
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista "
                 + base
-                + "AND contratista IS NOT NULL ORDER BY contratista"
+                + "AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -4299,8 +4299,8 @@ async def get_tarjas_jornadas_trabajador_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
             empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
@@ -4603,8 +4603,8 @@ async def get_tarjas_bono_mensual_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
-                "WHERE labor = %s AND contratista IS NOT NULL ORDER BY contratista",
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                "WHERE labor = %s AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista",
                 (_BONO_MENSUAL_LABOR,),
             )
             contratistas = [r[0] for r in cur.fetchall()]
@@ -4924,7 +4924,7 @@ async def get_tarjas_hora_ponderada_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                f"SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 f"WHERE contratista IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
                 f"ORDER BY contratista"
             )
@@ -5282,7 +5282,7 @@ async def get_tarjas_notas_filters():
             campos = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 "WHERE contratista IS NOT NULL AND estado = 'Aprobado' ORDER BY contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
@@ -5523,9 +5523,9 @@ async def get_tarjas_tractorista_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 "WHERE LOWER(TRIM(tipo_pago)) = 'tractorista' "
-                "AND contratista IS NOT NULL ORDER BY contratista"
+                "AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -6612,7 +6612,7 @@ async def get_tarjas_registros_campo_filters():
             )
             estados = [r[0] for r in cur.fetchall()]
             cur.execute(
-                "SELECT DISTINCT contratista FROM appsheet.tarjas_pagos "
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 "WHERE contratista IS NOT NULL AND TRIM(contratista) <> '' "
                 "ORDER BY contratista"
             )

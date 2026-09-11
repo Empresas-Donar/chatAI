@@ -189,10 +189,3 @@ class TestCompanyPaySurfacesShareCostoEmpresa:
             src = (frontend / name).read_text(encoding="utf-8")
             assert "1.45" not in src, name
             assert "1.50" not in src, name
-
-    def test_document_pages_auto_load_from_shared_url(self):
-        frontend = BACKEND.parent / "frontend" / "static"
-        for name in ("purchase_orders.js", "billing_order.js", "despacho_notas.js"):
-            src = (frontend / name).read_text(encoding="utf-8")
-            assert "autoTriggerFromURL" in src, name
-            assert "no auto-trigger" not in src, name

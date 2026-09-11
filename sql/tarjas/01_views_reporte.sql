@@ -65,9 +65,19 @@ SELECT DISTINCT
     COUNT(*) OVER (
         PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
     )                                                                       AS jornadas,
-    ROUND(AVG(p.pagar_efectivo) OVER (
+    -- total_unitario_empresa: precio unitario Costo Empresa (issue #163).
+    -- Must match tarjas_empresa.py: Trato ×1.45, Al Día ×1.50, resto ×1.0.
+    -- Billed export still uses total_empresa() via costo_empresa_odoo_lines —
+    -- do not treat this column as the billed source of truth.
+    ROUND(AVG(
+        p.total_trabajado * CASE
+            WHEN LOWER(p.tipo_pago) = 'trato'             THEN 1.45
+            WHEN LOWER(p.tipo_pago) IN ('al dia', 'al día') THEN 1.50
+            ELSE 1.0
+        END)
+    ) OVER (
         PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
-    )::NUMERIC, 2)                                                          AS total_unitario,
+    )::NUMERIC, 2)                                                          AS total_unitario_empresa,
     SUM(p.pagar_efectivo) OVER (
         PARTITION BY p.contratista, p.nombre_campo, p.fecha::DATE, p.tipo_pago, p.cuartel_cc, p.labor
     )                                                                       AS total_labor,

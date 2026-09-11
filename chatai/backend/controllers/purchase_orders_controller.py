@@ -188,9 +188,7 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
         (contratista, empresa, fecha_inicio, fecha_termino),
     )
     columns = [d[0] for d in cur.description]
-    rows = [
-        {k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()
-    ]
+    rows = [{k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()]
     for r in rows:
         emp = float(total_empresa(r.get("tipo_pago"), r.get("total_trabajado")))
         jornadas = float(r.get("jornadas") or 0)
@@ -209,17 +207,13 @@ def _purchase_order_header(rows, fecha_inicio, fecha_termino):
     if not rows:
         return None
     total_trato = sum(
-        r["total_labor"] or 0
-        for r in rows
-        if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
+        r["total_labor"] or 0 for r in rows if r.get("tipo_pago") == _PAYMENT_TYPE_TRATO
     )
     # Catch-all (not an exact "== _PAYMENT_TYPE_AL_DIA" match): tipo_pago
     # values other than "trato" (e.g. "Bono") still count toward the total,
     # so screen and PDF cannot drop rows (issue #88).
     total_al_dia = sum(
-        r["total_labor"] or 0
-        for r in rows
-        if r.get("tipo_pago") != _PAYMENT_TYPE_TRATO
+        r["total_labor"] or 0 for r in rows if r.get("tipo_pago") != _PAYMENT_TYPE_TRATO
     )
     total_pagar = total_trato + total_al_dia
     pct_trato = round(total_trato / total_pagar * 100, 1) if total_pagar else 0
@@ -299,11 +293,27 @@ def costo_empresa_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_term
 
 
 def _analytic_has_empty_key(analytic) -> bool:
-    if analytic is None:
+    """True if analytic is missing, has an empty key, or a null percentage.
+
+    Odoo rejects both `{"": 100}` and `{"410": null}`. The latter is produced
+    when tarjas_cc.valor_odoo stores a JSONB null for a CC key (issue #164).
+    """
+    parsed = analytic
+    if parsed is None:
         return True
-    if isinstance(analytic, dict):
-        return "" in analytic or not analytic
-    return '"": ' in str(analytic) or str(analytic).strip() in ("", "{}", "–")
+    if isinstance(parsed, str):
+        text = parsed.strip()
+        if text in ("", "{}", "–") or '"": ' in text or ": null" in text:
+            return True
+        try:
+            parsed = _json.loads(text)
+        except Exception:
+            return False
+    if isinstance(parsed, dict):
+        if not parsed or "" in parsed:
+            return True
+        return any(v is None for v in parsed.values())
+    return False
 
 
 def group_odoo_export_rows(lines):
@@ -363,9 +373,9 @@ async def get_filters():
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT DISTINCT contratista
+                SELECT DISTINCT ON (unaccent(contratista)) contratista
                 FROM appsheet.tarjas_reporte
-                ORDER BY contratista
+                ORDER BY unaccent(contratista), contratista
             """)
             contractors = [r[0] for r in cur.fetchall()]
 
@@ -717,7 +727,14 @@ async def get_export_preview(
             except Exception:
                 pass
 
-        cc_ids = [k for k in analytic_dict.keys() if k != ""]
+        # cc_ids: keys that are non-empty AND have a non-null numeric value.
+        # A null value ({"410": null}) means the CC has no valid percentage assigned;
+        # such entries must be treated as invalid to prevent exporting a distribution
+        # that does not sum to 100%.
+        cc_ids = [k for k, v in analytic_dict.items() if k != "" and v is not None]
+        cc_ids_with_null = [
+            k for k, v in analytic_dict.items() if k != "" and v is None
+        ]
         cc_display = _cc_display(analytic_dict, odoo_names)
 
         if not product_id:
@@ -729,6 +746,26 @@ async def get_export_preview(
                     "price_unit": price_f,
                     "total": total_line,
                     "reason": "Labor sin mapear en Odoo",
+                }
+            )
+            total_excluded += total_line
+            continue
+
+        if cc_ids_with_null:
+            # One or more CCs have a null percentage — distribution is incomplete/invalid
+            null_names = [odoo_names.get(cid, cid) for cid in cc_ids_with_null]
+            excluded_rows.append(
+                {
+                    "product_id": product_id,
+                    "analytic_distribution": _json.dumps(
+                        analytic_dict, ensure_ascii=False
+                    ),
+                    "cc_display": cc_display,
+                    "null_ids": cc_ids_with_null,
+                    "qty": qty_f,
+                    "price_unit": price_f,
+                    "total": total_line,
+                    "reason": f"CC con distribución nula: {', '.join(null_names)}",
                 }
             )
             total_excluded += total_line
@@ -785,6 +822,7 @@ async def get_export_preview(
         "rows": preview_rows,
         "excluded": excluded_rows,
         "total_ok": total_ok,
+        "total_ok_clp": total_ok,
         "total_excluded": total_excluded,
         "rows_count": len(preview_rows),
         "excluded_count": len(excluded_rows),
@@ -1221,8 +1259,7 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
         tipo_rows = [
-            (tipo,) + _billing_costo_parts(tipo, trab)
-            for tipo, trab in cur.fetchall()
+            (tipo,) + _billing_costo_parts(tipo, trab) for tipo, trab in cur.fetchall()
         ]
 
         cur.execute(
@@ -1256,12 +1293,8 @@ def _billing_header_from_tipo_rows(
         float(r[1] or 0) for r in tipo_rows if r[0] != _PAYMENT_TYPE_TRATO
     )
     total_pagar = total_trato + total_al_dia
-    total_trabajado = sum(
-        float(r[2] or 0) for r in tipo_rows if len(r) > 2
-    )
-    total_contratista = sum(
-        float(r[3] or 0) for r in tipo_rows if len(r) > 3
-    )
+    total_trabajado = sum(float(r[2] or 0) for r in tipo_rows if len(r) > 2)
+    total_contratista = sum(float(r[3] or 0) for r in tipo_rows if len(r) > 3)
     trab_trato = sum(
         float(r[2] or 0)
         for r in tipo_rows
@@ -1418,7 +1451,9 @@ async def billing_order_pdf(
             "comision": prev["comision"] + float(row[4] or 0),
         }
         if len(row) > 5 and row[5]:
-            worker_tipos[w].update(t.strip() for t in str(row[5]).split(",") if t.strip())
+            worker_tipos[w].update(
+                t.strip() for t in str(row[5]).split(",") if t.strip()
+            )
 
     sorted_workers = sorted(workers.items())
 
@@ -1427,7 +1462,9 @@ async def billing_order_pdf(
 
     col_totals = {
         d: {
-            "total": sum(wdata.get(d, _empty_cell())["total"] for _, wdata in sorted_workers),
+            "total": sum(
+                wdata.get(d, _empty_cell())["total"] for _, wdata in sorted_workers
+            ),
             "trabajado": sum(
                 wdata.get(d, _empty_cell())["trabajado"] for _, wdata in sorted_workers
             ),
