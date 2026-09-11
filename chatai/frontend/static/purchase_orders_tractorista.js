@@ -22,11 +22,7 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/tractorista/filters');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { contratistas, campos } = await res.json();
-
-    const selC = document.getElementById('sel-contractor');
-    selC.innerHTML = '<option value="">Seleccione contratista…</option>' +
-      contratistas.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    const { campos } = await res.json();
 
     const selCampo = document.getElementById('sel-campo');
     selCampo.innerHTML = '<option value="">Seleccione campo…</option>' +
@@ -48,17 +44,17 @@ function hideError() {
 }
 
 // ── Generate button ───────────────────────────────────────────────────────
-document.getElementById('btn-generate').addEventListener('click', async () => {
-  const contractor = document.getElementById('sel-contractor').value;
+async function generate() {
+  const contractor = document.getElementById('fil-contratista').value;
   const campo      = document.getElementById('sel-campo').value;
-  const dateFrom   = document.getElementById('inp-date-from').value;
-  const dateTo     = document.getElementById('inp-date-to').value;
+  const dateFrom   = document.getElementById('fil-from').value;
+  const dateTo     = document.getElementById('fil-to').value;
 
   hideError();
   document.getElementById('oc-document').style.display = 'none';
 
   if (!contractor || !campo || !dateFrom || !dateTo) {
-    showError('Complete todos los filtros antes de generar la orden.');
+    showError('Seleccione contratista, campo y rango de fechas.');
     return;
   }
   if (dateFrom > dateTo) {
@@ -66,6 +62,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     return;
   }
 
+  if (typeof showReportLoading === 'function') showReportLoading();
   const btn = document.getElementById('btn-generate');
   btn.disabled = true;
   btn.textContent = 'Generando…';
@@ -78,6 +75,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
       fecha_termino:  dateTo,
     });
     _lastParams = params.toString();
+    if (typeof syncFiltersToURL === 'function') syncFiltersToURL(['sel-campo']);
 
     const res = await fetch('/api/tarjas/tractorista/preview?' + params);
     if (!res.ok) {
@@ -97,13 +95,18 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 
     renderDocument(data);
-    loadPivotTable();
+    await loadPivotTable();
   } catch (err) {
     showError('Error al generar: ' + err.message);
   } finally {
+    if (typeof hideReportLoading === 'function') hideReportLoading();
     btn.disabled = false;
     btn.textContent = 'Generar orden';
   }
+}
+
+document.getElementById('btn-generate').addEventListener('click', () => {
+  generate();
 });
 
 // ── Tabla por operador (misma data que el Excel "Tabla por operador") ────
@@ -420,4 +423,14 @@ document.getElementById('btn-cc-proceed').addEventListener('click', async () => 
 
 
 // ── Init ──────────────────────────────────────────────────────────────────
-loadFilters();
+loadFilters().then(async () => {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+  autoTriggerFromURL(['sel-campo'], () => {
+    const contractor = document.getElementById('fil-contratista')?.value;
+    const campo = document.getElementById('sel-campo')?.value;
+    const dateFrom = document.getElementById('fil-from')?.value;
+    const dateTo = document.getElementById('fil-to')?.value;
+    if (!contractor || !campo || !dateFrom || !dateTo) return;
+    return generate();
+  });
+});

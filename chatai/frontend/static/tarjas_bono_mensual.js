@@ -18,6 +18,11 @@ function fmtDate(iso) {
 
 // ── Init mes (current month) ─────────────────────────────────────────
 function initMes() {
+  const from = document.getElementById('fil-from')?.value;
+  if (from && from.length >= 7) {
+    document.getElementById('fil-mes').value = from.slice(0, 7);
+    return;
+  }
   const now = new Date();
   const mes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   document.getElementById('fil-mes').value = mes;
@@ -28,8 +33,6 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/bono-mensual/filters');
     const data = await res.json();
-    fillSelect('fil-contratista', data.contratistas, 'Todos');
-    fillSelect('fil-empresa', data.empresas, 'Todas');
     fillSelect('fil-campo', data.campos, 'Todos');
   } catch (e) {
     console.error('Error loading filters:', e);
@@ -129,6 +132,7 @@ function downloadPdf() {
 const FILTER_IDS = ['fil-mes', 'fil-contratista', 'fil-empresa', 'fil-campo'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initMes();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);

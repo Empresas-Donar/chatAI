@@ -108,11 +108,13 @@ function apiDetail(data, status) {
 }
 
 function initDates() {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(to.getDate() - 6);
-  document.getElementById('fil-from').value = toISO(from);
-  document.getElementById('fil-to').value = toISO(to);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 function fillSelect(id, values, emptyLabel) {
@@ -127,10 +129,8 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/registros-campo/filters');
     const data = await res.json();
-    fillSelect('fil-empresa', data.empresas || [], 'Todas');
     fillSelect('fil-labor', data.labores || [], 'Todas');
     fillSelect('fil-estado', data.estados || [], 'Todos');
-    fillSelect('fil-contratista', data.contratistas || [], 'Todos');
     fillSelect('fil-supervisor', data.supervisores || [], 'Todos');
   } catch (e) {
     console.error('Error loading filters:', e);
@@ -428,13 +428,10 @@ async function saveTimelineRegistro(id, card) {
 }
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
-  if (location.search) {
-    autoTriggerFromURL(FILTER_IDS, queryData);
-  } else {
-    queryData();
-  }
+  autoTriggerFromURL(FILTER_IDS, queryData);
 }
 
 document.getElementById('btn-apply').addEventListener('click', () => {

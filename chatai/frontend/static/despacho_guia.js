@@ -25,14 +25,16 @@ function fmtProducto(p) {
 
 let _guiasData = [];
 
-// ── Default dates: last 30 days ───────────────────────────────────────────
+// ── Default dates: owned by global bar (closed Wed–Tue week) ─────────────
 function setDefaultDates() {
-  const to   = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 30);
-  const fmt = d => d.toISOString().slice(0, 10);
-  document.getElementById('fil-from').value = fmt(from);
-  document.getElementById('fil-to').value   = fmt(to);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange === 'function') {
+    const w = currentWeekRange();
+    fromEl.value = w.from;
+    toEl.value = w.to;
+  }
 }
 
 // ── Load filters (reactive) ───────────────────────────────────────────────
@@ -404,4 +406,9 @@ function hideError()    { document.getElementById('error-box').classList.add('hi
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
 // Restore URL params after options are loaded so the select value is valid
-loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));
+(async function initGuia() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+  setDefaultDates();
+  await loadFilters();
+  autoTriggerFromURL(FILTER_IDS, fetchGuias);
+})();

@@ -22,14 +22,16 @@ const isTrato = tipo => tipo && ['a trato', 'trato'].includes(tipo.toLowerCase()
 
 let chartInstance = null;
 
-// ── Default dates: first and last day of current month ────────────────────
+// ── Default dates: owned by global bar (closed Wed–Tue week) ─────────────
 function setDefaultDates() {
-  const now  = new Date();
-  const y    = now.getFullYear();
-  const m    = String(now.getMonth() + 1).padStart(2, '0');
-  const last = new Date(y, now.getMonth() + 1, 0).getDate();
-  document.getElementById('fil-from').value = `${y}-${m}-01`;
-  document.getElementById('fil-to').value   = `${y}-${m}-${String(last).padStart(2, '0')}`;
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange === 'function') {
+    const w = currentWeekRange();
+    fromEl.value = w.from;
+    toEl.value = w.to;
+  }
 }
 
 // ── Load filters ──────────────────────────────────────────────────────────
@@ -37,14 +39,7 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/notas/filters');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { campos, contratistas } = await res.json();
-
-    const selC = document.getElementById('fil-contratista');
-    contratistas.forEach(c => {
-      const o = document.createElement('option');
-      o.value = o.textContent = c;
-      selC.appendChild(o);
-    });
+    const { campos } = await res.json();
 
     const selF = document.getElementById('fil-campo');
     campos.forEach(c => {
@@ -574,4 +569,8 @@ document.getElementById('btn-apply').addEventListener('click', () => {
 // ── Init ──────────────────────────────────────────────────────────────────
 setDefaultDates();
 // Restore URL params after selects are populated; no auto-trigger (document requires deliberate action)
-loadFilters().then(() => loadFiltersFromURL(FILTER_IDS));
+loadFilters().then(async () => {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+  setDefaultDates();
+  loadFiltersFromURL(FILTER_IDS);
+});

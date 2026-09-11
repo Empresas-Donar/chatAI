@@ -2,6 +2,12 @@
 
 {% block title %}Orden de Facturación — Empresas Donar{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-generate">Generar orden</button>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
 <link rel="stylesheet" href="/static/billing_order.css?v={{ static_v }}" />
@@ -20,28 +26,7 @@
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="filter-card">
-    <div class="filter-group">
-      <label>Contratista</label>
-      <select id="sel-contractor"><option value="">Cargando…</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Empresa</label>
-      <select id="sel-company"><option value="">Cargando…</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Fecha Inicio</label>
-      <input lang="es-CL" type="date" id="inp-date-from" />
-    </div>
-    <div class="filter-group">
-      <label>Fecha Término</label>
-      <input lang="es-CL" type="date" id="inp-date-to" />
-    </div>
-    <div>
-      <button class="btn btn-primary" id="btn-generate">Generar orden</button>
-    </div>
-  </div>
+
 
   <div id="error-box" class="error-box hidden"></div>
   <div id="empty-box" class="empty-state hidden">
@@ -139,6 +124,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
-<script src="/static/billing_order.js?v={{ static_v }}&c=1"></script>
+<script src="/static/billing_order.js?v={{ static_v }}&c=3"></script>
 {% endblock %}

@@ -85,15 +85,13 @@ const percentLabelPlugin = {
 
 // ── Init dates (current week: Monday to Sunday) ─────────────────────
 function initDates() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  document.getElementById('fil-from').value = toISO(monday);
-  document.getElementById('fil-to').value = toISO(sunday);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 // ── Load filter dropdowns ────────────────────────────────────────────
@@ -102,8 +100,6 @@ async function loadFilters() {
     const res = await fetch('/api/tarjas/detalle/filters');
     const data = await res.json();
 
-    fillSelect('fil-contratista', data.contratistas, 'Todos');
-    fillSelect('fil-empresa', data.empresas, 'Todas');
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
     fillSelect('fil-campo', data.campos, 'Todos');
@@ -335,6 +331,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-labor', 'fil-campo', 'fil-tipo'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   // Set default dates first so inputs are never empty when no URL params exist
   initDates();
   // Populate dynamic selects, then restore URL params so select values find their <option>

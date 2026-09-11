@@ -23,27 +23,35 @@ function fmtDateFull(s) {
   return `${d}/${m}/${y}`;
 }
 
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 let chartDaily = null;
 let chartTipo = null;
 
 // ── Date filter setup ────────────────────────────────────────────────
 function initDateFilter() {
-  const now = new Date();
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  document.getElementById('fil-date-from').value = toISO(firstOfMonth);
-  document.getElementById('fil-date-to').value = toISO(now);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 function getDateParams() {
-  const from = document.getElementById('fil-date-from').value;
-  const to   = document.getElementById('fil-date-to').value;
+  const from = document.getElementById('fil-from').value;
+  const to   = document.getElementById('fil-to').value;
   if (!from || !to) return '';
   return `fecha_inicio=${from}&fecha_termino=${to}`;
 }
 
-function setPreset(days) {
+function setPreset(days, btn) {
   const now = new Date();
   let from;
 
@@ -54,27 +62,31 @@ function setPreset(days) {
     from.setDate(from.getDate() - days + 1);
   }
 
-  document.getElementById('fil-date-from').value = toISO(from);
-  document.getElementById('fil-date-to').value = toISO(now);
+  document.getElementById('fil-from').value = toISO(from);
+  document.getElementById('fil-to').value = toISO(now);
+  if (typeof saveGlobalFilters === 'function') saveGlobalFilters();
 
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  if (btn) btn.classList.add('active');
 }
 
 document.querySelectorAll('.preset-btn').forEach(btn => {
-  btn.addEventListener('click', e => {
-    setPreset(parseInt(btn.dataset.days));
+  btn.addEventListener('click', () => {
+    setPreset(parseInt(btn.dataset.days, 10), btn);
+    if (typeof syncFiltersToURL === 'function') syncFiltersToURL([]);
     loadDashboard();
   });
 });
 
 document.getElementById('btn-apply-filter').addEventListener('click', () => {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  if (typeof saveGlobalFilters === 'function') saveGlobalFilters();
+  if (typeof syncFiltersToURL === 'function') syncFiltersToURL([]);
   loadDashboard();
 });
 
 // allow Enter key on date inputs
-document.querySelectorAll('#fil-date-from, #fil-date-to').forEach(el => {
+document.querySelectorAll('#fil-from, #fil-to').forEach(el => {
   el.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
@@ -105,8 +117,8 @@ async function loadDashboard() {
 }
 
 function updateRangeLabels() {
-  const from = document.getElementById('fil-date-from').value;
-  const to   = document.getElementById('fil-date-to').value;
+  const from = document.getElementById('fil-from').value;
+  const to   = document.getElementById('fil-to').value;
   const label = `${fmtDateFull(from)} — ${fmtDateFull(to)}`;
   document.getElementById('badge-contratistas').textContent = label;
   document.getElementById('badge-labores').textContent = label;
@@ -285,5 +297,8 @@ function renderAlerts(alerts, sources) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────
-initDateFilter();
-loadDashboard();
+(async function initDashboard() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
+  initDateFilter();
+  autoTriggerFromURL([], loadDashboard);
+})();

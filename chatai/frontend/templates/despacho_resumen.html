@@ -2,6 +2,17 @@
 
 {% block title %}Resumen Despacho — Empresas Donar{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-sep"></div>
+<div class="global-filter-field">
+  <label>Cliente</label>
+  <select id="fil-cliente"><option value="">Todos</option></select>
+</div>
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
@@ -11,25 +22,6 @@
 {% block body %}
 <div class="container" style="max-width:1200px">
 
-  <!-- Filters -->
-  <div class="filter-card">
-    <div class="filter-group">
-      <label>Cliente</label>
-      <select id="fil-cliente"><option value="">Todos</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Fecha Inicio</label>
-      <input lang="es-CL" type="date" id="fil-from" />
-    </div>
-    <div class="filter-group">
-      <label>Fecha Término</label>
-      <input lang="es-CL" type="date" id="fil-to" />
-    </div>
-    <div class="filter-group" style="flex:0;min-width:auto;justify-content:flex-end">
-      <label>&nbsp;</label>
-      <button class="btn btn-primary" id="btn-apply">Consultar</button>
-    </div>
-  </div>
 
   <div id="error-box" class="error-box hidden"></div>
 
@@ -134,6 +126,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/despacho_resumen.js?v={{ static_v }}"></script>
 {% endblock %}

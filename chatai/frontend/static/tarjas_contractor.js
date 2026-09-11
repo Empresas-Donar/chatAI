@@ -35,15 +35,13 @@ function detectWorkerCol(cols) {
 
 // ── Init dates (current week) ─────────────────────────────────────────
 function initDates() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  document.getElementById('fil-from').value = toISO(monday);
-  document.getElementById('fil-to').value = toISO(sunday);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 // ── Load filter dropdowns ─────────────────────────────────────────────
@@ -51,8 +49,6 @@ async function loadFilters() {
   try {
     const res = await fetch('/api/tarjas/contratista/filters');
     const data = await res.json();
-    fillSelect('fil-contratista', data.contratistas, 'Todos');
-    fillSelect('fil-empresa', data.empresas, 'Todas');
     fillSelect('fil-cc', data.centros_costo, 'Todos');
     fillSelect('fil-labor', data.labores, 'Todas');
     fillSelect('fil-tipo', data.tipos_pago, 'Todos');
@@ -293,6 +289,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa', 'fil-cc', 'fil-tipo', 'fil-labor'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);

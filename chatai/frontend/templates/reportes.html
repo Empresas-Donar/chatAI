@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 
+{% block gf_attrs %}data-skip-auto-report{% endblock %}
+
 {% block title %}Descarga de Reportes{% endblock %}
+
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-download" disabled>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+    Descargar PDF
+  </button>
+  <span class="rep-count" id="rep-count" style="font-size:12px;color:var(--text-muted)">0 reportes seleccionados</span>
+</div>
+{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="/static/reportes.css?v={{ static_v }}" />
@@ -12,40 +28,10 @@
   <div class="page-header">
     <div>
       <h1>Descarga de Reportes</h1>
-      <p>Selecciona los reportes que deseas descargar y aplica los filtros de fecha</p>
+      <p>Selecciona los reportes que deseas descargar. Empresa, contratista y fechas se toman de la barra global.</p>
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="filter-bar rep-filter-bar">
-    <div>
-      <label>Desde</label>
-      <input lang="es-CL" type="date" id="fil-from" />
-    </div>
-    <div>
-      <label>Hasta</label>
-      <input lang="es-CL" type="date" id="fil-to" />
-    </div>
-    <div>
-      <label>Empresa / Campo</label>
-      <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Contratista</label>
-      <select id="fil-contratista"><option value="">Todos</option></select>
-    </div>
-    <div class="rep-filter-actions">
-      <button class="btn btn-primary" id="btn-download" disabled>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        Descargar PDF
-      </button>
-      <span class="rep-count" id="rep-count">0 reportes seleccionados</span>
-    </div>
-  </div>
 
   <!-- Selection controls -->
   <div class="rep-controls">
@@ -104,6 +90,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/reportes.js?v={{ static_v }}"></script>
 {% endblock %}

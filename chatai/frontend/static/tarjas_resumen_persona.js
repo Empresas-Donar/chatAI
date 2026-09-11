@@ -18,15 +18,13 @@ function formatShortDate(isoStr) {
 
 // ── Init dates (current week) ─────────────────────────────────────────
 function initDates() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  document.getElementById('fil-from').value = toISO(monday);
-  document.getElementById('fil-to').value = toISO(sunday);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 // ── Load filters ──────────────────────────────────────────────────────
@@ -39,18 +37,6 @@ async function loadFilters() {
     sel.innerHTML = '<option value="">Todos</option>' +
       data.trabajadores.map(t =>
         `<option value="${esc(t.trabajador)}">${esc(t.trabajador)}</option>`
-      ).join('');
-
-    const selContratista = document.getElementById('fil-contratista');
-    selContratista.innerHTML = '<option value="">Todos</option>' +
-      data.contratistas.map(c =>
-        `<option value="${esc(c)}">${esc(c)}</option>`
-      ).join('');
-
-    const selEmpresa = document.getElementById('fil-empresa');
-    selEmpresa.innerHTML = '<option value="">Todas</option>' +
-      data.empresas.map(e =>
-        `<option value="${esc(e)}">${esc(e)}</option>`
       ).join('');
 
     const selTipo = document.getElementById('fil-tipo');
@@ -242,6 +228,7 @@ function printWithHeader(title, filters) {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-trabajador', 'fil-contratista', 'fil-tipo', 'fil-empresa'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);

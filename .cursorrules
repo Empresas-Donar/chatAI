@@ -33,6 +33,20 @@ JSON `{"id_cc": porcentaje}`. Invariantes:
 - Nunca exportar valores `null` o vacíos: `"410": null` o `"410": ,` son inválidos
 - Filas con distribución inválida → estado `⚠ Incompleta`, excluir del export
 
+## Reportes frontend (filtros + loading)
+
+Nueva página en `/tarjas`, `/dashboard`, `/reportes`, `/odoo`, `/despacho`: reutilizar `base.html`. No copiar Empresa / Contratista / fechas ni un spinner.
+
+- IDs globales: `fil-empresa`, `fil-contratista`, `fil-from`, `fil-to` (`global-filters.js` + URL)
+- Default de fechas: última semana miércoles–martes **cerrada** (`currentWeekRange()`). Si el usuario cambia, sessionStorage. No usar lunes–domingo.
+- `{% block page_filters %}` = acciones (+ Mes local); `{% block advanced_filters %}` = Campo, CC, labor, tipo, etc.
+- `autoTriggerFromURL(ids, queryFn)` al entrar; no esperar Consultar
+- Overlay único `#report-inline-loading` vía `runReportQuery` / `showReportLoading` — nunca clonar el HTML ni ocultar `.container`
+- Opt-out: `{% block gf_attrs %}data-skip-auto-report{% endblock %}` (Notas, PDF masivo)
+- OC / facturación: auto-generar solo si empresa + contratista + fechas; `generate()` usa el mismo overlay
+
+Detalle: `.cursor/rules/frontend-reportes.mdc`.
+
 ## Convenciones generales
 
 - **Código:** inglés (funciones, variables, archivos, commits)

@@ -2,6 +2,26 @@
 
 {% block title %}Bonos Mensuales — Tarjas{% endblock %}
 
+{% block page_filters %}
+<div class="global-filter-sep"></div>
+<div class="global-filter-field">
+  <label>Mes</label>
+  <input lang="es-CL" type="month" id="fil-mes" />
+</div>
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+  <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+  <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label for="fil-campo">Campo</label>
+  <select id="fil-campo"><option value="">Todos</option></select>
+</div>
+{% endblock %}
+
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 <style>
@@ -24,32 +44,7 @@
   <!-- Print header (filled by JS, visible only when printing) -->
   <div id="print-header"></div>
 
-  <!-- Filters -->
-  <div class="filter-bar">
-    <div>
-      <label>Mes</label>
-      <input lang="es-CL" type="month" id="fil-mes" />
-    </div>
-    <div>
-      <label>Empresa</label>
-      <select id="fil-empresa"><option value="">Todas</option></select>
-    </div>
-    <div>
-      <label>Campo</label>
-      <select id="fil-campo"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <label>Contratista</label>
-      <select id="fil-contratista"><option value="">Todos</option></select>
-    </div>
-    <div>
-      <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
-    </div>
-    <div class="filter-actions">
-      <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
-      <button class="btn btn-secondary btn-sm" id="btn-pdf" disabled>PDF</button>
-    </div>
-  </div>
+
 
   <!-- Table -->
   <div class="table-card" id="table-section" style="display:none">
@@ -87,6 +82,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/url-filters.js?v={{ static_v }}"></script>
 <script src="/static/tarjas_bono_mensual.js?v={{ static_v }}"></script>
 {% endblock %}

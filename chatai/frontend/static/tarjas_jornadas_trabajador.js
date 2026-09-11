@@ -8,32 +8,18 @@ function toISO(d) { return d.toISOString().slice(0, 10); }
 
 // ── Init dates (current week) ─────────────────────────────────────────
 function initDates() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  document.getElementById('fil-from').value = toISO(monday);
-  document.getElementById('fil-to').value   = toISO(sunday);
+  const fromEl = document.getElementById('fil-from');
+  const toEl = document.getElementById('fil-to');
+  if (fromEl && fromEl.value && toEl && toEl.value) return;
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 // ── Load filters ──────────────────────────────────────────────────────
 async function loadFilters() {
-  try {
-    const res  = await fetch('/api/tarjas/jornadas-trabajador/filters');
-    const data = await res.json();
-
-    const selC = document.getElementById('fil-contratista');
-    selC.innerHTML = '<option value="">Todos</option>' +
-      data.contratistas.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-
-    const selE = document.getElementById('fil-empresa');
-    selE.innerHTML = '<option value="">Todas</option>' +
-      data.empresas.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
-  } catch (e) {
-    console.error('Error loading filters:', e);
-  }
+  // Empresa / contratista are owned by the global filter bar
 }
 
 // ── Query & render ────────────────────────────────────────────────────
@@ -131,6 +117,7 @@ function downloadPdf() {
 const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa'];
 
 async function loadFiltersAndRestore() {
+  if (window.globalFiltersReady) await window.globalFiltersReady;
   initDates();
   await loadFilters();
   autoTriggerFromURL(FILTER_IDS, queryData);
