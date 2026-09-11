@@ -88,14 +88,6 @@
     ]
   },
   {
-    "label": "Sensores",
-    "icon": "pulse",
-    "children": [
-      { "href": "/sensors",        "label": "Inventario" },
-      { "href": "/sensors/status", "label": "Estado Diario" },
-    ]
-  },
-  {
     "label": "Odoo",
     "icon": "odoo",
     "children": [
@@ -117,6 +109,14 @@
           { "href": "/despacho/guia",    "label": "Guía de despacho" },
         ]
       },
+    ]
+  },
+  {
+    "label": "Sensores",
+    "icon": "pulse",
+    "children": [
+      { "href": "/sensors",        "label": "Inventario" },
+      { "href": "/sensors/status", "label": "Estado Diario" },
     ]
   },
   {
@@ -275,7 +275,8 @@
 {% set _gf_path = request.url.path %}
 {% set show_global_filters = _gf_path.startswith('/tarjas') or _gf_path.startswith('/dashboard') or _gf_path.startswith('/reportes') or _gf_path.startswith('/odoo') or _gf_path.startswith('/despacho') %}
 {% if show_global_filters %}
-<div class="global-filter-bar" id="global-filter-bar" {% block gf_attrs %}{% endblock %}>
+{% set _gf_attrs %}{% block gf_attrs %}{% endblock %}{% endset %}
+<div class="global-filter-bar" id="global-filter-bar" {{ _gf_attrs|trim }}>
   <div class="global-filter-field">
     <label for="fil-empresa">Empresa</label>
     <select id="fil-empresa"><option value="">Todas</option></select>
@@ -311,7 +312,7 @@
     <button class="btn btn-primary btn-sm" id="btn-adv-apply">Consultar</button>
   </div>
 </div>
-<div id="report-inline-loading" class="report-inline-loading" hidden role="status" aria-live="polite">
+<div id="report-inline-loading" class="report-inline-loading"{% if 'data-skip-auto-report' in _gf_attrs %} hidden{% endif %} role="status" aria-live="polite">
   <div class="report-loader" aria-hidden="true">
     <span class="report-loader-ring"></span>
     <span class="report-loader-ring report-loader-ring--inner"></span>
@@ -408,8 +409,8 @@ if (userMenu) {
 }
 </script>
 {% if show_global_filters %}
-<script src="/static/url-filters.js?v={{ static_v }}&r=6"></script>
-<script src="/static/global-filters.js?v={{ static_v }}&r=4"></script>
+<script src="/static/url-filters.js?v={{ static_v }}&r=7"></script>
+<script src="/static/global-filters.js?v={{ static_v }}&r=5"></script>
 <script>
 (function () {
   const panel   = document.getElementById('adv-modal');

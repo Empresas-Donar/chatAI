@@ -1,0 +1,27 @@
+---
+description: Semana de cierre de reportes — miércoles a martes ya cerrado
+alwaysApply: true
+---
+
+# Semana de cierre (reportes)
+
+La empresa cierra y mira reportes **miércoles a martes**. El default de `fil-from` / `fil-to` es la **última semana miércoles–martes ya cerrada**, no la semana calendario lunes–domingo ni la semana en curso.
+
+Única fuente: `currentWeekRange()` en `chatai/frontend/static/global-filters.js`.
+
+Ejemplos:
+
+- Viernes 11 sep 2026 → `2026-09-02` .. `2026-09-08`
+- Miércoles 16 sep 2026 → `2026-09-09` .. `2026-09-15`
+
+Un martes todavía no cierra: se muestra la semana anterior.
+
+Si el usuario cambia las fechas, se guardan en **sessionStorage** (`donar.globalFilterDates`) para esa pestaña. Empresa / contratista siguen en localStorage. Un enlace con `?fil-from=` gana al cargar.
+
+```javascript
+// BAD — semana calendario
+monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+
+// GOOD
+const w = currentWeekRange(); // last completed Wed–Tue
+```

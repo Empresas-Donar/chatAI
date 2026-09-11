@@ -49,25 +49,15 @@ function detectWorkerCol(cols) {
   return null;
 }
 
-// ── Init dates (current week Mon–Sun) ─────────────────────────────────
+// ── Init dates (closed Wed–Tue week via currentWeekRange) ─────────────
 function initDates() {
   const fromEl = document.getElementById('fil-from');
   const toEl = document.getElementById('fil-to');
   if (fromEl && fromEl.value && toEl && toEl.value) return;
-  if (typeof currentWeekRange === 'function') {
-    const w = currentWeekRange();
-    fromEl.value = w.from;
-    toEl.value = w.to;
-    return;
-  }
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  fromEl.value = toISO(monday);
-  toEl.value   = toISO(sunday);
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 // ── Load filter dropdowns ──────────────────────────────────────────────

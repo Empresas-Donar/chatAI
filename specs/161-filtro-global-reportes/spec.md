@@ -14,11 +14,11 @@ Los filtros específicos de cada reporte (CC, labor, campo, tipo, trabajador, et
 - Barra global sticky bajo el navbar, visible en `/tarjas`, `/dashboard`, `/reportes`, `/odoo`, `/despacho`
 - No visible en Chat IA, Sensores, Utilidades, login
 - Cuatro controles: Empresa (`fil-empresa`, "Todas"), Contratista (`fil-contratista`, "Todos"), Fecha de Inicio (`fil-from`), Fecha de Fin (`fil-to`)
-- Persistencia: localStorage (canónico) + URL query params (URL gana al cargar por clave)
-- Al cambiar un filtro global se guarda de inmediato en localStorage
+- Persistencia: empresa/contratista en localStorage; fechas en sessionStorage (rango custom dura la pestaña) + URL (URL gana al cargar por clave)
+- Al cambiar un filtro global se guarda de inmediato (fechas → sessionStorage, empresa/contratista → localStorage)
 - Al navegar entre reportes (y al cambiar Empresa / Contratista / fechas) la consulta corre sola; no hay que pulsar Consultar. El botón queda para filtros avanzados del modal.
 - OC y facturación se auto-generan solo si ya hay empresa + contratista + fechas. Notas de crédito siguen pidiendo Generar.
-- Fechas por defecto: lunes–domingo de la semana actual si no hay valores guardados
+- Fechas por defecto: última semana **miércoles–martes ya cerrada** (viernes 11 sep → 2–8; miércoles 16 sep → 9–15)
 - Los 4 campos se quitan de las barras locales de cada reporte
 - `fil-mes` de bono mensual se mantiene como filtro de página; se hidrata desde `fil-from` (YYYY-MM)
 - Presets del dashboard escriben en los campos globales de fecha
@@ -38,7 +38,8 @@ Templates usan `{% block page_filters %}` (acciones + período local como Mes) y
 
 ## Decisions
 
-- **localStorage canónico** (`donar.globalFilters`): sobrevive navegación entre reportes. Los enlaces del menú se reescriben con Empresa / Contratista / fechas. No guardar la barra vacía antes de hidratar los selects (eso pisaba empresa/contratista). La URL gana por clave al cargar (enlaces compartidos).
+- **Fechas de cierre**: default = última semana miércoles–martes **cerrada** (`currentWeekRange()`). Si el usuario cambia Desde/Hasta, sessionStorage (`donar.globalFilterDates`) las mantiene en esa pestaña. Empresa/contratista siguen en localStorage. Un enlace `?fil-from=` gana al cargar.
+- **localStorage** (`donar.globalFilters`): solo empresa/contratista. Los enlaces del menú se reescriben con los cuatro globales. No guardar la barra vacía antes de hidratar los selects.
 - **Barra en `base.html`**: un solo markup + scripts; gating por prefijo de path (no en Chat/Sensores/Utilidades/login).
 - **Listas empresa/contratista** desde `GET /api/tarjas/general/filters` (sin API nueva). Tras #165 ese endpoint ya deduplica contratistas con `unaccent`.
 - **Documentos**: OC y facturación se auto-generan si empresa + contratista + fechas ya están elegidos al entrar. Notas de crédito siguen pidiendo Generar.
@@ -72,12 +73,13 @@ Static UI assertions updated in `test_136_registros_campo.py` and `test_153_deta
 
 ## Manual QA
 
-1. Abrir `/tarjas/general`: ver barra sticky con Empresa, Contratista, Desde, Hasta; semana actual si no hay valores guardados.
+1. Abrir `/tarjas/general` en pestaña nueva (sin query): Desde/Hasta = última semana miércoles–martes cerrada (hoy viernes 11 sep 2026 → 02/09/2026–08/09/2026).
 2. Elegir empresa + contratista + rango; ir a `/tarjas/detalle` **sin** pulsar Consultar — mismos valores en la barra y el reporte carga solo; Campo, CC, labor y tipo en el modal Filtros.
-3. Abrir un enlace con `?fil-from=…&fil-empresa=…` — esos valores ganan sobre localStorage.
+3. Abrir un enlace con `?fil-from=…&fil-empresa=…` — esos valores ganan sobre session/localStorage.
 4. Dashboard: presets 7/14/Este mes/3 meses escriben fechas globales y se reflejan al ir a otro reporte.
 5. `/odoo/tarjas` y `/odoo/facturacion`: si empresa + contratista + fechas ya están, el documento se genera al entrar; si faltan, esperar Generar.
 6. `/tarjas/bono-mensual`: `fil-mes` ≈ YYYY-MM de `fil-from`; la consulta corre al entrar.
 7. Despacho (`/despacho/guia`, etc.): usan fechas globales; empresa/contratista siguen en localStorage para tarjas.
 8. Chat IA / Sensores / login: **sin** barra global.
 9. Modal Filtros: el botón solo aparece si la página tiene filtros avanzados; el badge muestra cuántos están activos; Consultar del modal dispara el Consultar de la página.
+10. Cambiar Desde/Hasta, navegar a otro reporte en la misma pestaña: se conservan. Nueva pestaña sin query: vuelve a la semana de cierre.

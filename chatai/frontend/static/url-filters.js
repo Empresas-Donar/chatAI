@@ -61,6 +61,15 @@ function showReportLoading() {
   el.hidden = false;
 }
 
+function _revealLoaderIfAuto() {
+  const bar = document.getElementById('global-filter-bar');
+  if (!bar || bar.hasAttribute('data-skip-auto-report')) return;
+  const el = document.getElementById(_LOADING_ID);
+  if (!el) return;
+  _positionLoader(el);
+  el.hidden = false;
+}
+
 function hideReportLoading() {
   _loadingDepth = Math.max(0, _loadingDepth - 1);
   if (_loadingDepth > 0) return;
@@ -86,6 +95,8 @@ function runReportQuery(fn) {
 window.showReportLoading = showReportLoading;
 window.hideReportLoading = hideReportLoading;
 window.runReportQuery = runReportQuery;
+
+_revealLoaderIfAuto();
 
 window.addEventListener('resize', () => {
   const el = document.getElementById(_LOADING_ID);

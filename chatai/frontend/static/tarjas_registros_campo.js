@@ -111,19 +111,10 @@ function initDates() {
   const fromEl = document.getElementById('fil-from');
   const toEl = document.getElementById('fil-to');
   if (fromEl && fromEl.value && toEl && toEl.value) return;
-  if (typeof currentWeekRange === 'function') {
-    const w = currentWeekRange();
-    fromEl.value = w.from;
-    toEl.value = w.to;
-    return;
-  }
-  const to = new Date();
-  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate());
-  from.setDate(from.getDate() - (from.getDay() === 0 ? 6 : from.getDay() - 1));
-  const sunday = new Date(from);
-  sunday.setDate(from.getDate() + 6);
-  document.getElementById('fil-from').value = toISO(from);
-  document.getElementById('fil-to').value = toISO(sunday);
+  if (typeof currentWeekRange !== 'function') return;
+  const w = currentWeekRange();
+  fromEl.value = w.from;
+  toEl.value = w.to;
 }
 
 function fillSelect(id, values, emptyLabel) {

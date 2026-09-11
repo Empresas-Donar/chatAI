@@ -10,7 +10,7 @@ Nueva página de reporte (`/tarjas`, `/dashboard`, `/reportes`, `/odoo`, `/despa
 
 ## Barra y modal
 
-IDs canónicos en `base.html`: `fil-empresa`, `fil-contratista`, `fil-from`, `fil-to`. Persistencia: `global-filters.js` (`donar.globalFilters`) + URL.
+IDs canónicos en `base.html`: `fil-empresa`, `fil-contratista`, `fil-from`, `fil-to`. Empresa/contratista: localStorage. Fechas: sessionStorage (`donar.globalFilterDates`) + URL.
 
 | Bloque | Qué va ahí |
 |---|---|
@@ -35,7 +35,7 @@ Eso cubre: carga inicial, cambio de barra global, Consultar (`#btn-apply` / `#bt
 
 ## Overlay de loading
 
-Un solo `#report-inline-loading` en `base.html`. `url-filters.js` expone `runReportQuery` / `showReportLoading` / `hideReportLoading` (refcount).
+Un solo `#report-inline-loading` en `base.html`. En páginas con auto-consulta el overlay se pinta de inmediato (sin `hidden`); Notas/PDF masivo lo ocultan con `data-skip-auto-report`. `url-filters.js` expone `runReportQuery` / `showReportLoading` / `hideReportLoading` (refcount).
 
 ```javascript
 // BAD — spinner por página, hide de .container, loader HTML copiado
@@ -54,4 +54,4 @@ No ocultar hijos de `.container` a mano. No clonar el markup del overlay.
 
 ## Fechas
 
-UI `DD/MM/YYYY`. Inputs `type="date"` → `YYYY-MM-DD`. Default de barra: lunes–domingo de la semana actual. `fil-mes` / `fil-month` siguen locales; hidratar desde `fil-from` (YYYY-MM).
+UI `DD/MM/YYYY`. Inputs `type="date"` → `YYYY-MM-DD`. Default de barra: última semana **miércoles–martes ya cerrada** (`currentWeekRange()`). Fechas custom viven en sessionStorage; empresa/contratista en localStorage. `fil-mes` / `fil-month` siguen locales; hidratar desde `fil-from` (YYYY-MM).

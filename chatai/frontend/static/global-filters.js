@@ -1,17 +1,24 @@
 // global-filters.js — Persist Empresa / Contratista / date range across report pages
-// Canonical store: localStorage. URL query params win per-key on load (shareable links).
+// Empresa/contratista: localStorage. Dates: sessionStorage (custom range lasts the tab).
+// URL query params win per-key on load (shareable links).
 // Nav links to report pages are rewritten with the current globals so they survive navigation.
 // Depends on url-filters.js (loaded first) for URL sync helpers.
 //
+// Default dates: last completed Wednesday–Tuesday (company close week).
+//   Fri 11 Sep 2026 → 2026-09-02 .. 2026-09-08
+//   Wed 16 Sep 2026 → 2026-09-09 .. 2026-09-15
+//
 // Public:
 //   GLOBAL_FILTER_IDS, STORAGE_KEY
-//   getGlobalFilters(), saveGlobalFilters()
+//   getGlobalFilters(), saveGlobalFilters(), currentWeekRange()
 //   window.globalFiltersReady — Promise resolved after selects are populated
 
 'use strict';
 
 const GLOBAL_FILTER_IDS = ['fil-from', 'fil-to', 'fil-empresa', 'fil-contratista'];
+const DATE_IDS = ['fil-from', 'fil-to'];
 const STORAGE_KEY = 'donar.globalFilters';
+const DATE_SESSION_KEY = 'donar.globalFilterDates';
 const FILTERS_ENDPOINT = '/api/tarjas/general/filters';
 const REPORT_PREFIXES = ['/tarjas', '/dashboard', '/reportes', '/odoo', '/despacho'];
 
@@ -22,19 +29,31 @@ function _toLocalISO(d) {
   return `${y}-${m}-${day}`;
 }
 
-function currentWeekRange() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return { from: _toLocalISO(monday), to: _toLocalISO(sunday) };
+function currentWeekRange(now) {
+  const today = now instanceof Date ? now : new Date();
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  d.setDate(d.getDate() - 1);
+  while (d.getDay() !== 2) d.setDate(d.getDate() - 1);
+  const tuesday = d;
+  const wednesday = new Date(tuesday);
+  wednesday.setDate(tuesday.getDate() - 6);
+  return { from: _toLocalISO(wednesday), to: _toLocalISO(tuesday) };
 }
 
 function _readStored() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' ? data : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _readSessionDates() {
+  try {
+    const raw = sessionStorage.getItem(DATE_SESSION_KEY);
     if (!raw) return {};
     const data = JSON.parse(raw);
     return data && typeof data === 'object' ? data : {};
@@ -59,6 +78,10 @@ function _el(id) {
 function _desired(id) {
   const fromUrl = _urlValue(id);
   if (fromUrl !== null) return fromUrl;
+  if (DATE_IDS.includes(id)) {
+    const sess = _readSessionDates()[id];
+    return sess != null ? sess : '';
+  }
   const stored = _readStored()[id];
   return stored != null ? stored : '';
 }
@@ -117,7 +140,7 @@ function decorateNavLinks() {
   GLOBAL_FILTER_IDS.forEach(id => {
     const el = _el(id);
     const live = el ? el.value : '';
-    values[id] = live || _readStored()[id] || '';
+    values[id] = live || _desired(id) || '';
   });
   document.querySelectorAll('a[href]').forEach(a => {
     const href = a.getAttribute('href');
@@ -168,7 +191,16 @@ function saveGlobalFilters() {
     if (!hasOption) data[id] = prev;
   });
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    sessionStorage.setItem(DATE_SESSION_KEY, JSON.stringify({
+      'fil-from': data['fil-from'] || '',
+      'fil-to': data['fil-to'] || '',
+    }));
+  } catch (_) { /* quota / private mode */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      'fil-empresa': data['fil-empresa'] || '',
+      'fil-contratista': data['fil-contratista'] || '',
+    }));
   } catch (_) { /* quota / private mode */ }
   decorateNavLinks();
   _syncUrlFromGlobals();

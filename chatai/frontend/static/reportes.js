@@ -14,7 +14,7 @@
   const repCount    = document.getElementById('rep-count');
   const loadingEl   = document.getElementById('rep-loading');
 
-  // ── Default dates: owned by global bar (week Mon–Sun fallback) ─────────────
+  // ── Default dates: owned by global bar (closed Wed–Tue week) ─────────────
   function setDefaultDates() {
     const fromEl = document.getElementById('fil-from');
     const toEl = document.getElementById('fil-to');
