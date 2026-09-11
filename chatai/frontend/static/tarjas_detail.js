@@ -6,64 +6,36 @@ const fmtCLP = new Intl.NumberFormat('es-CL', {
 const fmtNum = new Intl.NumberFormat('es-CL');
 const fmtPct = v => v != null ? Number(v).toFixed(2) + ' %' : '—';
 const fmtResumenPct = v => v != null ? Number(v).toFixed(1) + ' %' : '—';
-// Must match chatai/backend/tarjas_empresa.py — screen derives money from
-// total_trabajado even if the API still returns total_pagar zeros.
-const FACTOR_EMPRESA_AL_DIA = 1.45;
-const FACTOR_EMPRESA_TRATO = 1.5;
-const FACTOR_EMPRESA_DEFAULT = 1;
 
-function tipoKey(tipo) {
-  return String(tipo || '').trim().toLowerCase();
-}
-function isTrato(tipo) { return tipoKey(tipo) === 'trato'; }
-function isAlDia(tipo) {
-  const k = tipoKey(tipo);
-  return k === 'al dia' || k === 'al día';
-}
-function factorEmpresa(tipo) {
-  if (isTrato(tipo)) return FACTOR_EMPRESA_TRATO;
-  if (isAlDia(tipo)) return FACTOR_EMPRESA_AL_DIA;
-  return FACTOR_EMPRESA_DEFAULT;
-}
-
-function recargoLabel(r) {
-  const factor = factorEmpresa(r.tipo_pago);
-  const recargoPct = Math.round((factor - 1) * 100);
-  if (recargoPct === 0) return '—';
-  return '+' + recargoPct + ' %';
-}
-
+// Money comes from tarjas_empresa.total_empresa() on the API.
+// Do not apply Costo Empresa factors in the browser.
 function enrichResumen(resumen) {
-  const grand = resumen.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0);
   return resumen.map(r => {
     const trab = Number(r.total_trabajado) || 0;
-    const factor = factorEmpresa(r.tipo_pago);
-    const recargoPct = Math.round((factor - 1) * 100);
     return Object.assign({}, r, {
       total_trabajado: trab,
-      total_empresa: Math.round(trab * factor),
-      recargo_pct: recargoPct,
-      recargo: recargoLabel(r),
-      pct: grand > 0 ? trab / grand * 100 : null,
+      total_empresa: Number(r.total_empresa) || 0,
+      recargo: r.recargo || '—',
+      pct: r.pct != null ? Number(r.pct) : null,
     });
   });
 }
 
 function enrichDetalle(rows) {
-  const grand = rows
-    .filter(r => isTrato(r.tipo_pago) || isAlDia(r.tipo_pago))
-    .reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0);
   return rows.map(r => {
     const trab = Number(r.total_trabajado) || 0;
     const jornadas = Number(r.jornadas) || 0;
     const hours = Number(r.horas_trabajadas) || 0;
-    const factor = factorEmpresa(r.tipo_pago);
     return Object.assign({}, r, {
       total_trabajado: trab,
-      total_empresa: Math.round(trab * factor),
-      total_unitario: jornadas > 0 ? trab / jornadas : null,
-      costo_hora: hours > 0 ? Math.round(trab / hours) : null,
-      pct_pago: grand > 0 ? trab / grand * 100 : null,
+      total_empresa: Number(r.total_empresa) || 0,
+      total_unitario: r.total_unitario != null
+        ? Number(r.total_unitario)
+        : (jornadas > 0 ? trab / jornadas : null),
+      costo_hora: r.costo_hora != null
+        ? Number(r.costo_hora)
+        : (hours > 0 ? Math.round(trab / hours) : null),
+      pct_pago: r.pct_pago != null ? Number(r.pct_pago) : null,
     });
   });
 }
@@ -220,7 +192,7 @@ function renderSummary(resumen, totalEmpresa, totalTrabajado, jornadas) {
     return `<tr>
       <td><span class="${cls}">${esc(label)}</span></td>
       <td class="num">${fmtCLP.format(r.total_trabajado)}</td>
-      <td class="num">${esc(recargoLabel(r))}</td>
+      <td class="num">${esc(r.recargo || '—')}</td>
       <td class="num">${fmtCLP.format(r.total_empresa)}</td>
       <td class="num">${fmtNum.format(r.jornadas)}</td>
       <td class="num">${fmtResumenPct(r.pct)}</td>

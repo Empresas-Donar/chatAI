@@ -201,6 +201,35 @@ Convención de PKs: `TEXT NOT NULL PRIMARY KEY` (nunca SERIAL — AppSheet gener
 
 ---
 
+## Reglas de Cálculo: Costo Empresa (tarjas)
+
+Hay **dos fórmulas distintas** para montos de tarjas — no mezclarlas:
+
+| Fórmula | Dónde usarla | Implementación |
+|---|---|---|
+| **Costo Empresa** | OC, Detalle, Facturación, Notas, Export Odoo | `total_trabajado × factor` via `tarjas_empresa.total_empresa()` |
+| **Pago AppSheet** | Reportes de pago a trabajadores (General, Por persona) | `total_trabajado + total_contratista` (raw AppSheet) |
+
+**Factores Costo Empresa** (`chatai/backend/tarjas_empresa.py`):
+- Trato → `× 1.45` (+45 %)
+- Al día → `× 1.50` (+50 %)
+- Otros (Bono, Tractorista, …) → `× 1.0`
+
+Costo Empresa: Trato × 1.45 (+45 %). Al Día × 1.50 (+50 %). NUNCA invertir. Única fuente: `tarjas_empresa.py`.
+
+**Fuente de verdad única:** `chatai/backend/tarjas_empresa.py` con sus factores fijos (Trato 1.45 / Al Día 1.50) es la única fuente de verdad para montos de Costo Empresa. Toda superficie — OC, Detalle, Facturación, Notas, Export Odoo — debe derivar su precio de esta función. `total_trabajado + total_contratista` y `total_pagar` de AppSheet son datos históricos de referencia, no fuente de verdad. AppSheet `total_contratista` usa los mismos porcentajes; igual no se factura con `total_pagar`.
+
+**Regla absoluta:** El export Odoo xlsx se precifica con `tarjas_empresa.total_empresa()` (mismas líneas que la OC) vía `costo_empresa_odoo_lines()`. La vista `tarjas_reporte_odoo` solo aporta `product_id` y `analytic_distribution`. **Nunca** usar `total_unitario` / `pagar_efectivo` de AppSheet como `price_unit`.
+
+**Reconciliación:** `SUM(order_line/product_qty × order_line/price_unit)` en el export Odoo debe cuadrar con el total del header de la Orden de Compra para el mismo rango de fechas y contratista.
+
+**`analytic_distribution`:** JSON `{"id_cc": porcentaje}`. Reglas:
+- Los valores deben sumar exactamente 100.00 por fila
+- Nunca exportar valores `null` o vacíos en el JSON (`"410": null` o `"410": ,` son inválidos para Odoo)
+- Filtrar filas con distribución inválida con estado `⚠ Incompleta` — no exportarlas
+
+---
+
 ## Reglas de Desarrollo
 
 1. No hardcodear credenciales — usar variables de entorno (`.env`)

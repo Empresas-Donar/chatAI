@@ -609,8 +609,8 @@ Las fechas en tarjas_pagos y otros son tipo TEXT — usar CAST(fecha AS DATE) o 
 - rendimiento, horas_extras, horas_trabajadas (TEXT)
 - total_jornada, total_trato, total_trabajado (INTEGER)
 - contratista_jornada, contratista_trato, total_contratista (INTEGER)
-- total_pagar: columna AppSheet; a menudo 0 o con recargos invertidos. NO es el costo empresa.
-- Costo Empresa (reportes): total_trabajado × 1.45 Al Día, × 1.50 Trato. Helper tarjas_empresa.total_empresa. Nunca total_pagar ni total_trabajado+total_contratista.
+- total_pagar: columna AppSheet; a menudo 0. NO es el costo empresa.
+- Costo Empresa (reportes): Trato × 1.45 (+45 %), Al Día × 1.50 (+50 %). NUNCA invertir. Helper tarjas_empresa.total_empresa. Nunca total_pagar ni total_trabajado+total_contratista.
 - estado: estado del pago
 
 ### appsheet.tarjas_reporte — Vista resumida de tarjas por día/campo/labor

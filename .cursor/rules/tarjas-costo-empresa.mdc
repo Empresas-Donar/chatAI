@@ -5,12 +5,20 @@ alwaysApply: true
 
 # Costo Empresa (tarjas)
 
-What the **company pays** for labores is **not** AppSheet `total_pagar` or `total_trabajado + total_contratista`. Those recargos are swapped (trato ~45%, al día ~50%) and `total_pagar` is often 0.
+What the **company pays** for labores is **not** AppSheet `total_pagar` (often 0)
+and is **not** `total_trabajado + total_contratista` as a billed source.
+Billed cost is always `total_trabajado × factor` via `total_empresa()`.
+
+**NEVER invert.** AppSheet `total_contratista` happens to be ~45 % trato / ~50 %
+al día, and Costo Empresa uses the **same** percentages on `total_trabajado`.
+Still never bill with `total_pagar`.
+
+Costo Empresa: Trato × 1.45 (+45 %). Al Día × 1.50 (+50 %). NUNCA invertir. Única fuente: `tarjas_empresa.py`.
 
 Use `chatai/backend/tarjas_empresa.py` only:
 
-- Al Día → `total_trabajado × 1.45`
-- Trato → `total_trabajado × 1.50`
+- Al Día → `total_trabajado × 1.50`
+- Trato → `total_trabajado × 1.45`
 - Bono / Tractorista / other → factor `1.0`
 - Round CLP with `total_empresa()` (`ROUND_HALF_UP`)
 - Source rows: `appsheet.tarjas_pagos` + `estado = 'Aprobado'`
@@ -22,10 +30,15 @@ Use `chatai/backend/tarjas_empresa.py` only:
 
 **Do not use for billed company cost:** `tarjas_reporte.total_labor`, `_BILLABLE_SQL`, `SUM(total_pagar)`, `SUM(total_contratista)`.
 
-Odoo CSV (`tarjas_reporte_odoo`) is an import template — do not silently mix it with Costo Empresa without an explicit change.
+Odoo xlsx export is priced through `total_empresa()` (same helper as the OC
+header). `tarjas_reporte_odoo` supplies product_id / analytic_distribution
+only — never `pagar_efectivo` as billed unit price.
+
+Frontend JS must **render** `total_empresa` / `recargo` from the API. Never
+duplicate 1.45 / 1.50 in JavaScript.
 
 ```python
-# BAD — AppSheet commission (swapped vs platform)
+# BAD — AppSheet stored columns (total_pagar is often 0)
 SUM(COALESCE(NULLIF(total_pagar,0), total_trabajado + total_contratista))
 
 # GOOD

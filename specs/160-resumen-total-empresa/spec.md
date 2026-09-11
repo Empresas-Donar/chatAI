@@ -11,9 +11,9 @@ URL reportada: `/tarjas/detalle?fil-from=2026-09-02&fil-to=2026-09-08&fil-contra
 ## Acceptance
 
 - [x] Columnas Resumen (web y PDF, mismo orden): Tipo de pago, Total trabajadores, Recargo, Costo Empresa, Jornadas, %
-- [x] Recargo muestra el % que se suma: Al Día **+45 %**, Trato **+50 %**; footer **—** (factores distintos)
+- [x] Recargo muestra el % que se suma: Al Día **+50 %**, Trato **+45 %**; footer **—** (factores distintos)
 - [x] Sin columna **Total a pagar** en el Resumen
-- [x] Al Día: Total Empresa = `total_trabajado * 1.45`; Trato: `* 1.50`; otros tipos: factor `1.0`
+- [x] Al Día: Total Empresa = `total_trabajado * 1.50`; Trato: `* 1.45`; otros tipos: factor `1.0`
 - [x] Footer Total Empresa = suma de filas (no mezclar factores)
 - [x] % = participación sobre Total trabajado; Al Día + Trato = 100% si son las únicas filas; formato `62.4 %`; Total = `100.0 %` o `—` si el total es 0
 - [x] Gráfico de torta usa Total trabajado
@@ -61,5 +61,5 @@ Suite pedida: 38 passed. Falla preexistente en `test_96_badge_class_fallback_emp
 ## Manual QA
 
 1. Abrir `/tarjas/detalle?fil-from=2026-09-02&fil-to=2026-09-08&fil-contratista=MULTISERVICIOS+BONHOMIA+SPA&fil-empresa=ZUÑIGA`
-2. Resumen: sin Total a pagar; columnas Tipo / Total trabajado / Recargo / Total Empresa / Jornadas / %. Recargo Al Día **+45 %**, Trato **+50 %**. Al Día Total Empresa **$4.845.658**, Trato **$3.027.000**, % **62.3 %** + **37.7 %** = 100%.
+2. Resumen: sin Total a pagar; columnas Tipo / Total trabajado / Recargo / Total Empresa / Jornadas / %. Recargo Al Día **+50 %**, Trato **+45 %**. Al Día Total Empresa **$5.012.750**, Trato **$2.926.100**, % **62.3 %** + **37.7 %** = 100%. Footer Costo Empresa **$7.938.850**.
 3. El gráfico de torta debe mostrar ambas rebanadas (no 100% Al Día). Descargar PDF y comprobar las mismas columnas y montos.

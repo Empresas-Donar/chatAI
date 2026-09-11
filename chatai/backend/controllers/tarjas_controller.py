@@ -5415,61 +5415,23 @@ async def export_tarjas_notas_odoo(
         )
 
     # Auto-sync unmapped labores (same as purchase orders export)
-    from .purchase_orders_controller import _sync_labores
+    from .purchase_orders_controller import (
+        _sync_labores,
+        costo_empresa_odoo_lines,
+        group_odoo_export_rows,
+    )
 
     try:
         _sync_labores(conn, fecha_inicio, fecha_termino, contratista, campo)
     except Exception as exc:
         logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
 
-    excluded_amount = 0.0
     try:
         with conn.cursor() as cur:
-            # Sum excluded rows (no product_id or unmapped CC)
-            cur.execute(
-                """
-                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"     = %s
-                  AND nombre_campo   = %s
-                  AND fecha BETWEEN %s AND %s
-                  AND (
-                      "order_line/product_id" IS NULL
-                      OR "order_line/analytic_distribution" LIKE '%%"": %%'
-                  )
-            """,
-                (contratista, campo, fecha_inicio, fecha_termino),
+            priced = costo_empresa_odoo_lines(
+                cur, contratista, campo, fecha_inicio, fecha_termino
             )
-            excluded_amount = float(cur.fetchone()[0] or 0)
-
-            # Group and aggregate valid rows — same structure as purchase orders
-            cur.execute(
-                """
-                SELECT
-                    "partner_id",
-                    "order_line/product_id",
-                    SUM("order_line/product_qty")               AS qty,
-                    "order_line/analytic_distribution",
-                    CASE WHEN SUM("order_line/product_qty") > 0
-                         THEN ROUND(
-                             SUM("order_line/product_qty" * "order_line/price_unit")
-                             / SUM("order_line/product_qty"), 2)
-                         ELSE NULL END                          AS price_unit
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"      = %s
-                  AND "nombre_campo"  = %s
-                  AND "fecha" BETWEEN %s AND %s
-                  AND "order_line/product_id" IS NOT NULL
-                  AND "order_line/analytic_distribution" NOT LIKE '%%"": %%'
-                GROUP BY
-                    "partner_id",
-                    "order_line/product_id",
-                    "order_line/analytic_distribution"
-                ORDER BY "order_line/product_id"
-            """,
-                (contratista, campo, fecha_inicio, fecha_termino),
-            )
-            rows = cur.fetchall()
+            rows, excluded_amount = group_odoo_export_rows(priced)
     finally:
         conn.close()
 

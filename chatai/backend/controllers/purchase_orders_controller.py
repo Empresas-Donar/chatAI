@@ -164,10 +164,10 @@ def _serialize(v):
 def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
     """OC lines from Aprobado tarjas_pagos, billed as Costo Empresa.
 
-    Detalle, OC and facturación share tarjas_empresa.total_empresa.
-    AppSheet billable (trabajado + comisión) swapped those markups, so
-    the old visor total did not square with Detalle. Facturación screen
-    uses the same helper; the Odoo CSV export stays on billable amounts.
+    Detalle, OC, facturación, Notas and the Odoo xlsx share
+    tarjas_empresa.total_empresa (Trato +45 %, Al Día +50 % — never
+    invert). Never bill from AppSheet total_pagar (often 0) or
+    trabajado+comisión.
     """
     cur.execute(
         """
@@ -235,6 +235,100 @@ def _purchase_order_header(rows, fecha_inicio, fecha_termino):
         "pct_trato": pct_trato,
         "pct_al_dia": pct_al_dia,
     }
+
+
+def _line_key(tipo_pago, cc, labor):
+    return ((tipo_pago or "").strip(), str(cc or "").strip(), (labor or "").strip())
+
+
+def _odoo_meta_by_line(cur, contratista, empresa, fecha_inicio, fecha_termino):
+    """product_id / analytic from the Odoo view, keyed like OC lines."""
+    cur.execute(
+        """
+        SELECT
+            tipo_pago,
+            "Lineas del pedido/Producto/Nombre" AS labor,
+            "Lineas del pedido/Código de Distribución Analítica/Código" AS cc,
+            MAX("order_line/product_id") AS product_id,
+            MAX("order_line/analytic_distribution") AS analytic
+        FROM appsheet.tarjas_reporte_odoo
+        WHERE "Vendedor" = %s
+          AND nombre_campo = %s
+          AND fecha BETWEEN %s AND %s
+        GROUP BY 1, 2, 3
+        """,
+        (contratista, empresa, fecha_inicio, fecha_termino),
+    )
+    meta = {}
+    for tipo, labor, cc, product_id, analytic in cur.fetchall():
+        meta[_line_key(tipo, cc, labor)] = (product_id, analytic)
+    return meta
+
+
+def costo_empresa_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
+    """OC grain + Costo Empresa prices, with Odoo product_id / analytic.
+
+    Changing tarjas_empresa factors changes Detalle, OC header, Facturación,
+    Notas and this export in one place. The SQL view's pagar_efectivo price
+    is mapping metadata only — never billed from.
+    """
+    oc_rows = _purchase_order_lines(
+        cur, contratista, empresa, fecha_inicio, fecha_termino
+    )
+    meta = _odoo_meta_by_line(
+        cur, contratista, empresa, fecha_inicio, fecha_termino
+    )
+    lines = []
+    for r in oc_rows:
+        key = _line_key(r.get("tipo_pago"), r.get("CC"), r.get("Nombre Labor"))
+        product_id, analytic = meta.get(key, (None, None))
+        lines.append(
+            {
+                "partner_id": contratista,
+                "product_id": product_id,
+                "analytic": analytic,
+                "qty": float(r.get("jornadas") or 0),
+                "price_unit": float(r.get("total_unitario") or 0),
+                "total": float(r.get("total_labor") or 0),
+                "tipo_pago": r.get("tipo_pago"),
+                "cc": r.get("CC"),
+                "labor": r.get("Nombre Labor"),
+            }
+        )
+    return lines
+
+
+def _analytic_has_empty_key(analytic) -> bool:
+    if analytic is None:
+        return True
+    if isinstance(analytic, dict):
+        return "" in analytic or not analytic
+    return '"": ' in str(analytic) or str(analytic).strip() in ("", "{}", "–")
+
+
+def group_odoo_export_rows(lines):
+    """Group priced lines by product_id + analytic for the Odoo xlsx."""
+    grouped: dict[tuple, dict] = {}
+    excluded_amount = 0.0
+    export_rows = []
+    for line in lines:
+        product_id = line.get("product_id")
+        analytic = line.get("analytic")
+        amount = float(line.get("total") or 0)
+        if not product_id or _analytic_has_empty_key(analytic):
+            excluded_amount += amount
+            continue
+        key = (line.get("partner_id"), product_id, analytic)
+        g = grouped.setdefault(key, {"qty": 0.0, "amount": 0.0})
+        g["qty"] += float(line.get("qty") or 0)
+        g["amount"] += amount
+    for (partner_id, product_id, analytic), g in sorted(
+        grouped.items(), key=lambda item: str(item[0][1] or "")
+    ):
+        qty = g["qty"]
+        price = round(g["amount"] / qty, 2) if qty else None
+        export_rows.append((partner_id, product_id, qty, analytic, price))
+    return export_rows, excluded_amount
 
 
 # ---------------------------------------------------------------------------
@@ -353,53 +447,12 @@ async def export_odoo_csv(
     except Exception as exc:
         logger.warning(f"Labor auto-sync failed (non-fatal): {exc}")
 
-    excluded_amount = 0.0
     try:
         with conn.cursor() as cur:
-            # Detect excluded rows (no product_id or unmapped CC) and sum their value
-            cur.execute(
-                """
-                SELECT COALESCE(SUM("order_line/product_qty" * "order_line/price_unit"), 0)
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"     = %s
-                  AND nombre_campo   = %s
-                  AND fecha BETWEEN %s AND %s
-                  AND (
-                      "order_line/product_id" IS NULL
-                      OR "order_line/analytic_distribution" LIKE '%%"": %%'
-                  )
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
+            priced = costo_empresa_odoo_lines(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
             )
-            excluded_amount = float(cur.fetchone()[0] or 0)
-
-            cur.execute(
-                """
-                SELECT
-                    "partner_id",
-                    "order_line/product_id",
-                    SUM("order_line/product_qty")               AS "order_line/product_qty",
-                    "order_line/analytic_distribution",
-                    CASE WHEN SUM("order_line/product_qty") > 0
-                         THEN ROUND(
-                             SUM("order_line/product_qty" * "order_line/price_unit")
-                             / SUM("order_line/product_qty"), 2)
-                         ELSE NULL END                          AS "order_line/price_unit"
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"      = %s
-                  AND "nombre_campo"  = %s
-                  AND "fecha" BETWEEN %s AND %s
-                  AND "order_line/product_id" IS NOT NULL
-                  AND "order_line/analytic_distribution" NOT LIKE '%%"": %%'
-                GROUP BY
-                    "partner_id",
-                    "order_line/product_id",
-                    "order_line/analytic_distribution"
-                ORDER BY "order_line/product_id"
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
-            )
-            rows = cur.fetchall()
+            rows, excluded_amount = group_odoo_export_rows(priced)
     finally:
         conn.close()
 
@@ -627,23 +680,9 @@ async def get_export_preview(
     last_sync = None
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    "order_line/product_id"            AS product_id,
-                    "order_line/analytic_distribution"  AS analytic,
-                    "order_line/product_qty"            AS qty,
-                    "order_line/price_unit"             AS price_unit
-                FROM appsheet.tarjas_reporte_odoo
-                WHERE "Vendedor"   = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
-                ORDER BY "order_line/product_id", fecha
-            """,
-                (contratista, empresa, fecha_inicio, fecha_termino),
+            priced = costo_empresa_odoo_lines(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
             )
-            all_rows = cur.fetchall()
-
             try:
                 cur.execute(
                     "SELECT value FROM appsheet.sync_meta WHERE key = 'last_cc_sync'"
@@ -655,16 +694,18 @@ async def get_export_preview(
     finally:
         conn.close()
 
-    # 3. Classify each row
+    # 3. Classify each Costo Empresa line (same grain as the OC document)
     preview_rows = []
     excluded_rows = []
     total_ok = 0.0
     total_excluded = 0.0
 
-    for product_id, analytic, qty, price_unit in all_rows:
-        qty_f = float(qty or 0)
-        price_f = float(price_unit or 0)
-        total_line = round(qty_f * price_f, 0)
+    for line in priced:
+        product_id = line.get("product_id")
+        analytic = line.get("analytic")
+        qty_f = float(line.get("qty") or 0)
+        price_f = float(line.get("price_unit") or 0)
+        total_line = round(float(line.get("total") or 0), 0)
 
         # Parse analytic distribution into dict
         analytic_dict: dict = {}
@@ -1158,8 +1199,8 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
     """Header totals + worker×date pivot from one snapshot of tarjas_pagos.
 
     Same scope as Detalle (estado='Aprobado'). Billable amount is Costo
-    Empresa (total_trabajado × platform factor), not AppSheet
-    trabajado+comisión — those markups were swapped vs Detalle/OC.
+    Empresa via total_empresa() (Trato +45 %, Al Día +50 % — never
+    invert), not AppSheet total_pagar or trabajado+comisión.
 
     Pivot columns stay positional: (trabajador, fecha, total_pagar, …)
     so existing tests that read r[2] as the billed amount keep working.

@@ -110,8 +110,8 @@ class TestCompanyPaySurfacesShareCostoEmpresa:
         assert oc["header"]["total"] == pytest.approx(detalle, abs=1.0)
         assert fact["header"]["total"] == pytest.approx(detalle, abs=1.0)
         assert notas["total_general"] == pytest.approx(detalle, abs=1.0)
-        assert oc["header"]["total_trato"] == pytest.approx(3_027_000, abs=1.0)
-        assert fact["header"]["total_trato"] == pytest.approx(3_027_000, abs=1.0)
+        assert oc["header"]["total_trato"] == pytest.approx(2_926_100, abs=1.0)
+        assert fact["header"]["total_trato"] == pytest.approx(2_926_100, abs=1.0)
 
     def test_company_pay_helpers_do_not_use_appsheet_billable(self):
         poc_path = BACKEND / "controllers" / "purchase_orders_controller.py"
@@ -145,7 +145,33 @@ class TestCompanyPaySurfacesShareCostoEmpresa:
         ).read_text(encoding="utf-8")
         assert "_build_detalle_html" in bulk
 
+    def test_odoo_export_uses_costo_empresa_helper(self):
+        export_src = inspect.getsource(poc.export_odoo_csv)
+        assert "costo_empresa_odoo_lines" in export_src
+        preview_src = inspect.getsource(poc.get_export_preview)
+        assert "costo_empresa_odoo_lines" in preview_src
+        notas_src = inspect.getsource(tc.export_tarjas_notas_odoo)
+        assert "costo_empresa_odoo_lines" in notas_src
+
+    def test_odoo_export_lines_sum_to_oc_header(self, conn):
+        oc = run(
+            poc.get_purchase_order(
+                contratista=CONTRATISTA,
+                empresa=EMPRESA,
+                fecha_inicio=FECHA_INICIO,
+                fecha_termino=FECHA_TERMINO,
+            )
+        )
+        with conn.cursor() as cur:
+            lines = poc.costo_empresa_odoo_lines(
+                cur, CONTRATISTA, EMPRESA, FECHA_INICIO, FECHA_TERMINO
+            )
+        assert sum(float(l["total"] or 0) for l in lines) == pytest.approx(
+            oc["header"]["total"], abs=1.0
+        )
+
     def test_no_magic_factors_in_company_pay_controllers(self):
+        frontend = BACKEND.parent / "frontend" / "static"
         for rel in (
             "controllers/purchase_orders_controller.py",
             "controllers/dashboard_controller.py",
@@ -153,3 +179,20 @@ class TestCompanyPaySurfacesShareCostoEmpresa:
             src = (BACKEND / rel).read_text(encoding="utf-8")
             assert "1.45" not in src
             assert "1.50" not in src
+        for name in (
+            "tarjas_detail.js",
+            "purchase_orders.js",
+            "billing_order.js",
+            "despacho_notas.js",
+            "dashboard.js",
+        ):
+            src = (frontend / name).read_text(encoding="utf-8")
+            assert "1.45" not in src, name
+            assert "1.50" not in src, name
+
+    def test_document_pages_auto_load_from_shared_url(self):
+        frontend = BACKEND.parent / "frontend" / "static"
+        for name in ("purchase_orders.js", "billing_order.js", "despacho_notas.js"):
+            src = (frontend / name).read_text(encoding="utf-8")
+            assert "autoTriggerFromURL" in src, name
+            assert "no auto-trigger" not in src, name

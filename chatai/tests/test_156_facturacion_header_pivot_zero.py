@@ -40,9 +40,9 @@ EMPRESA = "KONTROLAG"
 FECHA_INICIO = "2026-08-26"
 FECHA_TERMINO = "2026-09-01"
 
-# Canonical billed amount: Costo Empresa Al Día = 175_000 × 1.45.
+# Canonical billed amount: Costo Empresa Al Día = 175_000 × 1.50.
 # Must NOT equal the $175.000 the buggy screen pivot showed (total_trabajado).
-EXPECTED_BILLABLE = 253_750.0
+EXPECTED_BILLABLE = 262_500.0
 BUGGY_TOTAL_TRABAJADO = 175_000.0
 
 
@@ -142,7 +142,7 @@ class TestScreenHeaderMatchesPivot:
 
         assert expected > 0, "expected Aprobado billable data for this known dataset"
         assert expected == pytest.approx(EXPECTED_BILLABLE, abs=0.01), (
-            "HERBI/KONTROLAG 26/08–01/09 must still be 175.000 × 1.45 = $253.750"
+            "HERBI/KONTROLAG 26/08–01/09 must still be 175.000 × 1.50 = $262.500"
         )
         # The original bug: stored total_pagar is 0 (or was when reported)
         # while total_trabajado is the $175k the screen pivot showed.

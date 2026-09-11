@@ -1,0 +1,59 @@
+# ChatAI — Reglas de desarrollo (Donar / KONTROLAG)
+
+## Cálculo de montos: Costo Empresa vs pago AppSheet
+
+Hay dos fórmulas distintas para montos de tarjas — NO mezclarlas:
+
+| Fórmula | Dónde usarla |
+|---|---|
+| **Costo Empresa** (`total_trabajado × factor`) | OC, Detalle, Facturación, Notas, Export Odoo |
+| **Pago AppSheet** (`total_trabajado + total_contratista`) | Reportes de pago a trabajadores |
+
+**Factores** (definidos en `chatai/backend/tarjas_empresa.py`):
+- Trato → `× 1.45` (+45 %)
+- Al día → `× 1.50` (+50 %)
+- Otros → `× 1.0`
+
+Costo Empresa: Trato × 1.45 (+45 %). Al Día × 1.50 (+50 %). NUNCA invertir. Única fuente: `tarjas_empresa.py`.
+
+**`tarjas_empresa.py` es la única fuente de verdad para montos de Costo Empresa.**
+Toda superficie (OC, Detalle, Facturación, Notas, Export Odoo) debe derivar su precio de `total_empresa()`.
+`total_trabajado + total_contratista` y `total_pagar` de AppSheet son datos históricos, no fuente de verdad.
+
+**Regla para el export Odoo:**
+- Precio = `total_empresa()` vía `costo_empresa_odoo_lines()` (mismo grano que la OC)
+- La vista `tarjas_reporte_odoo` solo aporta product_id / analytic
+- **Nunca** usar `total_unitario` (AppSheet) ni `pagar_efectivo` como price_unit
+- El total del export (`SUM(qty × price_unit)` + excluidas) debe cuadrar con el header de la Orden de Compra
+
+## analytic_distribution (Odoo)
+
+JSON `{"id_cc": porcentaje}`. Invariantes:
+- Los valores deben sumar exactamente **100.00** por fila
+- Nunca exportar valores `null` o vacíos: `"410": null` o `"410": ,` son inválidos
+- Filas con distribución inválida → estado `⚠ Incompleta`, excluir del export
+
+## Convenciones generales
+
+- **Código:** inglés (funciones, variables, archivos, commits)
+- **Documentación y specs:** español
+- **Columnas DB:** exactamente como en AppSheet — NO renombrar
+- **Fechas UI:** `DD/MM/YYYY` — sin excepciones
+- **Fechas internas:** `YYYY-MM-DD`
+- **PKs:** siempre `TEXT NOT NULL PRIMARY KEY`
+- **Dinero:** `NUMERIC`, nunca `TEXT`
+- **UPSERT:** siempre `ON CONFLICT ... DO UPDATE`
+- **Nombres de columna en queries:** siempre entre comillas dobles `"columna"`
+
+## Módulo tarjas — archivos clave
+
+| Archivo | Rol |
+|---|---|
+| `chatai/backend/tarjas_empresa.py` | Factores y helper `total_empresa()` |
+| `sql/tarjas/01_views_reporte.sql` | Vista `tarjas_reporte` — fuente de datos de pagos |
+| `sql/tarjas/02_views_odoo.sql` | Vista `tarjas_reporte_odoo` — formato import Odoo |
+| `chatai/backend/controllers/purchase_orders_controller.py` | Endpoints OC y export |
+
+## Stack
+
+Python 3.11+ · FastAPI · PostgreSQL 16 (Cloud SQL) · BigQuery (`ace-scarab-484515-v1.odoo_data`) · Gemini 2.5-pro · Cloud Run (`southamerica-west1`)

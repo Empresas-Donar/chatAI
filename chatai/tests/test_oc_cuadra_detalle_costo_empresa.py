@@ -1,11 +1,9 @@
 """
 Orden de compra must square with Detalle operacional Costo Empresa.
 
-AppSheet pagar_efectivo (trabajado + comisión) applied ~45% on Trato and
-~50% on Al Día — the inverse of the platform factors. /odoo/tarjas therefore
-showed TOTAL A TRATO $2.925.200 vs Detalle $3.027.000 for the reported week.
-
-Orden de facturación and the Odoo CSV export are unchanged.
+Costo Empresa: Trato ×1.45 (+45 %), Al Día ×1.50 (+50 %). Never invert.
+AppSheet total_contratista uses the same percentages; still never bill
+from total_pagar or trabajado+comisión.
 
 Reported URL:
   /odoo/tarjas?inp-date-from=2026-09-02&inp-date-to=2026-09-08
@@ -93,8 +91,8 @@ class TestOcSquaresDetalleCostoEmpresa:
         assert header["total"] == pytest.approx(
             sum(float(r["total_empresa"] or 0) for r in resumen), abs=1.0
         )
-        assert header["total_trato"] == pytest.approx(3_027_000, abs=1.0)
-        assert header["total_al_dia"] == pytest.approx(4_845_658, abs=1.0)
+        assert header["total_trato"] == pytest.approx(2_926_100, abs=1.0)
+        assert header["total_al_dia"] == pytest.approx(5_012_750, abs=1.0)
 
     def test_facturacion_header_matches_detalle_resumen(self, conn):
         with conn.cursor() as cur:
@@ -133,10 +131,10 @@ class TestOcSquaresDetalleCostoEmpresa:
         assert header["total"] == pytest.approx(
             header["total_trabajado"] + header["total_contratista"], abs=0.01
         )
-        assert header["total_trato"] == pytest.approx(3_027_000, abs=1.0)
-        assert header["total_al_dia"] == pytest.approx(4_845_658, abs=1.0)
-        assert header["pct_comision_trato"] == pytest.approx(50.0, abs=0.1)
-        assert header["pct_comision_al_dia"] == pytest.approx(45.0, abs=0.1)
+        assert header["total_trato"] == pytest.approx(2_926_100, abs=1.0)
+        assert header["total_al_dia"] == pytest.approx(5_012_750, abs=1.0)
+        assert header["pct_comision_trato"] == pytest.approx(45.0, abs=0.1)
+        assert header["pct_comision_al_dia"] == pytest.approx(50.0, abs=0.1)
 
     def test_oc_uses_pagos_not_reporte_billable(self):
         src = inspect.getsource(poc._purchase_order_lines)
@@ -149,8 +147,12 @@ class TestOcSquaresDetalleCostoEmpresa:
         fact_src = inspect.getsource(poc.billing_order_pdf)
         assert "_purchase_order_lines" not in fact_src
 
-    def test_oc_does_not_use_swapped_appsheet_markup(self, conn):
-        """Trato must be ×1.50, not AppSheet's ~×1.45 on trabajado."""
+    def test_oc_uses_canonical_costo_empresa_factors(self, conn):
+        """Trato must be ×1.45 and Al Día ×1.50. Never invert."""
+        from decimal import Decimal
+
+        assert te.factor_empresa("trato") == Decimal("1.45")
+        assert te.factor_empresa("Al dia") == Decimal("1.50")
         oc = run(
             poc.get_purchase_order(
                 contratista=CONTRATISTA,
@@ -164,8 +166,16 @@ class TestOcSquaresDetalleCostoEmpresa:
             for r in oc["rows"]
             if r.get("tipo_pago") == "trato"
         )
+        al_dia_trab = sum(
+            float(r["total_trabajado"] or 0)
+            for r in oc["rows"]
+            if r.get("tipo_pago") != "trato"
+        )
         assert trato_trab > 0
-        appsheet_trato = float(te.total_empresa("Al dia", trato_trab))
-        platform_trato = float(te.total_empresa("trato", trato_trab))
-        assert oc["header"]["total_trato"] == pytest.approx(platform_trato, abs=1.0)
-        assert oc["header"]["total_trato"] != pytest.approx(appsheet_trato, abs=500)
+        assert al_dia_trab > 0
+        assert oc["header"]["total_trato"] == pytest.approx(
+            float(te.total_empresa("trato", trato_trab)), abs=1.0
+        )
+        assert oc["header"]["total_al_dia"] == pytest.approx(
+            float(te.total_empresa("Al dia", al_dia_trab)), abs=1.0
+        )
