@@ -74,6 +74,8 @@ from tarjas_empresa import (
     annotate_detalle_rows,
     format_markup,
     format_pct,
+    markup_pct,
+    pago_kind,
     total_empresa,
 )
 
@@ -6392,6 +6394,9 @@ _REGISTROS_CAMPO_COLUMNS = [
     "contratista_trato",
     "total_contratista",
     "total_pagar",
+    "total_empresa",
+    "recargo",
+    "recargo_pct",
     "estado",
     "id_tarja_supervisor",
     "id_labor",
@@ -6577,10 +6582,14 @@ def _build_registros_campo_where(
 
 
 def _annotate_registros_campo(rows: list[dict]) -> list[dict]:
+    rows = annotate_detalle_rows(rows)
     for row in rows:
         flags = _registros_campo_flags(row)
         row["flags"] = flags
         row["mal_digitado"] = _is_mal_digitado(flags)
+        recargo = markup_pct(row.get("tipo_pago"))
+        row["recargo_pct"] = float(recargo)
+        row["recargo"] = format_markup(recargo)
     return rows
 
 
@@ -6993,6 +7002,43 @@ def _empty_calendar_day(fecha: str) -> dict:
     }
 
 
+def _fold_calendar_contratistas(rows) -> list[dict]:
+    """Costo Empresa by contractor and tipo_pago for month follow-up."""
+    by: dict[str, dict] = {}
+    for nombre, tipo, trab, n in rows:
+        key = (nombre or "").strip() or "Sin contratista"
+        g = by.setdefault(
+            key,
+            {
+                "contratista": key,
+                "total_empresa": 0.0,
+                "al_dia": 0.0,
+                "trato": 0.0,
+                "tractorista": 0.0,
+                "otro": 0.0,
+                "n": 0,
+                "n_al_dia": 0,
+                "n_trato": 0,
+                "n_tractorista": 0,
+                "n_otro": 0,
+                "total_trabajado": 0.0,
+            },
+        )
+        amt = float(total_empresa(tipo, trab))
+        kind = pago_kind(tipo)
+        g[kind] = float(g.get(kind) or 0) + amt
+        g["total_empresa"] += amt
+        g["total_trabajado"] += float(trab or 0)
+        count = int(n or 0)
+        g["n"] += count
+        n_key = f"n_{kind}"
+        g[n_key] = int(g.get(n_key) or 0) + count
+    return sorted(
+        by.values(),
+        key=lambda r: (-r["total_empresa"], r["contratista"]),
+    )
+
+
 @router.get("/api/tarjas/calendario")
 async def get_tarjas_calendario(
     mes: str = Query(..., description="YYYY-MM"),
@@ -7044,6 +7090,7 @@ async def get_tarjas_calendario(
     total = aprobado = pendiente = max_count = 0
     sospechosos_total = 0
     planes_total = 0
+    contratistas: list[dict] = []
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -7084,6 +7131,28 @@ async def get_tarjas_calendario(
                     sospechosos_total += day["sospechosos"]
                     if day["total"] > max_count:
                         max_count = day["total"]
+
+            month_where, month_params = _build_registros_campo_where(
+                month_start,
+                month_end,
+                empresa=empresa,
+                labor=labor,
+                estado=estado,
+                contratista=contratista,
+                supervisor=supervisor,
+            )
+            cur.execute(
+                f"""
+                SELECT contratista, tipo_pago,
+                       COALESCE(SUM(total_trabajado), 0),
+                       COUNT(*)
+                FROM appsheet.tarjas_pagos
+                {month_where}
+                GROUP BY contratista, tipo_pago
+                """,
+                month_params,
+            )
+            contratistas = _fold_calendar_contratistas(cur.fetchall())
 
             try:
                 cur.execute(
@@ -7138,6 +7207,7 @@ async def get_tarjas_calendario(
         "sospechosos": sospechosos_total,
         "planes": planes_total,
         "max": max_count,
+        "contratistas": contratistas,
     }
 
 
