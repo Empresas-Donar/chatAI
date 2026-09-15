@@ -4,7 +4,7 @@ Regression tests for issue #136: Tarjas App → Registros de campo timeline.
 Verifies:
 1. Page route /tarjas/registros-campo exists in the controller.
 2. API routes exist (/api/tarjas/registros-campo and /filters).
-3. Nav in base.html has subgroup "App" and leaf "Registros de campo".
+3. Nav in base.html has subgroup "App" and leaf "Calendario" (no "Registros de campo").
 4. SQL uses parameterized fecha::date BETWEEN %s AND %s.
 5. UI dates are DD/MM/YYYY.
 6. Query is ordered newest-first.
@@ -109,8 +109,8 @@ def test_136_excel_route_exists():
 def test_136_nav_has_app_subgroup_and_leaf():
     html = _base_html()
     assert '"label": "App"' in html
-    assert '"label": "Registros de campo"' in html
-    assert '"href": "/tarjas/registros-campo"' in html
+    assert '"label": "Registros de campo"' not in html
+    assert '"href": "/tarjas/registros-campo"' not in html
     assert '"label": "Calendario"' in html
     assert '"href": "/tarjas/calendario"' in html
 
@@ -290,6 +290,10 @@ def test_136_calendario_sql_is_parameterized_group_by_day():
     assert "sospechosos" in block
     assert "_REGISTROS_CAMPO_MAL_SQL" in block
     assert "_REGISTROS_CAMPO_SELECT" not in block
+    assert "GROUP BY contratista, tipo_pago" in block
+    assert "_fold_calendar_contratistas" in block
+    assert "pago_kind" in block
+    assert "SUM(total_pagar)" not in block
     # psycopg2 pyformat treats unescaped % as placeholders (IndexError).
     mal = _ctrl_source()
     start = mal.index("_REGISTROS_CAMPO_MAL_SQL")
@@ -309,7 +313,7 @@ def test_136_calendario_sql_is_parameterized_group_by_day():
 def test_136_calendario_reuses_registros_filters():
     js = CAL_JS.read_text(encoding="utf-8")
     assert "/api/tarjas/registros-campo/filters" in js
-    assert "/tarjas/registros-campo?" in js
+    assert "'/tarjas/registros-campo?" not in js
     assert "/api/tarjas/calendario/planes" in js
     assert "dayPlanes" in js
     assert "planificados" in js
@@ -328,7 +332,40 @@ def test_136_calendario_reuses_registros_filters():
     assert "pan-fecha" in html
     assert "tab-aplicados" in html
     assert "tab-planificados" in html
-    assert "pan-empresa" in html
+    assert "pan-empresa" not in html
+    assert "tcal-panel-filters" not in html
+    assert "toMonthValue(new Date())" in js
+    assert "from.slice(0, 7)" not in js
+    assert "id !== 'fil-month'" in js
+
+
+def test_136_calendario_bills_costo_empresa_from_api():
+    """Day panel totals Costo Empresa from the API; never 1.45/1.50 in JS."""
+    js = CAL_JS.read_text(encoding="utf-8")
+    assert "total_empresa" in js
+    assert "fmtCLP" in js
+    assert "A facturar" in js or "Costo Empresa" in js
+    assert "precioTrabajador" in js
+    assert "Donar · Costo Empresa" in js
+    assert "Precio trabajador" in js
+    assert "recargoLabel" in js
+    assert "groupByContratista" in js
+    assert "pagoKind" in js
+    assert "renderMixBar" in js
+    assert "monthContratistas" in js
+    assert "data-contratista-toggle" in js
+    assert "tcal-contractor-body" in js
+    assert "tractorista" in js
+    assert "Máquinas" in js
+    assert "1.45" not in js
+    assert "1.50" not in js
+    assert "total_pagar" not in js
+    src = _ctrl_source()
+    block = _registros_campo_ctrl_block()
+    assert "annotate_detalle_rows" in block
+    assert 'row["total_empresa"]' in src or "annotate_detalle_rows" in block
+    assert '"total_empresa"' in block
+    assert '"contratistas"' in src[src.index("App → Calendario") :]
 
 
 def test_136_month_to_date_range():

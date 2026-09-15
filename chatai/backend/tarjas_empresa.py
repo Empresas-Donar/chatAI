@@ -29,6 +29,7 @@ FACTOR_EMPRESA_DEFAULT = Decimal("1")
 
 _AL_DIA = frozenset({"al dia", "al día"})
 _TRATO = frozenset({"trato"})
+_TRACTORISTA = frozenset({"tractorista"})
 
 
 def _as_decimal(value) -> Decimal:
@@ -46,6 +47,18 @@ def factor_empresa(tipo_pago: str | None) -> Decimal:
     if key in _TRATO:
         return FACTOR_EMPRESA_TRATO
     return FACTOR_EMPRESA_DEFAULT
+
+
+def pago_kind(tipo_pago: str | None) -> str:
+    """Bucket for follow-up: al_dia / trato / tractorista / otro. Not a money factor."""
+    key = (tipo_pago or "").strip().lower()
+    if key in _AL_DIA:
+        return "al_dia"
+    if key in _TRATO:
+        return "trato"
+    if key in _TRACTORISTA:
+        return "tractorista"
+    return "otro"
 
 
 def total_empresa(tipo_pago: str | None, total_trabajado) -> Decimal:

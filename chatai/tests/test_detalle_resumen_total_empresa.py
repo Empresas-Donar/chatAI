@@ -101,6 +101,13 @@ class TestEmpresaFactors:
         assert te.factor_empresa("Tractorista") == Decimal("1")
         assert te.total_empresa("Bono", 250_413) == Decimal("250413")
 
+    def test_pago_kind_buckets(self):
+        assert te.pago_kind("Al dia") == "al_dia"
+        assert te.pago_kind("Al día") == "al_dia"
+        assert te.pago_kind("trato") == "trato"
+        assert te.pago_kind("Tractorista") == "tractorista"
+        assert te.pago_kind("Bono") == "otro"
+
     def test_total_empresa_amounts(self):
         assert te.total_empresa("Al dia", 3_341_833) == Decimal("5012750")
         assert te.total_empresa("trato", 2_018_000) == Decimal("2926100")
