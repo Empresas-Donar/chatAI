@@ -4928,7 +4928,7 @@ async def get_tarjas_hora_ponderada_filters():
             cur.execute(
                 f"SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 f"WHERE contratista IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
-                f"ORDER BY contratista"
+                f"ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
@@ -5285,7 +5285,8 @@ async def get_tarjas_notas_filters():
 
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL AND estado = 'Aprobado' ORDER BY contratista"
+                "WHERE contratista IS NOT NULL AND estado = 'Aprobado' "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
     finally:
@@ -6623,7 +6624,7 @@ async def get_tarjas_registros_campo_filters():
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 "WHERE contratista IS NOT NULL AND TRIM(contratista) <> '' "
-                "ORDER BY contratista"
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
             cur.execute(
