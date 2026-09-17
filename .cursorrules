@@ -42,8 +42,9 @@ Nueva página en `/tarjas`, `/dashboard`, `/reportes`, `/odoo`, `/despacho`: reu
 - `{% block page_filters %}` = acciones (+ Mes local); `{% block advanced_filters %}` = Campo, CC, labor, tipo, etc.
 - `autoTriggerFromURL(ids, queryFn)` al entrar; no esperar Consultar
 - Overlay único `#report-inline-loading` vía `runReportQuery` / `showReportLoading` — nunca clonar el HTML ni ocultar `.container`
-- Opt-out: `{% block gf_attrs %}data-skip-auto-report{% endblock %}` (Notas, PDF masivo)
-- OC / facturación: auto-generar solo si empresa + contratista + fechas; `generate()` usa el mismo overlay
+- Opt-out: `{% block gf_attrs %}data-skip-auto-report{% endblock %}` (PDF masivo)
+- OC / facturación: auto-generar solo si empresa + contratista + fechas; `generate()` usa el mismo overlay.
+- Notas: auto-generar con contratista + fechas; empresa vacía (Todas) incluye todos los predios.
 
 Detalle: `.cursor/rules/frontend-reportes.mdc`.
 

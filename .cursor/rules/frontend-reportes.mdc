@@ -29,13 +29,15 @@ autoTriggerFromURL(FILTER_IDS, queryData); // page-specific IDs only
 
 Eso cubre: carga inicial, cambio de barra global, Consultar (`#btn-apply` / `#btn-apply-filter`). No esperar Consultar. No hacer `pushState` en cada `change` de la barra (`saveGlobalFilters` ya hace `replaceState`).
 
-**Opt-out** (`data-skip-auto-report`): Notas de crédito y descarga masiva PDF. Ahí el usuario pulsa Generar.
+**Opt-out** (`data-skip-auto-report`): descarga masiva PDF. Ahí el usuario pulsa Generar.
 
 **Odoo** (OC / facturación): auto-generar solo si empresa + contratista + fechas están set. Tractorista OC también exige Campo. `generate()` usa el overlay compartido.
 
+**Notas de crédito:** auto-generar si hay contratista + fechas. Empresa vacía (Todas) consulta todos los predios. `fil-empresa` se envía como `campo`.
+
 ## Overlay de loading
 
-Un solo `#report-inline-loading` en `base.html`. En páginas con auto-consulta el overlay se pinta de inmediato (sin `hidden`); Notas/PDF masivo lo ocultan con `data-skip-auto-report`. `url-filters.js` expone `runReportQuery` / `showReportLoading` / `hideReportLoading` (refcount).
+Un solo `#report-inline-loading` en `base.html`. En páginas con auto-consulta el overlay se pinta de inmediato (sin `hidden`); PDF masivo lo oculta con `data-skip-auto-report`. `url-filters.js` expone `runReportQuery` / `showReportLoading` / `hideReportLoading` (refcount).
 
 ```javascript
 // BAD — spinner por página, hide de .container, loader HTML copiado

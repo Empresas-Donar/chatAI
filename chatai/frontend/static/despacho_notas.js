@@ -20,9 +20,15 @@ function esc(str) {
 
 const isTrato = tipo => tipo && ['a trato', 'trato'].includes(tipo.toLowerCase().trim());
 
+const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-empresa'];
+
 let chartInstance = null;
 
 // ── Default dates: owned by global bar (closed Wed–Tue week) ─────────────
+function globalVal(id) {
+  return document.getElementById(id)?.value || '';
+}
+
 function setDefaultDates() {
   const fromEl = document.getElementById('fil-from');
   const toEl = document.getElementById('fil-to');
@@ -34,46 +40,57 @@ function setDefaultDates() {
   }
 }
 
-// ── Load filters ──────────────────────────────────────────────────────────
-async function loadFilters() {
-  try {
-    const res = await fetch('/api/tarjas/notas/filters');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { campos } = await res.json();
-
-    const selF = document.getElementById('fil-campo');
-    campos.forEach(c => {
-      const o = document.createElement('option');
-      o.value = o.textContent = c;
-      selF.appendChild(o);
-    });
-  } catch (err) {
-    showError('Error cargando filtros: ' + err.message);
+function hydrateLegacyCampo() {
+  const params = new URLSearchParams(location.search);
+  if (!params.get('fil-empresa') && params.get('fil-campo')) {
+    params.set('fil-empresa', params.get('fil-campo'));
+    params.delete('fil-campo');
+    history.replaceState(null, '', `${location.pathname}?${params}`);
   }
 }
 
-// ── Generate button ───────────────────────────────────────────────────────
-document.getElementById('btn-apply').addEventListener('click', async () => {
-  const contratista = document.getElementById('fil-contratista').value;
-  const campo       = document.getElementById('fil-campo').value;
-  const from        = document.getElementById('fil-from').value;
-  const to          = document.getElementById('fil-to').value;
-
-  hideError();
+function clearDocument() {
   document.getElementById('oc-document').style.display = 'none';
   document.getElementById('nc-section').style.display  = 'none';
   document.getElementById('empty-box').classList.add('hidden');
+}
 
-  if (!contratista) { showError('Selecciona un contratista.'); return; }
+function promptSelectContractor() {
+  hideError();
+  clearDocument();
+  showError('Selecciona un contratista.');
+}
+
+// ── Generate (barra global: empresa + contratista + fechas) ───────────────
+async function generate() {
+  const contratista = globalVal('fil-contratista');
+  const campo       = globalVal('fil-empresa');
+  const from        = globalVal('fil-from');
+  const to          = globalVal('fil-to');
+
+  if (!contratista) {
+    promptSelectContractor();
+    return;
+  }
+
+  hideError();
+  clearDocument();
   if (!from || !to)  { showError('Selecciona fechas de inicio y término.'); return; }
   if (from > to)     { showError('La fecha de inicio no puede ser posterior a la de término.'); return; }
 
   const btn = document.getElementById('btn-apply');
-  btn.disabled = true;
-  btn.textContent = 'Generando…';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Generando…';
+  }
+  if (typeof showReportLoading === 'function') showReportLoading();
 
   try {
-    const params = new URLSearchParams({ fecha_inicio: from, fecha_termino: to, contratista });
+    const params = new URLSearchParams({
+      fecha_inicio: from,
+      fecha_termino: to,
+      contratista,
+    });
     if (campo) params.set('campo', campo);
     _lastParams = { contratista, campo, fecha_inicio: from, fecha_termino: to };
 
@@ -90,13 +107,17 @@ document.getElementById('btn-apply').addEventListener('click', async () => {
     }
 
     renderDocument(data, from, to, contratista);
+    if (typeof syncFiltersToURL === 'function') syncFiltersToURL(FILTER_IDS);
   } catch (err) {
     showError('Error al generar: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Generar nota';
+    if (typeof hideReportLoading === 'function') hideReportLoading();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Generar nota';
+    }
   }
-});
+}
 
 // ── NC Amount — proportional distribution ─────────────────────────────────
 
@@ -542,7 +563,7 @@ async function doOdooExport() {
 
 document.getElementById('btn-odoo-export').addEventListener('click', () => {
   if (!_lastParams) return;
-  if (!_lastParams.campo) { showError('Selecciona un campo específico para exportar a Odoo.'); return; }
+  if (!_lastParams.campo) { showError('Selecciona una empresa para exportar a Odoo.'); return; }
   openCCModal();
 });
 
@@ -555,22 +576,18 @@ document.getElementById('btn-print-pdf').addEventListener('click', () => {
   window.open('/api/tarjas/notas/print-pdf?' + params, '_blank');
 });
 
-// ── URL filter sync ───────────────────────────────────────────────────────
-const FILTER_IDS = ['fil-from', 'fil-to', 'fil-contratista', 'fil-campo'];
-
-// Sync URL when user clicks "Generar nota" (secondary listener stacks on the primary above)
-document.getElementById('btn-apply').addEventListener('click', () => {
-  // Sync only if minimum required field is filled (avoid polluting URL on empty-click)
-  if (document.getElementById('fil-contratista').value) {
-    syncFiltersToURL(FILTER_IDS);
-  }
-});
-
-// ── Init ──────────────────────────────────────────────────────────────────
+// ── Init: same as OC / facturación — auto-generar con filtro global ──────
 setDefaultDates();
-// Restore URL params after selects are populated; no auto-trigger (document requires deliberate action)
-loadFilters().then(async () => {
+(async () => {
   if (window.globalFiltersReady) await window.globalFiltersReady;
   setDefaultDates();
-  loadFiltersFromURL(FILTER_IDS);
-});
+  hydrateLegacyCampo();
+  autoTriggerFromURL(FILTER_IDS, () => {
+    if (!globalVal('fil-contratista')) {
+      promptSelectContractor();
+      return;
+    }
+    if (!globalVal('fil-from') || !globalVal('fil-to')) return;
+    return generate();
+  });
+})();

@@ -5362,12 +5362,16 @@ async def get_tarjas_notas(
                 SELECT DISTINCT nombre_campo
                 FROM appsheet.tarjas_pagos
                 {where}
-                LIMIT 1
+                AND nombre_campo IS NOT NULL
+                ORDER BY nombre_campo
             """,
                 params,
             )
-            row = cur.fetchone()
-            nombre_campo = row[0] if row else ""
+            campos = [r[0] for r in cur.fetchall() if r[0]]
+            nombre_campo = (
+                campo
+                or (campos[0] if len(campos) == 1 else " / ".join(campos) if campos else "")
+            )
 
     finally:
         conn.close()
@@ -6226,11 +6230,15 @@ async def notas_print_pdf(
             rows = _query_notas_lines(cur, where, params)
 
             cur.execute(
-                f"SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos {where} LIMIT 1",
+                f"SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos {where} "
+                "AND nombre_campo IS NOT NULL ORDER BY nombre_campo",
                 params,
             )
-            r = cur.fetchone()
-            nombre_campo = r[0] if r else (campo or "")
+            campos = [r[0] for r in cur.fetchall() if r[0]]
+            nombre_campo = (
+                campo
+                or (campos[0] if len(campos) == 1 else " / ".join(campos) if campos else "")
+            )
     finally:
         conn.close()
 
