@@ -8,6 +8,11 @@ Syncs Odoo analytic accounts (CC_analiticos in BigQuery) into:
 Also syncs Odoo analytic distribution models (Modelos_Distribucion_Analitica in BigQuery) into:
   - appsheet.tarjas_cc  : inserts distribution models as "virtual CCs" using x_studio_numeracin as id_cc
 
+Names for those models (800 → CAMPO ZÚÑIGA) are not in BigQuery. They live in
+appsheet.tarjas_cc_nombres, seeded from sql/tarjas/cc_nombres.csv (Excel
+export of Odoo analytic distribution codes). After the Odoo sync, cultivo is
+backfilled when it is empty or equal to id_cc.
+
 Run manually:
   python apps/sync_cc.py
 
@@ -15,6 +20,7 @@ Run as cron (example, daily at 6am):
   0 6 * * * cd /path/to/project && python apps/sync_cc.py >> logs/sync_cc.log 2>&1
 """
 
+import csv
 import datetime
 import json
 import logging
@@ -68,6 +74,19 @@ DEFAULT_CAMPO = 1
 # misfiling it into either campo.
 COMPANY_3_ISLA_DE_MAIPO_PLAN_IDS = {247, 249, 250, 251, 252, 253}
 COMPANY_3_ZUNIGA_PLAN_IDS = {255, 257, 258, 259, 260, 261, 262}
+
+CC_NOMBRES_CSV = Path(__file__).resolve().parent.parent / "sql" / "tarjas" / "cc_nombres.csv"
+
+_CC_NOMBRES_DDL = """
+CREATE TABLE IF NOT EXISTS appsheet.tarjas_cc_nombres (
+    "id_cc"      TEXT NOT NULL PRIMARY KEY,
+    "nombre"     TEXT NOT NULL,
+    "tipo"       TEXT NOT NULL,
+    "campo"      TEXT,
+    "fuente"     TEXT NOT NULL,
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
 
 
 def _resolve_campo(company_id: int, plan_id) -> int:
@@ -624,17 +643,113 @@ def sync_despacho_cc(odoo: dict[str, dict], conn) -> None:
     log.info(f"despacho_cc → corregidos: {len(to_fix)}")
 
 
+def load_cc_nombres_csv(path: Path | None = None) -> list[dict]:
+    """Read sql/tarjas/cc_nombres.csv (Excel dump of Odoo distribution names)."""
+    csv_path = path or CC_NOMBRES_CSV
+    if not csv_path.exists():
+        log.warning(f"cc_nombres CSV no encontrado: {csv_path}")
+        return []
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        rows = []
+        for r in csv.DictReader(fh):
+            id_cc = (r.get("id_cc") or "").strip()
+            nombre = (r.get("nombre") or "").strip()
+            if not id_cc or not nombre:
+                continue
+            rows.append(
+                {
+                    "id_cc": id_cc,
+                    "nombre": nombre,
+                    "tipo": (r.get("tipo") or "").strip() or "cuartel",
+                    "campo": (r.get("campo") or "").strip() or None,
+                    "fuente": (r.get("fuente") or "").strip() or csv_path.name,
+                }
+            )
+        return rows
+
+
+def seed_cc_nombres(conn, rows: list[dict]) -> int:
+    """Upsert the Excel name catalog into appsheet.tarjas_cc_nombres."""
+    with conn.cursor() as cur:
+        cur.execute(_CC_NOMBRES_DDL)
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        for r in rows:
+            cur.execute(
+                """
+                INSERT INTO appsheet.tarjas_cc_nombres
+                    ("id_cc", "nombre", "tipo", "campo", "fuente")
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT ("id_cc") DO UPDATE SET
+                    "nombre" = EXCLUDED."nombre",
+                    "tipo" = EXCLUDED."tipo",
+                    "campo" = EXCLUDED."campo",
+                    "fuente" = EXCLUDED."fuente",
+                    "updated_at" = now()
+                """,
+                (r["id_cc"], r["nombre"], r["tipo"], r["campo"], r["fuente"]),
+            )
+    log.info(f"tarjas_cc_nombres → upserted: {len(rows)}")
+    return len(rows)
+
+
+def overlay_model_cultivo(models: list[dict], nombres: dict[str, str]) -> int:
+    """Replace cultivo=code with the catalog name on distribution models."""
+    n = 0
+    for m in models:
+        code = str(m.get("id_cc") or "").strip()
+        name = nombres.get(code)
+        if not name:
+            continue
+        cultivo = str(m.get("cultivo") or "").strip()
+        if not cultivo or cultivo == code:
+            m["cultivo"] = name
+            n += 1
+    return n
+
+
+def apply_cc_nombres(conn, nombres: dict[str, str] | None = None) -> int:
+    """Fill tarjas_cc.cultivo when it is missing or still equal to id_cc.
+
+    Reads appsheet.tarjas_cc_nombres (already seeded). `nombres` is unused;
+    kept so callers can pass the CSV dict without a second signature.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE appsheet.tarjas_cc t
+               SET cultivo = n."nombre"
+              FROM appsheet.tarjas_cc_nombres n
+             WHERE t.id_cc = n."id_cc"
+               AND (
+                    t.cultivo IS NULL
+                 OR btrim(t.cultivo::text) = ''
+                 OR btrim(t.cultivo::text) = btrim(t.id_cc::text)
+               )
+            """
+        )
+        updated = cur.rowcount or 0
+    log.info(f"tarjas_cc.cultivo ← nombres → actualizados: {updated}")
+    return updated
+
+
 def run() -> None:
     log.info("=== sync_cc start ===")
     bq = _bq_client()
     odoo, archived_to_active = fetch_odoo_cc(bq)
     distribucion_models = fetch_odoo_distribucion_models(bq, odoo)
     active_ids = {info["id"] for info in odoo.values()}
+    nombre_rows = load_cc_nombres_csv()
+    nombres = {r["id_cc"]: r["nombre"] for r in nombre_rows}
+    overlay_model_cultivo(distribucion_models, nombres)
 
     conn = _pg_conn()
     try:
+        seed_cc_nombres(conn, nombre_rows)
         sync_tarjas_cc(odoo, archived_to_active, conn)
         sync_distribucion_models(distribucion_models, active_ids, conn)
+        apply_cc_nombres(conn, nombres)
         sync_despacho_cc(odoo, conn)
         conn.commit()
     except Exception:

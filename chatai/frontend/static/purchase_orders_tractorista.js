@@ -179,7 +179,7 @@ function renderDocument(data) {
   for (const r of data.rows) {
     if (r.cc !== currentCC) {
       currentCC = r.cc;
-      currentGroup = { cc: r.cc, rows: [] };
+      currentGroup = { cc: r.cc, nombre: r.nombre_cc || '', rows: [] };
       groups.push(currentGroup);
     }
     currentGroup.rows.push(r);
@@ -205,7 +205,7 @@ function renderDocument(data) {
     section.dataset.cc = g.cc;
     section.innerHTML = `
       <div class="cc-section-header">
-        <span class="cc-section-title">CC ${esc(String(g.cc ?? ''))}</span>
+        <span class="cc-section-title">CC ${esc(String(g.cc ?? ''))}${g.nombre ? ' — ' + esc(g.nombre) : ''}</span>
         <div class="cc-section-total">${fmtCLP.format(ccTotal)}</div>
       </div>
       <div class="oc-table-wrap">
@@ -219,7 +219,7 @@ function renderDocument(data) {
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
           <tfoot><tr>
-            <td colspan="2"><strong>Total CC ${esc(String(g.cc ?? ''))}</strong></td>
+            <td colspan="2"><strong>Total CC ${esc(String(g.cc ?? ''))}${g.nombre ? ' — ' + esc(g.nombre) : ''}</strong></td>
             <td></td>
             <td class="num"><strong>${fmtNum2.format(ccJornadas)}</strong></td>
             <td class="num"><strong>${fmtCLP.format(ccTotal)}</strong></td>

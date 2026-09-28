@@ -125,6 +125,7 @@ function renderDocument(h, rows) {
     tr.innerHTML = `
       <td><span class="badge ${badgeCls}">${esc(label)}</span></td>
       <td>${esc(String(row['CC'] ?? ''))}</td>
+      <td>${esc(row['Nombre CC'] || '—')}</td>
       <td>${esc(row['Nombre Labor'] ?? '')}</td>
       <td class="num">${row.jornadas ?? ''}</td>
       <td class="num">${fmtCLP.format(row.total_unitario ?? 0)}</td>

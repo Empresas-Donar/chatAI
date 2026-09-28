@@ -52,11 +52,7 @@ async function loadFilters() {
 function fillSelect(id, items, defaultLabel) {
   const sel = document.getElementById(id);
   if (!sel || !Array.isArray(items) || !items.length) return;
-  const prev = sel.value;
-  sel.innerHTML = '';
-  sel.add(new Option(defaultLabel, ''));
-  items.forEach(item => sel.add(new Option(String(item), String(item))));
-  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  fillSelectOptions(sel, items, defaultLabel);
 }
 
 async function queryData() {

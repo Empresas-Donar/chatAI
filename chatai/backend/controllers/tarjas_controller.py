@@ -53,6 +53,7 @@ import base64
 import datetime
 import decimal
 import io
+import json
 from pathlib import Path
 import logging
 import re
@@ -463,11 +464,7 @@ async def get_tarjas_general_filters():
         )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
-                "WHERE cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
-            )
-            centros_costo = [r[0] for r in cur.fetchall()]
+            centros_costo = _fetch_cc_filter_options(cur)
 
             cur.execute(
                 "SELECT DISTINCT tipo_pago FROM appsheet.tarjas_pagos "
@@ -679,9 +676,18 @@ async def get_tarjas_filters():
             contratistas = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                'SELECT DISTINCT "CC" FROM appsheet.tarjas_reporte WHERE "CC" IS NOT NULL ORDER BY "CC"'
+                """
+                SELECT DISTINCT r."CC", cc.cultivo, cc.valor_odoo
+                FROM appsheet.tarjas_reporte r
+                LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = r."CC"::text
+                WHERE r."CC" IS NOT NULL
+                ORDER BY r."CC"
+                """
             )
-            centros_costo = [r[0] for r in cur.fetchall()]
+            centros_costo = [
+                {"id": str(code), "label": _cc_filter_label(code, cultivo, valor)}
+                for code, cultivo, valor in cur.fetchall()
+            ]
 
             cur.execute(
                 'SELECT DISTINCT "Nombre Labor" FROM appsheet.tarjas_reporte ORDER BY "Nombre Labor"'
@@ -747,6 +753,119 @@ def _build_detalle_filters(
     return "WHERE " + " AND ".join(filters), params
 
 
+def _valor_odoo_cuartel_count(valor_odoo) -> int:
+    """How many analytic CC keys are in tarjas_cc.valor_odoo (skip empty keys)."""
+    if valor_odoo is None:
+        return 0
+    parsed = valor_odoo
+    if isinstance(parsed, str):
+        raw = parsed.strip()
+        if not raw:
+            return 0
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return 0
+    if not isinstance(parsed, dict):
+        return 0
+    return sum(1 for k in parsed if k not in (None, ""))
+
+
+def _nombre_cc_label(id_cc, cultivo, valor_odoo) -> str | None:
+    """Detalle 'Nombre CC': real cultivo name, else '{code} (N cuarteles)'.
+
+    Distribution models (800, 878, …) used to store the code in cultivo.
+    After sync_cc overlays tarjas_cc_nombres, cultivo is CAMPO ZÚÑIGA.
+    The N-cuarteles fallback only applies when cultivo is still the code.
+    """
+    code = "" if id_cc is None else str(id_cc).strip()
+    name = "" if cultivo is None else str(cultivo).strip()
+    if name and name != code:
+        return name
+    n = _valor_odoo_cuartel_count(valor_odoo)
+    if n > 1 and code:
+        return f"{code} ({n} cuarteles)"
+    return name or None
+
+
+def _cc_filter_label(id_cc, cultivo, valor_odoo) -> str:
+    """Dropdown text: '800 — CAMPO ZÚÑIGA', else the bare code."""
+    code = "" if id_cc is None else str(id_cc).strip()
+    raw = "" if cultivo is None else str(cultivo).strip()
+    if raw and raw != code:
+        return f"{code} — {raw}"
+    return code
+
+
+def _apply_nombre_cc(rows, id_key: str, name_key: str, valor_key: str = "valor_odoo"):
+    """Overwrite name_key with _nombre_cc_label and drop valor_odoo."""
+    for r in rows:
+        r[name_key] = _nombre_cc_label(
+            r.get(id_key), r.get(name_key), r.pop(valor_key, None)
+        )
+    return rows
+
+
+def _fetch_cc_filter_options(cur, extra_sql: str = "", params=()) -> list[dict]:
+    """Distinct cuartel_cc values as {id, label} for filter dropdowns."""
+    extra = f" AND {extra_sql}" if extra_sql else ""
+    cur.execute(
+        f"""
+        SELECT DISTINCT tarjas_pagos.cuartel_cc, cc.cultivo, cc.valor_odoo
+        FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
+        WHERE tarjas_pagos.cuartel_cc IS NOT NULL{extra}
+        ORDER BY tarjas_pagos.cuartel_cc
+        """,
+        params,
+    )
+    return [
+        {"id": str(code), "label": _cc_filter_label(code, cultivo, valor)}
+        for code, cultivo, valor in cur.fetchall()
+    ]
+
+
+def _attach_cc_nombres(cur, rows, id_key: str, name_key: str = "centro_costo_nombre"):
+    """Look up tarjas_cc.cultivo for already-fetched rows (registros / calendario)."""
+    codes = sorted(
+        {
+            str(r.get(id_key)).strip()
+            for r in rows
+            if r.get(id_key) not in (None, "")
+        }
+    )
+    lookup: dict = {}
+    if codes:
+        cur.execute(
+            """
+            SELECT id_cc::text, cultivo, valor_odoo
+            FROM appsheet.tarjas_cc
+            WHERE id_cc::text = ANY(%s)
+            """,
+            (codes,),
+        )
+        lookup = {a: (b, c) for a, b, c in cur.fetchall()}
+    for r in rows:
+        code = str(r.get(id_key) or "").strip()
+        cultivo, valor = lookup.get(code, (None, None))
+        r[name_key] = _nombre_cc_label(code or None, cultivo, valor)
+    return rows
+
+
+def _lookup_nombre_cc(cur, id_cc) -> str | None:
+    if not id_cc:
+        return None
+    cur.execute(
+        "SELECT cultivo, valor_odoo FROM appsheet.tarjas_cc WHERE id_cc::text = %s",
+        (str(id_cc),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return _nombre_cc_label(id_cc, row[0], row[1])
+
+
 def _query_detalle_rows(cur, where, params):
     cur.execute(
         f"""
@@ -755,6 +874,7 @@ def _query_detalle_rows(cur, where, params):
             p.labor                                                   AS labor,
             p.cuartel_cc                                              AS centro_costo,
             cc.cultivo                                                AS centro_costo_nombre,
+            cc.valor_odoo                                             AS valor_odoo,
             COUNT(*)                                                  AS jornadas,
             SUM(p.horas_trabajadas)                                   AS horas_trabajadas,
             CASE WHEN COUNT(*) > 0
@@ -779,12 +899,13 @@ def _query_detalle_rows(cur, where, params):
         FROM appsheet.tarjas_pagos p
         LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = p.cuartel_cc::text
         {where}
-        GROUP BY p.tipo_pago, p.labor, p.cuartel_cc, cc.cultivo, p.nombre_campo
+        GROUP BY p.tipo_pago, p.labor, p.cuartel_cc, cc.cultivo, cc.valor_odoo, p.nombre_campo
         ORDER BY p.tipo_pago DESC, p.labor, p.cuartel_cc
     """,
         params,
     )
-    return annotate_detalle_rows(_rows_to_dicts(cur))
+    rows = annotate_detalle_rows(_rows_to_dicts(cur))
+    return _apply_nombre_cc(rows, "centro_costo", "centro_costo_nombre")
 
 
 def _query_detalle_resumen(cur, where, params):
@@ -928,26 +1049,34 @@ def _fetch_detalle_tractorista_filter_options(cur, where: str, params: list) -> 
     """Distinct dropdown values for the current tractorista WHERE (one scan)."""
     cur.execute(
         f"""
-        SELECT contratista, nombre_campo, cuartel_cc, labor
+        SELECT tarjas_pagos.contratista, tarjas_pagos.nombre_campo,
+               tarjas_pagos.cuartel_cc, tarjas_pagos.labor,
+               cc.cultivo, cc.valor_odoo
         FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
         {where}
         """,
         params,
     )
-    contratistas, empresas, centros, labores = set(), set(), set(), set()
-    for contratista, campo, cc, labor in cur.fetchall():
+    contratistas, empresas, labores = set(), set(), set()
+    centros: dict[str, str] = {}
+    for contratista, campo, cc, labor, cultivo, valor in cur.fetchall():
         if contratista:
             contratistas.add(contratista)
         if campo:
             empresas.add(campo)
         if cc:
-            centros.add(str(cc))
+            code = str(cc)
+            centros[code] = _cc_filter_label(cc, cultivo, valor)
         if labor:
             labores.add(labor)
     return {
         "contratistas": sorted(contratistas),
         "empresas": sorted(empresas),
-        "centros_costo": sorted(centros),
+        "centros_costo": [
+            {"id": k, "label": centros[k]} for k in sorted(centros)
+        ],
         "labores": sorted(labores),
     }
 
@@ -1514,11 +1643,7 @@ async def get_tarjas_contractor_filters():
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
-            cur.execute(
-                "SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
-                "WHERE cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
-            )
-            centros_costo = [r[0] for r in cur.fetchall()]
+            centros_costo = _fetch_cc_filter_options(cur)
 
             cur.execute(
                 "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
@@ -1637,12 +1762,7 @@ async def get_tarjas_contractor_tractorista_filters():
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
-            cur.execute(
-                "SELECT DISTINCT cuartel_cc "
-                + base_where
-                + "AND cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
-            )
-            centros_costo = [r[0] for r in cur.fetchall()]
+            centros_costo = _fetch_cc_filter_options(cur, extra_sql=_TRACTORISTA_PAGOS_SQL)
 
             cur.execute(
                 "SELECT DISTINCT labor "
@@ -2241,12 +2361,7 @@ async def get_tarjas_general_tractorista_filters():
             maq_col = _resolve_maquina_column(cur)
             base = f" FROM appsheet.tarjas_pagos WHERE {_TRACTORISTA_PAGOS_SQL} "
 
-            cur.execute(
-                "SELECT DISTINCT cuartel_cc "
-                + base
-                + "AND cuartel_cc IS NOT NULL ORDER BY cuartel_cc"
-            )
-            centros_costo = [r[0] for r in cur.fetchall()]
+            centros_costo = _fetch_cc_filter_options(cur, extra_sql=_TRACTORISTA_PAGOS_SQL)
 
             cur.execute(
                 "SELECT DISTINCT labor " + base + "AND labor IS NOT NULL ORDER BY labor"
@@ -4576,16 +4691,20 @@ def _query_bono_mensual_rows(cur, where, params):
             contratista,
             nombre_campo,
             cuartel_cc AS cc,
+            cc.cultivo AS nombre_cc,
+            cc.valor_odoo AS valor_odoo,
             fecha::date AS fecha,
             total_pagar AS monto,
             estado
         FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
         {where}
         ORDER BY contratista, trabajador, fecha
         """,
         params,
     )
-    return _rows_to_dicts(cur)
+    return _apply_nombre_cc(_rows_to_dicts(cur), "cc", "nombre_cc")
 
 
 @router.get("/tarjas/bono-mensual", response_class=HTMLResponse)
@@ -4688,6 +4807,7 @@ async def download_tarjas_bono_mensual_excel(
             "Contratista",
             "Empresa/Campo",
             "CC",
+            "Nombre CC",
             "Fecha",
             "Monto",
             "Estado",
@@ -4701,24 +4821,25 @@ async def download_tarjas_bono_mensual_excel(
         ws.cell(i, 3, r["contratista"])
         ws.cell(i, 4, r["nombre_campo"])
         ws.cell(i, 5, r["cc"])
-        ws.cell(i, 6, r["fecha"])
+        ws.cell(i, 6, r["nombre_cc"] or "—")
+        ws.cell(i, 7, r["fecha"])
         monto = float(r["monto"] or 0)
         total += monto
-        c = ws.cell(i, 7, monto)
+        c = ws.cell(i, 8, monto)
         c.number_format = money
-        ws.cell(i, 8, r["estado"])
+        ws.cell(i, 9, r["estado"])
 
     total_row = len(rows) + 2
     fill = PatternFill("solid", fgColor="D6E4F0")
     tcell = ws.cell(total_row, 1, "Suma total")
     tcell.font = Font(bold=True)
-    for col in range(1, 9):
+    for col in range(1, 10):
         ws.cell(total_row, col).fill = fill
-    t = ws.cell(total_row, 7, total)
+    t = ws.cell(total_row, 8, total)
     t.font = Font(bold=True)
     t.number_format = money
 
-    for col, w in zip("ABCDEFGH", [26, 14, 28, 20, 10, 12, 14, 14]):
+    for col, w in zip("ABCDEFGHI", [26, 14, 28, 20, 10, 22, 12, 14, 14]):
         ws.column_dimensions[col].width = w
 
     return _excel_response(wb, f"bonos_mensuales_{mes}.xlsx")
@@ -4761,14 +4882,15 @@ def _build_bono_mensual_html(
     # reproduced with real data and confirmed fixed by declaring widths on
     # every <th>/<td>, including the footer row (see specs/117-*).
     W = {
-        "trabajador": "width:16%",
-        "rut": "width:11%",
-        "contratista": "width:20%",
-        "campo": "width:14%",
-        "cc": "width:7%",
-        "fecha": "width:9%",
+        "trabajador": "width:14%",
+        "rut": "width:10%",
+        "contratista": "width:16%",
+        "campo": "width:12%",
+        "cc": "width:6%",
+        "nombre_cc": "width:12%",
+        "fecha": "width:8%",
         "monto": "width:11%",
-        "estado": "width:12%",
+        "estado": "width:11%",
     }
     rows_html = "".join(
         f'<tr><td style="{W["trabajador"]}">{_escape_html(r["trabajador"] or "")}</td>'
@@ -4776,6 +4898,7 @@ def _build_bono_mensual_html(
         f'<td style="{W["contratista"]}">{_escape_html(r["contratista"] or "")}</td>'
         f'<td style="{W["campo"]}">{_escape_html(r["nombre_campo"] or "")}</td>'
         f'<td style="{W["cc"]}">{_escape_html(str(r["cc"] or ""))}</td>'
+        f'<td style="{W["nombre_cc"]}">{_escape_html(r.get("nombre_cc") or "—")}</td>'
         f'<td style="{W["fecha"]}">{_fmt_date_display(str(r["fecha"]))}</td>'
         f'<td class="num" style="{W["monto"]}">{_fmt_clp(r["monto"])}</td>'
         f'<td style="{W["estado"]}">{_escape_html(r["estado"] or "")}</td></tr>'
@@ -4784,7 +4907,8 @@ def _build_bono_mensual_html(
     rows_html += (
         f'<tr class="total-row"><td style="{W["trabajador"]}"><b>Suma total</b></td>'
         f'<td style="{W["rut"]}"></td><td style="{W["contratista"]}"></td>'
-        f'<td style="{W["campo"]}"></td><td style="{W["cc"]}"></td><td style="{W["fecha"]}"></td>'
+        f'<td style="{W["campo"]}"></td><td style="{W["cc"]}"></td>'
+        f'<td style="{W["nombre_cc"]}"></td><td style="{W["fecha"]}"></td>'
         f'<td class="num" style="{W["monto"]}"><b>{_fmt_clp(total)}</b></td>'
         f'<td style="{W["estado"]}"></td></tr>'
     )
@@ -4800,7 +4924,8 @@ def _build_bono_mensual_html(
     <table style="width:88%;table-layout:fixed"><thead>
       <tr><th style="{W["trabajador"]}">Trabajador</th><th style="{W["rut"]}">RUT</th>
       <th style="{W["contratista"]}">Contratista</th><th style="{W["campo"]}">Empresa/Campo</th>
-      <th style="{W["cc"]}">CC</th><th style="{W["fecha"]}">Fecha</th>
+      <th style="{W["cc"]}">CC</th><th style="{W["nombre_cc"]}">Nombre CC</th>
+      <th style="{W["fecha"]}">Fecha</th>
       <th class="num" style="{W["monto"]}">Monto</th><th style="{W["estado"]}">Estado</th></tr>
     </thead><tbody>{rows_html}</tbody></table>
     """
@@ -4843,7 +4968,7 @@ async def download_tarjas_bono_mensual_pdf(
 # Any daily cell above this amount is highlighted on screen, Excel and PDF.
 HORA_PONDERADA_HIGHLIGHT_THRESHOLD = 30000
 
-# This pivot has 3 fixed columns (Labor/CC/Total) plus large currency values
+# This pivot has 4 fixed columns (Labor/CC/Nombre CC/Total) plus large currency values
 # (can run into the millions), so it needs wider date columns than the
 # 2-fixed-column pivots elsewhere in this file. Capped at roughly a full
 # calendar month of working days (verified legible up to 23 date columns at
@@ -4887,17 +5012,23 @@ def _query_hora_ponderada_rows(cur, where, params):
         SELECT
             labor,
             cuartel_cc                               AS centro_costo,
+            cc.cultivo                               AS centro_costo_nombre,
+            cc.valor_odoo                            AS valor_odoo,
             fecha::date::text                        AS fecha,
             COALESCE(SUM(total_trabajado), 0)        AS total_trabajado,
             COALESCE(SUM(horas_trabajadas), 0)       AS horas_trabajadas
         FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
         {where}
-        GROUP BY labor, cuartel_cc, fecha::date
+        GROUP BY labor, cuartel_cc, cc.cultivo, cc.valor_odoo, fecha::date
         ORDER BY labor, cuartel_cc, fecha::date
     """,
         params,
     )
-    return _rows_to_dicts(cur)
+    return _apply_nombre_cc(
+        _rows_to_dicts(cur), "centro_costo", "centro_costo_nombre"
+    )
 
 
 def _hora_ponderada_9h(total_trabajado, horas_trabajadas) -> int | None:
@@ -4932,12 +5063,9 @@ async def get_tarjas_hora_ponderada_filters():
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
-            cur.execute(
-                f"SELECT DISTINCT cuartel_cc FROM appsheet.tarjas_pagos "
-                f"WHERE cuartel_cc IS NOT NULL AND NOT {_TRACTORISTA_PAGOS_SQL} "
-                f"ORDER BY cuartel_cc"
+            centros_costo = _fetch_cc_filter_options(
+                cur, extra_sql=f"NOT {_TRACTORISTA_PAGOS_SQL}"
             )
-            centros_costo = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 f"SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
@@ -5029,7 +5157,12 @@ async def download_tarjas_hora_ponderada_excel(
     for r in rows:
         key = (r["labor"], r["centro_costo"])
         if key not in groups:
-            groups[key] = {"total_trabajado": 0.0, "total_horas": 0.0, "by_date": {}}
+            groups[key] = {
+                "total_trabajado": 0.0,
+                "total_horas": 0.0,
+                "by_date": {},
+                "nombre": r.get("centro_costo_nombre"),
+            }
         g = groups[key]
         total = float(r["total_trabajado"] or 0)
         horas = float(r["horas_trabajadas"] or 0)
@@ -5042,7 +5175,7 @@ async def download_tarjas_hora_ponderada_excel(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Hora ponderada 9h"
-    fixed_headers = ["Labor", "CC"]
+    fixed_headers = ["Labor", "CC", "Nombre CC"]
     date_headers = [d[5:] for d in dates]  # MM-DD
     _apply_header(ws, fixed_headers + date_headers + ["Hora ponderada 9h"])
 
@@ -5058,7 +5191,8 @@ async def download_tarjas_hora_ponderada_excel(
     for i, ((labor_, cc), g) in enumerate(groups.items(), 2):
         ws.cell(i, 1, labor_)
         ws.cell(i, 2, cc)
-        for j, d in enumerate(dates, 3):
+        ws.cell(i, 3, g.get("nombre") or "—")
+        for j, d in enumerate(dates, 4):
             cell = g["by_date"].get(d)
             if cell:
                 val = _hora_ponderada_9h(*cell)
@@ -5091,7 +5225,7 @@ async def download_tarjas_hora_ponderada_excel(
     if footer_val is not None:
         fcell.number_format = money
 
-    fixed_widths = [28, 14]
+    fixed_widths = [28, 12, 28]
     date_widths = [10] * len(dates)
     for idx, w in enumerate(fixed_widths + date_widths + [18], start=1):
         ws.column_dimensions[get_column_letter(idx)].width = w
@@ -5131,7 +5265,12 @@ def _build_hora_ponderada_html(
     for r in rows:
         key = (r["labor"], r["centro_costo"])
         if key not in groups:
-            groups[key] = {"total_trabajado": 0.0, "total_horas": 0.0, "by_date": {}}
+            groups[key] = {
+                "total_trabajado": 0.0,
+                "total_horas": 0.0,
+                "by_date": {},
+                "nombre": r.get("centro_costo_nombre"),
+            }
         g = groups[key]
         total = float(r["total_trabajado"] or 0)
         horas = float(r["horas_trabajadas"] or 0)
@@ -5145,7 +5284,11 @@ def _build_hora_ponderada_html(
     # money values up to 7 digits ($X.XXX.XXX), unlike the smaller hour/count
     # values in other pivots — narrower columns risk reproducing #108's
     # column-overlap bug.
-    w = _pivot_col_widths({"labor": 13, "cc": 8, "total": 13}, len(dates), date_pct=5.0)
+    w = _pivot_col_widths(
+        {"labor": 11, "cc": 6, "nombre_cc": 12, "total": 11},
+        len(dates),
+        date_pct=5.0,
+    )
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
         f'{datetime.date.fromisoformat(d).strftime("%d/%m")}</th>'
@@ -5180,6 +5323,7 @@ def _build_hora_ponderada_html(
             f"<tr class='{row_cls}'>"
             f"<td style='{w['labor']}'>{_escape_html(labor_cell)}</td>"
             f"<td style='{w['cc']}'>{_escape_html(cc or '')}</td>"
+            f"<td style='{w['nombre_cc']}'>{_escape_html(g.get('nombre') or '—')}</td>"
             f"{date_cells}"
             f"<td class='total' style='{w['total']}'>"
             f"{_fmt_clp(row_total) if row_total is not None else '-'}</td></tr>"
@@ -5195,6 +5339,7 @@ def _build_hora_ponderada_html(
     rows_html += (
         f"<tr class='total-row'><td style='{w['labor']}'><b>Hora ponderada 9h global</b></td>"
         f"<td style='{w['cc']}'></td>"
+        f"<td style='{w['nombre_cc']}'></td>"
         + f'<td class="num" style="{w["date"]}"></td>' * len(dates)
         + f"<td class='total' style='{w['total']}'><b>"
         f"{_fmt_clp(footer_val) if footer_val is not None else '-'}</b></td></tr>"
@@ -5217,6 +5362,7 @@ def _build_hora_ponderada_html(
       <tr>
         <th style="{w['labor']}">Labor</th>
         <th style="{w['cc']}">CC</th>
+        <th style="{w['nombre_cc']}">Nombre CC</th>
         {date_headers}
         <th class="num" style="{w['total']}">Hora ponderada 9h</th>
       </tr>
@@ -5302,19 +5448,23 @@ def _query_notas_lines(cur, where, params):
         SELECT
             tipo_pago,
             cuartel_cc AS cc,
+            cc.cultivo AS nombre_cc,
+            cc.valor_odoo AS valor_odoo,
             labor,
             COUNT(*) AS jornadas,
             COALESCE(SUM(total_trabajado), 0) AS total_trabajado
         FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
         {where}
-        GROUP BY tipo_pago, cuartel_cc, labor
+        GROUP BY tipo_pago, cuartel_cc, cc.cultivo, cc.valor_odoo, labor
         ORDER BY
             CASE WHEN LOWER(TRIM(tipo_pago)) IN ('a trato','trato') THEN 0 ELSE 1 END,
             cuartel_cc, labor
         """,
         params,
     )
-    rows = _rows_to_dicts(cur)
+    rows = _apply_nombre_cc(_rows_to_dicts(cur), "cc", "nombre_cc")
     for r in rows:
         emp = float(total_empresa(r.get("tipo_pago"), r.get("total_trabajado")))
         jornadas = float(r.get("jornadas") or 0)
@@ -5648,25 +5798,32 @@ async def get_tarjas_tractorista_preview(
             cur.execute(
                 """
                 SELECT
-                    fecha::text                                                  AS fecha,
-                    "Lineas del pedido/Código de Distribución Analítica/Código" AS cc,
-                    "Lineas del pedido/Producto/Nombre"                         AS labor,
-                    SUM("order_line/product_qty")                               AS horas,
-                    CASE WHEN SUM("order_line/product_qty") > 0
+                    t.fecha::text                                                  AS fecha,
+                    t."Lineas del pedido/Código de Distribución Analítica/Código" AS cc,
+                    cc.cultivo                                                     AS nombre_cc,
+                    cc.valor_odoo                                                  AS valor_odoo,
+                    t."Lineas del pedido/Producto/Nombre"                         AS labor,
+                    SUM(t."order_line/product_qty")                               AS horas,
+                    CASE WHEN SUM(t."order_line/product_qty") > 0
                          THEN ROUND(
-                             SUM("order_line/product_qty" * "order_line/price_unit")
-                             / SUM("order_line/product_qty"), 2)
+                             SUM(t."order_line/product_qty" * t."order_line/price_unit")
+                             / SUM(t."order_line/product_qty"), 2)
                          ELSE NULL END                                          AS precio_hora,
-                    COALESCE(MAX("order_line/product_id"), '(sin mapeo)')       AS product_id
-                FROM appsheet.tarjas_reporte_odoo_tractorista
-                WHERE "Vendedor"   = %s
-                  AND nombre_campo = %s
-                  AND fecha BETWEEN %s AND %s
+                    COALESCE(MAX(t."order_line/product_id"), '(sin mapeo)')       AS product_id
+                FROM appsheet.tarjas_reporte_odoo_tractorista t
+                LEFT JOIN appsheet.tarjas_cc cc
+                  ON cc.id_cc::text = t."Lineas del pedido/Código de Distribución Analítica/Código"::text
+                WHERE t."Vendedor"   = %s
+                  AND t.nombre_campo = %s
+                  AND t.fecha BETWEEN %s AND %s
                 GROUP BY
-                    fecha,
-                    "Lineas del pedido/Código de Distribución Analítica/Código",
-                    "Lineas del pedido/Producto/Nombre"
-                ORDER BY cc, fecha, labor
+                    t.fecha,
+                    t."Lineas del pedido/Código de Distribución Analítica/Código",
+                    cc.cultivo,
+                    cc.valor_odoo,
+                    t."Lineas del pedido/Producto/Nombre"
+                ORDER BY t."Lineas del pedido/Código de Distribución Analítica/Código",
+                         t.fecha, t."Lineas del pedido/Producto/Nombre"
                 """,
                 (contratista, campo, fecha_inicio, fecha_termino),
             )
@@ -5674,22 +5831,30 @@ async def get_tarjas_tractorista_preview(
     finally:
         conn.close()
 
-    total_horas = sum(float(r[3] or 0) for r in rows)
-    total_monto = sum(float(r[3] or 0) * float(r[4] or 0) for r in rows)
-
-    return {
-        "rows": [
+    mapped = []
+    total_horas = 0.0
+    total_monto = 0.0
+    for r in rows:
+        horas = float(r[5]) if r[5] is not None else None
+        precio = float(r[6]) if r[6] is not None else None
+        total = (float(r[5] or 0) * float(r[6] or 0)) if r[6] is not None else None
+        total_horas += float(r[5] or 0)
+        total_monto += float(total or 0)
+        mapped.append(
             {
                 "fecha": r[0],
                 "cc": r[1],
-                "labor": r[2],
-                "horas": float(r[3]) if r[3] is not None else None,
-                "precio_hora": float(r[4]) if r[4] is not None else None,
-                "total": (float(r[3] or 0) * float(r[4] or 0)) if r[4] is not None else None,
-                "product_id": r[5],
+                "nombre_cc": _nombre_cc_label(r[1], r[2], r[3]),
+                "labor": r[4],
+                "horas": horas,
+                "precio_hora": precio,
+                "total": total,
+                "product_id": r[7],
             }
-            for r in rows
-        ],
+        )
+
+    return {
+        "rows": mapped,
         "total_horas": total_horas,
         "total_monto": total_monto,
         "contratista": contratista,
@@ -5991,6 +6156,7 @@ async def download_tarjas_tractorista_pdf(
     except Exception:
         raise HTTPException(status_code=503, detail="Error de conexión")
 
+    cc_name = None  # set inside the DB block
     try:
         with conn.cursor() as cur:
             cc_filter = "AND cuartel_cc = %s" if cc else ""
@@ -6017,6 +6183,7 @@ async def download_tarjas_tractorista_pdf(
                 params,
             )
             rows = _rows_to_dicts(cur)
+            cc_name = _lookup_nombre_cc(cur, cc) if cc else None
         pivot_rows = _fetch_tractorista_pivot_rows(
             conn, contratista, campo, fecha_inicio, fecha_termino, cc=cc
         )
@@ -6101,7 +6268,12 @@ async def download_tarjas_tractorista_pdf(
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
     fi_fmt = datetime.date.fromisoformat(fecha_inicio).strftime("%d/%m/%Y")
     ft_fmt = datetime.date.fromisoformat(fecha_termino).strftime("%d/%m/%Y")
-    cc_line = f'<div class="sub">CC {cc}</div>' if cc else ""
+    if cc and cc_name:
+        cc_line = f'<div class="sub">CC {cc} — {_escape_html(cc_name)}</div>'
+    elif cc:
+        cc_line = f'<div class="sub">CC {cc}</div>'
+    else:
+        cc_line = ""
 
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>
@@ -6292,6 +6464,7 @@ async def notas_print_pdf(
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{r.get("cc") or ""}</td>
+          <td>{_escape_html(r.get("nombre_cc") or "—")}</td>
           <td>{r.get("labor") or ""}</td>
           <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
           <td class="num">{_fmt_clp(r.get("total_unitario"))}</td>
@@ -6345,7 +6518,7 @@ async def notas_print_pdf(
 <table class="detail-table">
   <thead>
     <tr>
-      <th>Tipo de Pago</th><th>CC</th><th>Nombre Labor</th>
+      <th>Tipo de Pago</th><th>CC</th><th>Nombre CC</th><th>Nombre Labor</th>
       <th class="num">Jornadas</th><th class="num">Precio Unitario</th>
       <th class="num">Total a Pagar</th>
     </tr>
@@ -6382,6 +6555,7 @@ _REGISTROS_CAMPO_COLUMNS = [
     "fecha_iso",
     "nombre_campo",
     "cuartel_cc",
+    "centro_costo_nombre",
     "labor",
     "contratista",
     "trabajador",
@@ -6701,6 +6875,7 @@ async def get_tarjas_registros_campo(
                 page_params,
             )
             rows = _annotate_registros_campo(_rows_to_dicts(cur))
+            _attach_cc_nombres(cur, rows, "cuartel_cc")
     finally:
         conn.close()
 
@@ -6780,6 +6955,7 @@ async def patch_tarjas_registro_campo(
                     (id_resumen,),
                 )
                 rows = _annotate_registros_campo(_rows_to_dicts(cur))
+                _attach_cc_nombres(cur, rows, "cuartel_cc")
     finally:
         conn.close()
 
@@ -6829,6 +7005,7 @@ async def download_tarjas_registros_campo_excel(
                 excel_params,
             )
             rows = _annotate_registros_campo(_rows_to_dicts(cur))
+            _attach_cc_nombres(cur, rows, "cuartel_cc")
     finally:
         conn.close()
 
@@ -6839,6 +7016,7 @@ async def download_tarjas_registros_campo_excel(
         ("id_supervisor", "Supervisor"),
         ("nombre_campo", "Campo"),
         ("cuartel_cc", "Cuartel / CC"),
+        ("centro_costo_nombre", "Nombre CC"),
         ("trabajador", "Trabajador"),
         ("rut_trabajador", "RUT"),
         ("contratista", "Contratista"),
@@ -6895,8 +7073,10 @@ async def download_tarjas_registros_campo_excel(
     ws.column_dimensions["C"].width = 28
     ws.column_dimensions["D"].width = 22
     ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["F"].width = 12
     ws.column_dimensions["G"].width = 28
-    ws.column_dimensions["I"].width = 28
+    ws.column_dimensions["H"].width = 28
+    ws.column_dimensions["J"].width = 28
 
     output = io.BytesIO()
     wb.save(output)
@@ -7282,6 +7462,7 @@ async def get_tarjas_calendario_planes(
         dias = int(row.get("dias") or 1)
         row["dias"] = dias
         row["largo"] = dias >= 7
+        row["cultivo"] = _nombre_cc_label(row.get("id_cc"), row.get("cultivo"), None)
         for key in ("fecha_inicio", "fecha_fin"):
             raw = row.get(key)
             row[key] = str(raw)[:10] if raw else None

@@ -266,6 +266,7 @@ function renderDocument(data, from, to, contratista) {
     tr.innerHTML = `
       <td><span class="badge ${isTrato(row.tipo_pago) ? 'badge-trato' : 'badge-aldia'}">${esc(row.tipo_pago)}</span></td>
       <td>${esc(row.cc)}</td>
+      <td>${esc(row.nombre_cc || '—')}</td>
       <td>${esc(row.labor)}</td>
       <td class="num">${row.jornadas ?? '–'}</td>
       <td class="num">${fmtCLP.format(row.total_unitario ?? 0)}</td>

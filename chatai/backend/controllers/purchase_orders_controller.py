@@ -174,22 +174,31 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
         SELECT
             tipo_pago,
             cuartel_cc AS "CC",
+            cc.cultivo AS "Nombre CC",
+            cc.valor_odoo AS valor_odoo,
             labor AS "Nombre Labor",
             COUNT(*) AS jornadas,
             COALESCE(SUM(total_trabajado), 0) AS total_trabajado
         FROM appsheet.tarjas_pagos
+        LEFT JOIN appsheet.tarjas_cc cc
+          ON cc.id_cc::text = tarjas_pagos.cuartel_cc::text
         WHERE estado = 'Aprobado'
           AND contratista = %s
           AND nombre_campo = %s
           AND fecha::date BETWEEN %s AND %s
-        GROUP BY tipo_pago, cuartel_cc, labor
+        GROUP BY tipo_pago, cuartel_cc, cc.cultivo, cc.valor_odoo, labor
         ORDER BY tipo_pago DESC, cuartel_cc, labor
         """,
         (contratista, empresa, fecha_inicio, fecha_termino),
     )
     columns = [d[0] for d in cur.description]
     rows = [{k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()]
+    from tarjas_controller import _nombre_cc_label
+
     for r in rows:
+        r["Nombre CC"] = _nombre_cc_label(
+            r.get("CC"), r.get("Nombre CC"), r.pop("valor_odoo", None)
+        )
         emp = float(total_empresa(r.get("tipo_pago"), r.get("total_trabajado")))
         jornadas = float(r.get("jornadas") or 0)
         r["contratista"] = contratista
@@ -1688,6 +1697,7 @@ async def purchase_order_print_pdf(
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{r.get("CC") or ""}</td>
+          <td>{r.get("Nombre CC") or "—"}</td>
           <td>{r.get("Nombre Labor") or ""}</td>
           <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
           <td class="num">{_fmt_clp(r.get("total_unitario"))}</td>
@@ -1741,7 +1751,7 @@ async def purchase_order_print_pdf(
 <table class="detail-table">
   <thead>
     <tr>
-      <th>Tipo de Pago</th><th>CC</th><th>Nombre Labor</th>
+      <th>Tipo de Pago</th><th>CC</th><th>Nombre CC</th><th>Nombre Labor</th>
       <th class="num">Jornadas</th><th class="num">Precio Unitario</th>
       <th class="num">Total a Pagar</th>
     </tr>
