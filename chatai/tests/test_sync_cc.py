@@ -882,3 +882,53 @@ class TestCompany3PlanSplitDistribucionModels:
             result = _run_fetch_distribucion_models(rows, by_code)
         assert result[0]["id_campo"] not in (2, 3)
         assert any("no reconocido" in record.message for record in caplog.records)
+
+
+class TestCcNombresCatalog:
+    """Excel-backed name catalog for distribution models (cultivo = code today)."""
+
+    def test_csv_contains_zuniga_models(self):
+        sync_cc = _load_sync_cc()
+        rows = sync_cc.load_cc_nombres_csv()
+        by_id = {r["id_cc"]: r for r in rows}
+        assert by_id["800"]["nombre"] == "CAMPO ZÚÑIGA"
+        assert by_id["800"]["tipo"] == "modelo"
+        assert by_id["878"]["nombre"] == "CEREZOS ZÚÑIGA"
+        assert by_id["880"]["nombre"] == "CEREZOS 2014"
+        assert by_id["866"]["nombre"] == "CEREZOS 2024"
+        assert by_id["883"]["nombre"] == "CEREZOS SANTINA 2014"
+        assert by_id["883"]["tipo"] == "cuartel"
+        assert sum(1 for r in rows if r["tipo"] == "modelo") == 25
+
+    def test_overlay_replaces_code_cultivo(self):
+        sync_cc = _load_sync_cc()
+        models = [
+            {"id_cc": "800", "cultivo": "800", "id_campo": 3, "valor_odoo": "{}"},
+            {
+                "id_cc": "883",
+                "cultivo": "CEREZOS SANTINA 2014",
+                "id_campo": 3,
+                "valor_odoo": "{}",
+            },
+        ]
+        n = sync_cc.overlay_model_cultivo(
+            models,
+            {"800": "CAMPO ZÚÑIGA", "883": "CEREZOS SANTINA 2014"},
+        )
+        assert n == 1
+        assert models[0]["cultivo"] == "CAMPO ZÚÑIGA"
+        assert models[1]["cultivo"] == "CEREZOS SANTINA 2014"
+
+    def test_apply_updates_only_code_like_cultivo(self):
+        sync_cc = _load_sync_cc()
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 24
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        n = sync_cc.apply_cc_nombres(mock_conn)
+        assert n == 24
+        sql = mock_cursor.execute.call_args.args[0]
+        assert "UPDATE appsheet.tarjas_cc" in sql
+        assert "FROM appsheet.tarjas_cc_nombres" in sql
+        assert "btrim(t.cultivo::text) = btrim(t.id_cc::text)" in sql
+

@@ -240,3 +240,22 @@ function bindPopstate(ids, triggerFn) {
     _runAutoQuery();
   });
 }
+
+function fillSelectOptions(sel, items, defaultLabel) {
+  if (!sel) return;
+  const escOpt = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const prev = sel.value;
+  const opts = (items || []).map(i => {
+    if (i && typeof i === 'object' && (i.id != null || i.value != null)) {
+      const value = String(i.id ?? i.value ?? '');
+      const label = String(i.label ?? i.nombre ?? value);
+      return `<option value="${escOpt(value)}">${escOpt(label)}</option>`;
+    }
+    return `<option value="${escOpt(String(i))}">${escOpt(String(i))}</option>`;
+  }).join('');
+  sel.innerHTML = `<option value="">${escOpt(defaultLabel)}</option>` + opts;
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+window.fillSelectOptions = fillSelectOptions;

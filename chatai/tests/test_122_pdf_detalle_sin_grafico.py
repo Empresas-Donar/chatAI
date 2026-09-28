@@ -6,7 +6,8 @@ Regression tests for issue #122: the "Detalle Operacional" PDF
   column instead (issue #96 pie chart coverage moved out of
   test_96_pdf_detalle_resumen_grafico.py, which no longer applies).
 - The Detalle table drops the "Horas" and "Unitario" columns and gains a
-  "Nombre CC" column (appsheet.tarjas_cc.cultivo, joined by id_cc).
+  "Nombre CC" column (tarjas_cc.cultivo, or "{code} (N cuarteles)" from
+  valor_odoo when cultivo is just the CC code).
 - The Detalle table's "% pago" is the row's total_trabajado divided by
   (Al Día + Trato) total_trabajado — not total_pagar / costo_total, which
   AppSheet leaves at 0 on most rows.

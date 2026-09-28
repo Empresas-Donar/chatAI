@@ -88,6 +88,7 @@ const DETAIL_FIELDS = [
   ['contratista', 'Contratista'],
   ['nombre_campo', 'Campo'],
   ['cuartel_cc', 'Cuartel / CC'],
+  ['centro_costo_nombre', 'Nombre CC'],
   ['id_supervisor', 'Supervisor'],
   ['tipo_pago', 'Tipo de pago'],
   ['horas_trabajadas', 'Horas trabajadas'],
@@ -612,7 +613,13 @@ function renderPlanSection(planes) {
       const people = p.numero_personas
         ? `${fmtInt(p.numero_personas)} persona${Number(p.numero_personas) === 1 ? '' : 's'}`
         : '';
-      const meta = [p.nombre_campo, people].filter(Boolean).join(' · ');
+      const ccLabel = (() => {
+        const code = String(p.id_cc || '').trim();
+        const name = String(p.cultivo || '').trim();
+        if (code && name && name !== code) return `${code} — ${name}`;
+        return code || name;
+      })();
+      const meta = [p.nombre_campo, ccLabel, people].filter(Boolean).join(' · ');
       return `<article class="tcal-rec tcal-rec-plan tcal-rec-compact">
         <div class="tcal-rec-top">
           <h3 class="tcal-rec-title">${esc(title)}</h3>

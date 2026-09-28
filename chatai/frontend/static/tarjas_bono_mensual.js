@@ -101,6 +101,7 @@ function renderTable(rows, count, total) {
     <td>${esc(r.contratista ?? '')}</td>
     <td>${esc(r.nombre_campo ?? '')}</td>
     <td>${esc(r.cc ?? '')}</td>
+    <td>${esc(r.nombre_cc || '—')}</td>
     <td>${fmtDate(r.fecha)}</td>
     <td class="num">${fmtCLP.format(r.monto || 0)}</td>
     <td>${esc(r.estado ?? '')}</td>
@@ -108,7 +109,7 @@ function renderTable(rows, count, total) {
 
   const tfoot = document.getElementById('data-tfoot');
   tfoot.innerHTML = `<tr>
-    <td colspan="6"><strong>Suma total</strong></td>
+    <td colspan="7"><strong>Suma total</strong></td>
     <td class="num"><strong>${fmtCLP.format(total || 0)}</strong></td>
     <td></td>
   </tr>`;

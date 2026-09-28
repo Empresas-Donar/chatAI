@@ -45,9 +45,7 @@ async function loadFilters() {
 }
 
 function fillSelect(id, items, defaultLabel) {
-  const sel = document.getElementById(id);
-  sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+  fillSelectOptions(document.getElementById(id), items || [], defaultLabel);
 }
 
 // ── Query & render ────────────────────────────────────────────────────

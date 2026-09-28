@@ -52,9 +52,7 @@ async function loadFilters() {
 }
 
 function fillSelect(id, items, defaultLabel) {
-  const sel = document.getElementById(id);
-  sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
+  fillSelectOptions(document.getElementById(id), items || [], defaultLabel);
 }
 
 // ── Query & render ────────────────────────────────────────────────────
@@ -136,7 +134,7 @@ function renderPivot(rows) {
     const horas = Number(r.horas_trabajadas) || 0;
 
     if (!groups.has(key)) {
-      groups.set(key, { labor, cc, totalTrabajado: 0, totalHoras: 0, byDate: {} });
+      groups.set(key, { labor, cc, nombre: r.centro_costo_nombre || '', totalTrabajado: 0, totalHoras: 0, byDate: {} });
     }
     const g = groups.get(key);
     g.totalTrabajado += total;
@@ -158,7 +156,8 @@ function renderPivot(rows) {
   const thead = document.getElementById('pivot-thead');
   let hdr = `<tr>
     <th class="th-fixed">Labor</th>
-    <th class="th-fixed">CC</th>`;
+    <th class="th-fixed">CC</th>
+    <th class="th-fixed">Nombre CC</th>`;
   dates.forEach(d => {
     hdr += `<th class="th-date">${formatShortDate(d)}</th>`;
   });
@@ -186,6 +185,7 @@ function renderPivot(rows) {
     html += `<tr class="${rowClass}">`;
     html += `<td class="cell-worker">${laborCell}</td>`;
     html += `<td class="cell-labor" title="${esc(g.cc)}">${esc(g.cc)}</td>`;
+    html += `<td class="cell-labor" title="${esc(g.nombre || g.cc)}">${esc(g.nombre || '—')}</td>`;
 
     dates.forEach(d => {
       const cell = g.byDate[d];
@@ -216,6 +216,7 @@ function renderPivot(rows) {
   const footerTotal = horaPonderada9h(grandTotal, grandHoras);
   html += `<tr class="tc-totals-row">`;
   html += `<td class="cell-worker"><strong>Hora ponderada 9h global</strong></td>`;
+  html += `<td></td>`;
   html += `<td></td>`;
   dates.forEach(d => {
     const v = horaPonderada9h(colTrabajado[d], colHoras[d]);

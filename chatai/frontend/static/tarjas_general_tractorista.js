@@ -53,10 +53,7 @@ async function loadFilters() {
 function fillSelect(id, items, defaultLabel) {
   const sel = document.getElementById(id);
   if (!sel || !Array.isArray(items) || !items.length) return;
-  const prev = sel.value;
-  sel.innerHTML = `<option value="">${defaultLabel}</option>` +
-    items.map(i => `<option value="${esc(String(i))}">${esc(String(i))}</option>`).join('');
-  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  fillSelectOptions(sel, items, defaultLabel);
 }
 
 async function queryData() {

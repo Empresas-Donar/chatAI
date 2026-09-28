@@ -24,6 +24,7 @@ const FLAG_LABELS = {
 };
 
 const DETAIL_FIELDS = [
+  ['centro_costo_nombre', 'Nombre CC'],
   ['rut_trabajador', 'RUT'],
   ['horas_trabajadas', 'Horas trabajadas'],
   ['horas_extras', 'Horas extras'],
@@ -278,7 +279,7 @@ function renderCard(r, idx) {
       ${metaSpan('Trabajador', 'trabajador', r.trabajador)}
       <span>Contratista <strong>${esc(r.contratista || '—')}</strong></span>
       <span>Pago <strong>${esc(r.tipo_pago || '—')}</strong></span>
-      <span>CC <strong>${esc(r.cuartel_cc || '—')}</strong></span>
+      <span>CC <strong>${esc(r.cuartel_cc || '—')}</strong>${r.centro_costo_nombre ? ' · ' + esc(r.centro_costo_nombre) : ''}</span>
     </div>
     ${flagText ? `<div class="trc-flag-list">${esc(flagText)}</div>` : ''}
     <button type="button" class="trc-expand" data-toggle="${idx}">${isMalDigitado(r) ? 'Ocultar detalle' : 'Ver detalle'}</button>
