@@ -17,6 +17,24 @@ function esc(str) {
 
 let _lastParams = null;
 
+// Empresa de la barra global es el campo (nombre_campo). El enlace
+// ?fil-empresa=TALAGANTE no trae sel-campo; sin esto la orden no genera.
+function campoActual() {
+  const empresa = document.getElementById('fil-empresa')?.value || '';
+  const sel = document.getElementById('sel-campo');
+  if (empresa && sel) {
+    if (![...sel.options].some(o => o.value === empresa)) {
+      const opt = document.createElement('option');
+      opt.value = empresa;
+      opt.textContent = empresa;
+      sel.appendChild(opt);
+    }
+    sel.value = empresa;
+    return empresa;
+  }
+  return sel?.value || empresa;
+}
+
 // ── Load filter dropdowns ────────────────────────────────────────────────
 async function loadFilters() {
   try {
@@ -25,8 +43,11 @@ async function loadFilters() {
     const { campos } = await res.json();
 
     const selCampo = document.getElementById('sel-campo');
+    if (!selCampo) return;
+    const keep = document.getElementById('fil-empresa')?.value || selCampo.value;
     selCampo.innerHTML = '<option value="">Seleccione campo…</option>' +
       campos.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    if (keep) selCampo.value = keep;
   } catch (err) {
     showError('Error cargando filtros: ' + err.message);
   }
@@ -46,7 +67,7 @@ function hideError() {
 // ── Generate button ───────────────────────────────────────────────────────
 async function generate() {
   const contractor = document.getElementById('fil-contratista').value;
-  const campo      = document.getElementById('sel-campo').value;
+  const campo      = campoActual();
   const dateFrom   = document.getElementById('fil-from').value;
   const dateTo     = document.getElementById('fil-to').value;
 
@@ -54,7 +75,7 @@ async function generate() {
   document.getElementById('oc-document').style.display = 'none';
 
   if (!contractor || !campo || !dateFrom || !dateTo) {
-    showError('Seleccione contratista, campo y rango de fechas.');
+    showError('Seleccione contratista, empresa y rango de fechas.');
     return;
   }
   if (dateFrom > dateTo) {
@@ -427,7 +448,7 @@ loadFilters().then(async () => {
   if (window.globalFiltersReady) await window.globalFiltersReady;
   autoTriggerFromURL(['sel-campo'], () => {
     const contractor = document.getElementById('fil-contratista')?.value;
-    const campo = document.getElementById('sel-campo')?.value;
+    const campo = campoActual();
     const dateFrom = document.getElementById('fil-from')?.value;
     const dateTo = document.getElementById('fil-to')?.value;
     if (!contractor || !campo || !dateFrom || !dateTo) return;
