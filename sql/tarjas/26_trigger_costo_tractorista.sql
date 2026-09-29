@@ -263,10 +263,11 @@ BEFORE INSERT OR UPDATE OF fecha, trabajador, labor, horas_trabajadas, tipo_pago
     total_tractor, total_trabajado, total_pagar
 ON appsheet.tarjas_pagos
 FOR EACH ROW
+WHEN (lower(trim(COALESCE(NEW.tipo_pago, ''))) = 'tractorista')
 EXECUTE FUNCTION appsheet.aplicar_costo_tractorista();
 
 COMMENT ON TRIGGER trg_costo_tractorista ON appsheet.tarjas_pagos IS
-    'Activo. Calcula el costo tractorista al guardar. No corre al aprobar (cambio solo de estado).';
+    'Activo solo si tipo_pago es Tractorista. No modifica trato, al día ni otras tarjas.';
 
 DROP TABLE IF EXISTS appsheet.tarjas_tarifa_tractorista;
 

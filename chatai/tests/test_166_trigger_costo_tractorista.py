@@ -63,6 +63,34 @@ def test_166_costo_matches_tariff(conn):
         assert got == expected, f"{trabajador} {labor} {horas}h -> {got}, expected {expected}"
 
 
+def test_166_trigger_ignores_non_tractorista(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT "id_Resumen", tipo_pago
+        FROM appsheet.tarjas_pagos
+        WHERE lower(trim(COALESCE(tipo_pago, ''))) IS DISTINCT FROM 'tractorista'
+        LIMIT 1
+        """
+    )
+    row_id, tipo = cur.fetchone()
+    cur.execute(
+        """
+        UPDATE appsheet.tarjas_pagos
+        SET total_tractor = 12345,
+            labor = 'Jornada Tractor normal',
+            horas_trabajadas = 9,
+            fecha = fecha
+        WHERE "id_Resumen" = %s
+        RETURNING total_tractor, tipo_pago
+        """,
+        (row_id,),
+    )
+    tt, tipo_after = cur.fetchone()
+    assert int(tt) == 12345
+    assert tipo_after == tipo
+
+
 def test_166_manual_payment_is_kept_when_the_day_does_not_change(conn):
     cur = conn.cursor()
     cur.execute(

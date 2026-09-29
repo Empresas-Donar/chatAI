@@ -33,7 +33,7 @@ Una segunda fila del mismo trabajador, misma fecha y misma labor no vuelve a cob
 
 - No corre cuando solo cambia `estado`. Aprobar no recalcula.
 - Si editan el pago y no cambian fecha, trabajador, labor, horas ni tipo de pago, se guarda el monto que escribieron en las tres columnas. Si cambian las horas o la labor, el trigger vuelve a calcular.
-- No toca filas que no son `tipo_pago = Tractorista`.
+- No toca filas que no son `tipo_pago = Tractorista`. El trigger tiene `WHEN (tipo_pago = tractorista)`: trato, al día y el resto ni siquiera entran a la función.
 - No reescribió el historial al instalarse. Las filas ya guardadas cambian la próxima vez que se edite la fecha, la persona, la labor o las horas.
 - Operario solo en el catálogo quedó en $60.000. Las 23 filas de julio ya aprobadas siguen en $30.000 o $36.000 hasta que alguien edite la fecha, la persona, la labor o las horas. Una jornada simple de Nivaldo aprobada en $31.000 también se queda así.
 
