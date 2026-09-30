@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
 from db import get_connection
-from tarjas_empresa import fold_costo_empresa
+from tarjas_empresa import fold_costo_empresa, not_tractorista_sql
 
 logger = logging.getLogger("controllers.dashboard")
 
@@ -102,7 +102,9 @@ async def get_dashboard_data(
     try:
         with conn.cursor() as cur:
             date_filter, date_params = _pagos_date_sql(fecha_inicio, fecha_termino)
-            pagos_scope = f"estado = 'Aprobado' AND {date_filter}"
+            pagos_scope = (
+                f"estado = 'Aprobado' AND {date_filter} AND {not_tractorista_sql()}"
+            )
 
             # ── Tarjas summary for selected range (Costo Empresa) ─────
             cur.execute(
@@ -162,7 +164,7 @@ async def get_dashboard_data(
                 f"""
                 SELECT tipo_pago, COALESCE(SUM(total_trabajado), 0)
                 FROM appsheet.tarjas_pagos
-                WHERE estado = 'Aprobado' AND {prev_filter}
+                WHERE estado = 'Aprobado' AND {prev_filter} AND {not_tractorista_sql()}
                 GROUP BY tipo_pago
                 """,
                 prev_params,

@@ -1,8 +1,14 @@
 """Platform factors for company-side tarjas money (Costo Empresa).
 
 Trato ×1.45 (+45 %) and Al Día ×1.50 (+50 %) on SUM(total_trabajado).
-Other tipo_pago values (Bono, Tractorista, …) keep factor 1.0 — do not
-invent a markup. NEVER invert these percentages.
+Other tipo_pago values (Bono, …) keep factor 1.0 — do not invent a markup.
+NEVER invert these percentages.
+
+tipo_pago Tractorista is not a contractor labor. Contractor reports
+(Detalle, Por persona, General, Resumen, Horas extra, Jornadas, Bonos,
+Hora ponderada, OC, facturación, notas, dashboard) exclude it via
+not_tractorista_sql(). Those rows stay on the tractorista section, still
+at factor 1.0.
 
 MUST use these helpers for any report that shows what the company pays
 for labores: Detalle Costo Empresa, Orden de compra, Orden de facturación,
@@ -30,6 +36,17 @@ FACTOR_EMPRESA_DEFAULT = Decimal("1")
 _AL_DIA = frozenset({"al dia", "al día"})
 _TRATO = frozenset({"trato"})
 _TRACTORISTA = frozenset({"tractorista"})
+
+# Contractor queries append this predicate. Tractorista rows stay on
+# /tarjas/detalle-tractorista and the tractorista OC.
+NOT_TRACTORISTA_SQL = "NOT (LOWER(TRIM(tipo_pago)) = 'tractorista')"
+
+
+def not_tractorista_sql(column: str = "tipo_pago") -> str:
+    """SQL predicate: drop tipo_pago tractorista from a contractor query."""
+    if column == "tipo_pago":
+        return NOT_TRACTORISTA_SQL
+    return f"NOT (LOWER(TRIM({column})) = 'tractorista')"
 
 
 def _as_decimal(value) -> Decimal:

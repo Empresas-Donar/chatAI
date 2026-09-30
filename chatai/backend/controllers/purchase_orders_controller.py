@@ -36,7 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
 from db import get_connection
-from tarjas_empresa import total_empresa
+from tarjas_empresa import not_tractorista_sql, total_empresa
 
 logger = logging.getLogger("controllers.purchase_orders")
 
@@ -67,12 +67,13 @@ def _sync_labores(
     """Find labores without a product code in the given period and auto-map from BigQuery."""
     with conn.cursor() as cur:
         cur.execute(
-            """
+            rf"""
             SELECT DISTINCT r."Nombre Labor"
             FROM appsheet.tarjas_reporte r
             WHERE r.fecha BETWEEN %s AND %s
               AND r.contratista = %s
               AND r.nombre_campo = %s
+              AND {not_tractorista_sql("r.tipo_pago")}
               AND COALESCE(
                   (SELECT l.codigo_labor FROM appsheet.tarjas_labores l
                    WHERE TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(l.labor), '\s+', ' ', 'g'), '\(\s+', '(', 'g'), '\s+\)', ')', 'g'))
@@ -170,7 +171,7 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
     trabajado+comisión.
     """
     cur.execute(
-        """
+        f"""
         SELECT
             tipo_pago,
             cuartel_cc AS "CC",
@@ -186,6 +187,7 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
           AND contratista = %s
           AND nombre_campo = %s
           AND fecha::date BETWEEN %s AND %s
+          AND {not_tractorista_sql()}
         GROUP BY tipo_pago, cuartel_cc, cc.cultivo, cc.valor_odoo, labor
         ORDER BY tipo_pago DESC, cuartel_cc, labor
         """,
@@ -381,16 +383,18 @@ async def get_filters():
         )
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT ON (unaccent(contratista)) contratista
                 FROM appsheet.tarjas_reporte
+                WHERE {not_tractorista_sql()}
                 ORDER BY unaccent(contratista), contratista
             """)
             contractors = [r[0] for r in cur.fetchall()]
 
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT nombre_campo
                 FROM appsheet.tarjas_reporte
+                WHERE {not_tractorista_sql()}
                 ORDER BY nombre_campo
             """)
             companies = [r[0] for r in cur.fetchall()]
@@ -1255,7 +1259,7 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
     """
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT tipo_pago,
                    SUM(COALESCE(total_trabajado, 0)) AS total_trabajado
             FROM appsheet.tarjas_pagos
@@ -1263,6 +1267,7 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
               AND nombre_campo = %s
               AND estado       = 'Aprobado'
               AND fecha::date BETWEEN %s AND %s
+              AND {not_tractorista_sql()}
             GROUP BY tipo_pago
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
@@ -1272,7 +1277,7 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
         ]
 
         cur.execute(
-            """
+            f"""
             SELECT trabajador, fecha::date::text AS fecha, tipo_pago,
                    SUM(COALESCE(total_trabajado, 0)) AS total_trabajado
             FROM appsheet.tarjas_pagos
@@ -1280,6 +1285,7 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
               AND nombre_campo = %s
               AND estado       = 'Aprobado'
               AND fecha::date BETWEEN %s AND %s
+              AND {not_tractorista_sql()}
             GROUP BY trabajador, fecha::date, tipo_pago
             ORDER BY trabajador, fecha::date, tipo_pago
             """,

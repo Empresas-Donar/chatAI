@@ -76,6 +76,7 @@ from tarjas_empresa import (
     format_markup,
     format_pct,
     markup_pct,
+    not_tractorista_sql,
     pago_kind,
     total_empresa,
 )
@@ -464,26 +465,33 @@ async def get_tarjas_general_filters():
         )
     try:
         with conn.cursor() as cur:
-            centros_costo = _fetch_cc_filter_options(cur)
+            centros_costo = _fetch_cc_filter_options(
+                cur, extra_sql=not_tractorista_sql()
+            )
 
             cur.execute(
                 "SELECT DISTINCT tipo_pago FROM appsheet.tarjas_pagos "
-                "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
+                f"WHERE tipo_pago IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
-                "WHERE labor IS NOT NULL ORDER BY labor"
+                f"WHERE labor IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY labor"
             )
             labores = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
+                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -508,7 +516,10 @@ def _build_pagos_where(
 ):
     """Build WHERE clause + params for tarjas_pagos queries."""
     pfx = f"{alias}." if alias else ""
-    filters = [f"{pfx}fecha::date BETWEEN %s AND %s"]
+    filters = [
+        f"{pfx}fecha::date BETWEEN %s AND %s",
+        not_tractorista_sql(f"{pfx}tipo_pago"),
+    ]
     params: list = [fecha_inicio, fecha_termino]
     if centro_costo:
         filters.append(f"{pfx}cuartel_cc = %s")
@@ -671,16 +682,20 @@ async def get_tarjas_filters():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_reporte ORDER BY unaccent(contratista), contratista"
+                "SELECT DISTINCT ON (unaccent(contratista)) contratista "
+                "FROM appsheet.tarjas_reporte "
+                f"WHERE {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                """
+                f"""
                 SELECT DISTINCT r."CC", cc.cultivo, cc.valor_odoo
                 FROM appsheet.tarjas_reporte r
                 LEFT JOIN appsheet.tarjas_cc cc ON cc.id_cc::text = r."CC"::text
                 WHERE r."CC" IS NOT NULL
+                  AND {not_tractorista_sql("r.tipo_pago")}
                 ORDER BY r."CC"
                 """
             )
@@ -690,15 +705,21 @@ async def get_tarjas_filters():
             ]
 
             cur.execute(
-                'SELECT DISTINCT "Nombre Labor" FROM appsheet.tarjas_reporte ORDER BY "Nombre Labor"'
+                'SELECT DISTINCT "Nombre Labor" FROM appsheet.tarjas_reporte '
+                f"WHERE {not_tractorista_sql()} "
+                'ORDER BY "Nombre Labor"'
             )
             labores = [r[0] for r in cur.fetchall()]
 
             cur.execute(
-                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_reporte ORDER BY nombre_campo"
+                "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_reporte "
+                f"WHERE {not_tractorista_sql()} "
+                "ORDER BY nombre_campo"
             )
             campos = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_reporte")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_reporte", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -726,10 +747,12 @@ def _build_detalle_filters(
     Costo por hora, Total unitario and % del pago are based on
     total_trabajado. Costo Empresa is total_trabajado × factor. The stored
     total_pagar column is not used for displayed money on this report.
+    tipo_pago Tractorista is excluded: those rows belong to Detalle tractorista.
     """
     filters = [
         "fecha::date BETWEEN %s AND %s",
         "estado = 'Aprobado'",
+        not_tractorista_sql(),
     ]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
@@ -1639,24 +1662,31 @@ async def get_tarjas_contractor_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
+                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
-            centros_costo = _fetch_cc_filter_options(cur)
+            centros_costo = _fetch_cc_filter_options(
+                cur, extra_sql=not_tractorista_sql()
+            )
 
             cur.execute(
                 "SELECT DISTINCT labor FROM appsheet.tarjas_pagos "
-                "WHERE labor IS NOT NULL ORDER BY labor"
+                f"WHERE labor IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY labor"
             )
             labores = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT tipo_pago FROM appsheet.tarjas_pagos "
-                "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
+                f"WHERE tipo_pago IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -1690,7 +1720,7 @@ async def get_tarjas_contractor_data(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
 
     if contratista:
@@ -1887,23 +1917,27 @@ async def get_tarjas_resumen_persona_filters():
             cur.execute(
                 "SELECT trabajador, COALESCE(SUM(total_trabajado), 0) AS total "
                 "FROM appsheet.tarjas_pagos "
-                "WHERE trabajador IS NOT NULL "
+                f"WHERE trabajador IS NOT NULL AND {not_tractorista_sql()} "
                 "GROUP BY trabajador ORDER BY total DESC"
             )
             trabajadores = _rows_to_dicts(cur)
 
             cur.execute(
                 "SELECT DISTINCT tipo_pago FROM appsheet.tarjas_pagos "
-                "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
+                f"WHERE tipo_pago IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
+                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -1935,7 +1969,7 @@ async def get_tarjas_resumen_persona(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
 
     if trabajador:
@@ -1993,7 +2027,7 @@ async def download_tarjas_resumen_persona_excel(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
         filters.append("trabajador = %s")
@@ -2119,23 +2153,27 @@ async def get_tarjas_resumen_horas_filters():
             cur.execute(
                 "SELECT trabajador, COALESCE(SUM(horas_extras), 0)::numeric AS total "
                 "FROM appsheet.tarjas_pagos "
-                "WHERE trabajador IS NOT NULL "
+                f"WHERE trabajador IS NOT NULL AND {not_tractorista_sql()} "
                 "GROUP BY trabajador ORDER BY total DESC"
             )
             trabajadores = _rows_to_dicts(cur)
 
             cur.execute(
                 "SELECT DISTINCT tipo_pago FROM appsheet.tarjas_pagos "
-                "WHERE tipo_pago IS NOT NULL ORDER BY tipo_pago"
+                f"WHERE tipo_pago IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY tipo_pago"
             )
             tipos_pago = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
+                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -2167,7 +2205,7 @@ async def get_tarjas_resumen_horas(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
 
     if trabajador:
@@ -2723,7 +2761,7 @@ async def download_tarjas_contratista_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -3341,7 +3379,7 @@ async def download_tarjas_resumen_horas_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
         filters.append("trabajador = %s")
@@ -3669,7 +3707,7 @@ def _build_resumen_persona_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
         filters.append("trabajador = %s")
@@ -4095,7 +4133,7 @@ def _build_contratista_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -4259,7 +4297,7 @@ def _build_resumen_horas_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if trabajador:
         filters.append("trabajador = %s")
@@ -4417,10 +4455,13 @@ async def get_tarjas_jornadas_trabajador_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL ORDER BY unaccent(contratista), contratista"
+                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            empresas = _get_empresas(
+                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
+            )
     finally:
         conn.close()
 
@@ -4434,7 +4475,10 @@ async def get_tarjas_jornadas_trabajador(
     contratista: str = Query(None),
     empresa: str = Query(None),
 ):
-    """Return jornada count (distinct work dates) per worker for the given period."""
+    """Return jornada count (distinct work dates) per worker for the given period.
+
+    Tractorista days are counted on Detalle tractorista, not here.
+    """
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
 
@@ -4445,7 +4489,7 @@ async def get_tarjas_jornadas_trabajador(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
 
     if contratista:
@@ -4491,7 +4535,7 @@ async def download_tarjas_jornadas_trabajador_excel(
             status_code=503, detail="Error de conexión a la base de datos"
         )
 
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -4571,7 +4615,7 @@ def _build_jornadas_trabajador_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    filters = ["fecha::date BETWEEN %s AND %s"]
+    filters = ["fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -4668,7 +4712,7 @@ def _mes_range(mes: str) -> tuple[str, str]:
 
 def _build_bono_mensual_filters(mes, contratista=None, empresa=None, campo=None):
     fecha_inicio, fecha_termino = _mes_range(mes)
-    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s"]
+    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [_BONO_MENSUAL_LABOR, fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -4725,19 +4769,23 @@ async def get_tarjas_bono_mensual_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE labor = %s AND contratista IS NOT NULL ORDER BY unaccent(contratista), contratista",
+                f"WHERE labor = %s AND contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY unaccent(contratista), contratista",
                 (_BONO_MENSUAL_LABOR,),
             )
             contratistas = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
-                "WHERE labor = %s AND nombre_campo IS NOT NULL ORDER BY nombre_campo",
+                f"WHERE labor = %s AND nombre_campo IS NOT NULL AND {not_tractorista_sql()} "
+                "ORDER BY nombre_campo",
                 (_BONO_MENSUAL_LABOR,),
             )
             campos = [r[0] for r in cur.fetchall()]
             empresas = _get_empresas(
-                cur, "appsheet.tarjas_pagos", extra_where="labor = 'Bono mensual'"
+                cur,
+                "appsheet.tarjas_pagos",
+                extra_where=f"labor = 'Bono mensual' AND {not_tractorista_sql()}",
             )
     finally:
         conn.close()
@@ -4860,7 +4908,7 @@ def _build_bono_mensual_html(
     resolved to fecha_inicio/fecha_termino by the caller); the bulk PDF
     passes an arbitrary date range instead. `mes` is only used for the
     header's "Mes" chip, shown when the caller has one."""
-    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s"]
+    filters = ["labor = %s", "fecha::date BETWEEN %s AND %s", not_tractorista_sql()]
     params: list = [_BONO_MENSUAL_LABOR, fecha_inicio, fecha_termino]
     if contratista:
         filters.append("contratista = %s")
@@ -5425,13 +5473,15 @@ async def get_tarjas_notas_filters():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos "
-                "WHERE nombre_campo IS NOT NULL AND estado = 'Aprobado' ORDER BY nombre_campo"
+                "WHERE nombre_campo IS NOT NULL AND estado = 'Aprobado' "
+                f"AND {not_tractorista_sql()} ORDER BY nombre_campo"
             )
             campos = [r[0] for r in cur.fetchall()]
 
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
                 "WHERE contratista IS NOT NULL AND estado = 'Aprobado' "
+                f"AND {not_tractorista_sql()} "
                 "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
@@ -5494,6 +5544,7 @@ async def get_tarjas_notas(
         "fecha::date BETWEEN %s AND %s",
         "contratista = %s",
         "estado = 'Aprobado'",
+        not_tractorista_sql(),
     ]
     params: list = [fecha_inicio, fecha_termino, contratista]
 
@@ -6390,6 +6441,7 @@ async def notas_print_pdf(
         "fecha::date BETWEEN %s AND %s",
         "contratista = %s",
         "estado = 'Aprobado'",
+        not_tractorista_sql(),
     ]
     params: list = [fecha_inicio, fecha_termino, contratista]
     if campo:
