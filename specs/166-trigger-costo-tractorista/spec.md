@@ -24,7 +24,7 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 1. Se busca el esquema de la persona vigente en esa fecha (`desde` / `hasta`). Si no hay fila, se usa lunes a viernes con operador. Operario Fundo está como sin operador.
 2. Se lee el precio en `tarjas_labor` para esa labor.
 3. Jornada normal completa: el valor de la columna (lunes a viernes o lunes a sábado, con o sin operador) más el carnet si lleva operador.
-4. Jornada normal más corta: ese valor × horas / horas de la jornada, más el carnet entero.
+4. Jornada normal más corta: (valor + carnet) × horas / horas de la jornada. El carnet se pondera igual que la jornada. Media jornada de lunes a viernes con carnet: $33.000 + $3.000 = $36.000.
 5. Hora extra: horas × valor.
 6. Chico, simple, Gilberto, extraordinaria y operario solo: el `valor` de la fila, sin carnet y sin prorrateo.
 

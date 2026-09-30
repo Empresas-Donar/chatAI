@@ -45,8 +45,8 @@ def test_166_costo_matches_tariff(conn):
         ("Cristian Gonzalez", "Jornada Tractor normal", 9, "2026-09-01", 66000),
         ("Cristian Gonzalez", "Jornada Tractor normal", 7.5, "2026-08-03", 55000),
         ("Cristian Gonzalez", "Jornada Tractor normal", 4.5, "2026-08-06", 33000),
-        ("Felipe Cordova", "Jornada Tractor normal", 7.5, "2026-09-07", 61000),
-        ("Felipe Cordova", "Jornada Tractor normal", 4.5, "2026-09-25", 39000),
+        ("Felipe Cordova", "Jornada Tractor normal", 7.5, "2026-09-07", 60000),
+        ("Felipe Cordova", "Jornada Tractor normal", 4.5, "2026-09-25", 36000),
         ("Cristian Gonzalez", "Hora Extra", 2, "2026-09-03", 6800),
         ("Cristian Gonzalez", "Hora Extra", 4.5, "2026-09-05", 15300),
         ("Operario Fundo", "Jornada Tractor normal", 9, "2026-09-15", 27600),
@@ -142,7 +142,7 @@ def test_166_manual_payment_is_kept_when_the_day_does_not_change(conn):
         (row_id,),
     )
     tt, tw, tp = cur.fetchone()
-    assert (int(tt), int(tw), int(tp)) == (39000, 39000, 39000)
+    assert (int(tt), int(tw), int(tp)) == (36000, 36000, 36000)
 
 
 def test_166_other_campo_same_day_is_not_a_duplicate(conn):

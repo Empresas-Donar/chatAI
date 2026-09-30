@@ -8,6 +8,8 @@
 --     lunes a viernes, con operador:  valor 66.000 + 6.000 carnet, en 9 h
 --     lunes a sábado, con operador:   valor 55.000 + 6.000 carnet, en 7,5 h
 --     sin operador (antes Angel Celis): 27.600 en 9 h, 23.000 en 7,5 h, sin carnet
+--   Jornada incompleta: (valor + carnet) × horas / horas de la jornada.
+--     Media jornada lun-vie con carnet: 33.000 + 3.000 = 36.000.
 --   Jornada Tractor simple / Chico / Gilberto: 25.000
 --   Hora Extra:              3.400 por hora
 --   Labor Extraordinaria:    10.000
@@ -175,14 +177,14 @@ BEGIN
     END IF;
 
     IF v_horas > 0 AND v_horas < v_horas_jornada THEN
-        RETURN ROUND(v_base * v_horas / v_horas_jornada, 0) + v_carnet;
+        RETURN ROUND((v_base + v_carnet) * v_horas / v_horas_jornada, 0);
     END IF;
     RETURN v_base + v_carnet;
 END;
 $function$;
 
 COMMENT ON FUNCTION appsheet.costo_tractorista(TEXT, TEXT, NUMERIC, DATE) IS
-    'Costo tractorista desde tarjas_labor. Carnet 6.000 solo si el esquema de la persona lo tiene.';
+    'Costo tractorista desde tarjas_labor. Carnet 6.000 solo si el esquema lo tiene. En jornada incompleta el carnet se pondera con las horas.';
 
 CREATE OR REPLACE FUNCTION appsheet.aplicar_costo_tractorista()
 RETURNS trigger
