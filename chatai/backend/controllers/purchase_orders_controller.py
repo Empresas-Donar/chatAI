@@ -195,7 +195,10 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
     )
     columns = [d[0] for d in cur.description]
     rows = [{k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()]
-    from tarjas_controller import _nombre_cc_label
+    # Package path used by Cloud Run (`chatai.backend.main`). A bare
+    # `import tarjas_controller` raises ModuleNotFoundError and the OC
+    # screen returns 500 even when the query itself succeeded.
+    from controllers.tarjas_controller import _nombre_cc_label
 
     for r in rows:
         r["Nombre CC"] = _nombre_cc_label(
