@@ -42,9 +42,19 @@ def _fn_source(name: str) -> str:
 
 def test_oc_lines_import_nombre_cc_as_package():
     """Regression: the helper import must resolve under Cloud Run's path."""
-    src = _fn_source("_purchase_order_lines")
+    src = _fn_source("_label_nombre_cc")
     assert "from controllers.tarjas_controller import _nombre_cc_label" in src
+    lines = _fn_source("_purchase_order_lines")
+    assert "from tarjas_controller import" not in lines
     assert "from tarjas_controller import" not in src
+
+
+def test_missing_cc_name_does_not_drop_the_line():
+    """A CC absent from tarjas_cc keeps the code. It must not raise."""
+    assert poc._label_nombre_cc("800", None, None) == "800"
+    assert poc._label_nombre_cc("800", "800", None) == "800"
+    assert poc._label_nombre_cc("800", "CAMPO ZUÑIGA", "{") == "CAMPO ZUÑIGA"
+    assert poc._label_nombre_cc(None, None, None) is None
 
 
 def test_oc_agroservice_week_without_cuadrilla_does_not_500():

@@ -162,6 +162,25 @@ def _serialize(v):
     return v
 
 
+def _label_nombre_cc(id_cc, cultivo, valor_odoo):
+    """Nombre CC for one OC line.
+
+    A missing tarjas_cc row, or a failure loading the label helper, must
+    not abort the order. Accounting still gets the line, labeled with the
+    CC code when the catalog name is absent.
+    """
+    code = "" if id_cc is None else str(id_cc).strip()
+    name = "" if cultivo is None else str(cultivo).strip()
+    fallback = name or code or None
+    try:
+        from controllers.tarjas_controller import _nombre_cc_label
+        labeled = _nombre_cc_label(id_cc, cultivo, valor_odoo)
+    except Exception:
+        logger.exception("Nombre CC unavailable for CC %s", code or None)
+        return fallback
+    return labeled or fallback
+
+
 def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
     """OC lines from Aprobado tarjas_pagos, billed as Costo Empresa.
 
@@ -195,13 +214,9 @@ def _purchase_order_lines(cur, contratista, empresa, fecha_inicio, fecha_termino
     )
     columns = [d[0] for d in cur.description]
     rows = [{k: _serialize(v) for k, v in zip(columns, r)} for r in cur.fetchall()]
-    # Package path used by Cloud Run (`chatai.backend.main`). A bare
-    # `import tarjas_controller` raises ModuleNotFoundError and the OC
-    # screen returns 500 even when the query itself succeeded.
-    from controllers.tarjas_controller import _nombre_cc_label
 
     for r in rows:
-        r["Nombre CC"] = _nombre_cc_label(
+        r["Nombre CC"] = _label_nombre_cc(
             r.get("CC"), r.get("Nombre CC"), r.pop("valor_odoo", None)
         )
         emp = float(total_empresa(r.get("tipo_pago"), r.get("total_trabajado")))
