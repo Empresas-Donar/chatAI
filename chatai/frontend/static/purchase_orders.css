@@ -110,6 +110,8 @@
   border-radius: var(--radius);
 }
 .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+.empty-state p { margin: 0 0 8px; }
+.empty-state a { color: var(--accent, #b45309); font-weight: 600; }
 
 /* Print overrides */
 @media print {

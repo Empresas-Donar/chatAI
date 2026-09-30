@@ -115,6 +115,8 @@
   border-radius: var(--radius);
 }
 .td-empty h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+.td-empty p { margin: 0 0 8px; }
+.td-empty a { color: var(--accent, #b45309); font-weight: 600; }
 
 .td-detail-section .tbl tfoot td {
   padding: 10px 12px;
