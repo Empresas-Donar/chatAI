@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS appsheet.tarjas_esquema_tractorista (
     hasta           DATE,
     esquema         TEXT NOT NULL,
     con_operador    BOOLEAN NOT NULL,
+    carnet          BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT esquema_tractorista_esquema
         CHECK (esquema IN ('lun_vie', 'lun_sab')),
     CONSTRAINT esquema_tractorista_rango
@@ -39,25 +40,29 @@ CREATE TABLE IF NOT EXISTS appsheet.tarjas_esquema_tractorista (
 );
 
 COMMENT ON TABLE appsheet.tarjas_esquema_tractorista IS
-    'Horario vigente de cada tractorista. lun_vie = 9 h, lun_sab = 7,5 h.';
+    'Horario vigente de cada tractorista. lun_vie = 9 h, lun_sab = 7,5 h. carnet suma 6.000 en la jornada normal.';
+
+ALTER TABLE appsheet.tarjas_esquema_tractorista
+    ADD COLUMN IF NOT EXISTS carnet BOOLEAN NOT NULL DEFAULT TRUE;
 
 INSERT INTO appsheet.tarjas_esquema_tractorista
-    (id, trabajador, desde, hasta, esquema, con_operador)
+    (id, trabajador, desde, hasta, esquema, con_operador, carnet)
 VALUES
-    ('andres-diaz',     'ANDRÉS DÍAZ HERRRRA',          DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('cristian',        'Cristian Gonzalez',            DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('felipe',          'Felipe Cordova',               DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('gabriel',         'Gabriel Necupil',              DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('luis-bravo',      'Luis Bravo Huerta',            DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('luis-ivan',       'LUIS IVÁN CONTRERAS PERALTA',  DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('nivaldo',         'NIVALDO MALDONADO VALENZUELA', DATE '2026-01-01', NULL, 'lun_vie', TRUE),
-    ('operario-fundo',  'Operario Fundo',               DATE '2026-01-01', NULL, 'lun_vie', FALSE)
+    ('andres-diaz',     'ANDRÉS DÍAZ HERRRRA',          DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('cristian',        'Cristian Gonzalez',            DATE '2026-01-01', NULL, 'lun_vie', TRUE,  FALSE),
+    ('felipe',          'Felipe Cordova',               DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('gabriel',         'Gabriel Necupil',              DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('luis-bravo',      'Luis Bravo Huerta',            DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('luis-ivan',       'LUIS IVÁN CONTRERAS PERALTA',  DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('nivaldo',         'NIVALDO MALDONADO VALENZUELA', DATE '2026-01-01', NULL, 'lun_vie', TRUE,  TRUE),
+    ('operario-fundo',  'Operario Fundo',               DATE '2026-01-01', NULL, 'lun_vie', FALSE, FALSE)
 ON CONFLICT (id) DO UPDATE SET
     trabajador = EXCLUDED.trabajador,
     desde = EXCLUDED.desde,
     hasta = EXCLUDED.hasta,
     esquema = EXCLUDED.esquema,
-    con_operador = EXCLUDED.con_operador;
+    con_operador = EXCLUDED.con_operador,
+    carnet = EXCLUDED.carnet;
 
 -- El catálogo de AppSheet tenía Operario Solo en 30.000. La regla es 60.000.
 UPDATE appsheet.tarjas_labor
@@ -81,6 +86,7 @@ AS $function$
 DECLARE
     v_esquema TEXT := 'lun_vie';
     v_con BOOLEAN := TRUE;
+    v_tiene_carnet BOOLEAN := TRUE;
     v_labor TEXT := lower(trim(COALESCE(p_labor, '')));
     v_lookup TEXT;
     v_horas NUMERIC := COALESCE(p_horas, 0);
@@ -93,8 +99,8 @@ DECLARE
     v_carnet NUMERIC := 0;
     v_horas_jornada NUMERIC;
 BEGIN
-    SELECT e.esquema, e.con_operador
-      INTO v_esquema, v_con
+    SELECT e.esquema, e.con_operador, e.carnet
+      INTO v_esquema, v_con, v_tiene_carnet
       FROM appsheet.tarjas_esquema_tractorista e
      WHERE e.trabajador = p_trabajador
        AND e.desde <= p_fecha
@@ -105,6 +111,7 @@ BEGIN
     IF NOT FOUND THEN
         v_esquema := 'lun_vie';
         v_con := TRUE;
+        v_tiene_carnet := TRUE;
     END IF;
 
     IF v_labor LIKE '%gilberto%' OR v_labor LIKE '%chico%'
@@ -152,11 +159,11 @@ BEGIN
     IF v_con AND v_esquema = 'lun_sab' THEN
         v_base := COALESCE(v_cs, v_valor);
         v_horas_jornada := 7.5;
-        v_carnet := 6000;
+        v_carnet := CASE WHEN v_tiene_carnet THEN 6000 ELSE 0 END;
     ELSIF v_con THEN
         v_base := COALESCE(v_cv, v_valor);
         v_horas_jornada := 9;
-        v_carnet := 6000;
+        v_carnet := CASE WHEN v_tiene_carnet THEN 6000 ELSE 0 END;
     ELSIF v_esquema = 'lun_sab' THEN
         v_base := COALESCE(v_ss, v_sv, v_valor);
         v_horas_jornada := 7.5;
@@ -175,7 +182,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION appsheet.costo_tractorista(TEXT, TEXT, NUMERIC, DATE) IS
-    'Costo tractorista desde tarjas_labor. Carnet 6.000 solo en jornada normal con operador.';
+    'Costo tractorista desde tarjas_labor. Carnet 6.000 solo si el esquema de la persona lo tiene.';
 
 CREATE OR REPLACE FUNCTION appsheet.aplicar_costo_tractorista()
 RETURNS trigger
@@ -222,12 +229,16 @@ BEGIN
         RETURN NEW;
     END;
 
+    -- Misma persona, fecha, labor, campo y CC: la segunda fila no se paga.
+    -- Otro predio u otro cuartel el mismo día es otra jornada.
     SELECT EXISTS (
         SELECT 1
           FROM appsheet.tarjas_pagos p
          WHERE p.trabajador = NEW.trabajador
            AND p.fecha = NEW.fecha
            AND p.labor IS NOT DISTINCT FROM NEW.labor
+           AND p.nombre_campo IS NOT DISTINCT FROM NEW.nombre_campo
+           AND p.cuartel_cc IS NOT DISTINCT FROM NEW.cuartel_cc
            AND p."id_Resumen" IS DISTINCT FROM NEW."id_Resumen"
            AND lower(trim(COALESCE(p.tipo_pago, ''))) = 'tractorista'
            AND COALESCE(p.total_tractor, 0) > 0

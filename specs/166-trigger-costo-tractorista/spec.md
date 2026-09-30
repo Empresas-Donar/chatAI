@@ -10,7 +10,8 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 
 | Labor | Precio |
 |---|---|
-| Jornada Tractor normal, lunes a viernes, con operador | $66.000 + $6.000 carnet, en 9 h |
+| Jornada Tractor normal, lunes a viernes, con operador y carnet | $66.000 + $6.000 carnet, en 9 h |
+| Jornada Tractor normal, con operador, sin carnet | $66.000 en 9 h. Cristian González no tiene carnet |
 | Jornada Tractor normal, lunes a sábado, con operador | $55.000 + $6.000 carnet, en 7,5 h |
 | Jornada Tractor normal sin operador (antes Angel Celis) | $27.600 en 9 h, $23.000 en 7,5 h, sin carnet |
 | Jornada Tractor chico, simple o Gilberto | $25.000 |
@@ -27,7 +28,7 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 5. Hora extra: horas × valor.
 6. Chico, simple, Gilberto, extraordinaria y operario solo: el `valor` de la fila, sin carnet y sin prorrateo.
 
-Una segunda fila del mismo trabajador, misma fecha y misma labor no vuelve a cobrar el día: si la otra ya tiene monto, esta queda en 0.
+Una segunda fila del mismo trabajador, misma fecha, misma labor, mismo campo y mismo centro de costo no vuelve a cobrar el día: si la otra ya tiene monto, esta queda en 0. El mismo día en otro predio o en otro cuartel es otra jornada y sí se cobra.
 
 ## Qué no hace
 
