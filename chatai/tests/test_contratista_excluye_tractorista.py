@@ -3,6 +3,7 @@
 Those rows belong to the tractorista section (Detalle / General / Resumen
 and the tractorista purchase order).
 """
+import asyncio
 import os
 import sys
 
@@ -40,6 +41,18 @@ def test_not_tractorista_sql_matches_existing_predicate():
     assert te.not_tractorista_sql() == "NOT (LOWER(TRIM(tipo_pago)) = 'tractorista')"
     assert te.not_tractorista_sql("p.tipo_pago") == (
         "NOT (LOWER(TRIM(p.tipo_pago)) = 'tractorista')"
+    )
+
+
+def test_global_filter_keeps_tractorista_only_contractors():
+    """The shared bar feeds Orden de compra tractorista. Those contractors
+    have no cuadrilla rows, so excluding tipo_pago Tractorista hid them.
+    """
+    data = asyncio.run(tc.get_tarjas_general_filters())
+    assert "AGROSERVICIOS C Y G SPA" in data["contratistas"]
+    assert "SERVICIOS AGRICOLAS RD SPA" in data["contratistas"]
+    assert all(
+        (t or "").strip().lower() != "tractorista" for t in data["tipos_pago"]
     )
 
 

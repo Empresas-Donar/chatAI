@@ -483,15 +483,17 @@ async def get_tarjas_general_filters():
             )
             labores = [r[0] for r in cur.fetchall()]
 
+            # Shared bar (fil-contratista / fil-empresa), also used by the
+            # tractorista purchase order. A contractor who only has
+            # tipo_pago Tractorista must stay selectable. Report queries
+            # still exclude those rows via not_tractorista_sql().
             cur.execute(
                 "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                f"WHERE contratista IS NOT NULL AND {not_tractorista_sql()} "
+                "WHERE contratista IS NOT NULL "
                 "ORDER BY unaccent(contratista), contratista"
             )
             contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(
-                cur, "appsheet.tarjas_pagos", extra_where=not_tractorista_sql()
-            )
+            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
