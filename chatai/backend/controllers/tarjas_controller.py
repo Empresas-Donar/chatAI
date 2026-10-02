@@ -6680,8 +6680,10 @@ _REGISTROS_CAMPO_EDITABLE = frozenset(
         "rut_trabajador",
         "horas_trabajadas",
         "horas_extras",
+        "estado",
     }
 )
+_REGISTROS_CAMPO_ESTADOS = {"aprobado": "Aprobado", "pendiente": "Pendiente"}
 _MAL_DIGITADO_FLAGS = frozenset(
     {
         "bad_rut",
@@ -6944,6 +6946,14 @@ async def get_tarjas_registros_campo(
 
 
 def _coerce_registro_campo_edit(col: str, raw):
+    if col == "estado":
+        key = str(raw or "").strip().lower()
+        if key not in _REGISTROS_CAMPO_ESTADOS:
+            raise HTTPException(
+                status_code=422,
+                detail="Estado debe ser Aprobado o Pendiente",
+            )
+        return _REGISTROS_CAMPO_ESTADOS[key]
     if col in ("horas_trabajadas", "horas_extras"):
         if raw is None or str(raw).strip() == "":
             return None
@@ -7016,6 +7026,37 @@ async def patch_tarjas_registro_campo(
     if not rows:
         raise HTTPException(status_code=404, detail="Registro no encontrado")
     return {"row": rows[0]}
+
+
+@router.delete("/api/tarjas/registros-campo/{id_resumen}")
+async def delete_tarjas_registro_campo(id_resumen: str):
+    """Remove one field record. id_Resumen is unique in tarjas_pagos."""
+    if not id_resumen or not str(id_resumen).strip():
+        raise HTTPException(status_code=400, detail="id_resumen is required")
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    delete_sql = psql.SQL(
+        "DELETE FROM appsheet.tarjas_pagos WHERE {} = %s"
+    ).format(psql.Identifier("id_Resumen"))
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(delete_sql, (id_resumen,))
+                if cur.rowcount != 1:
+                    raise HTTPException(
+                        status_code=404, detail="Registro no encontrado"
+                    )
+    finally:
+        conn.close()
+
+    return {"deleted": id_resumen}
 
 
 @router.get("/api/tarjas/registros-campo/download-excel")
@@ -7241,6 +7282,7 @@ def _empty_calendar_day(fecha: str) -> dict:
         "aprobado": 0,
         "pendiente": 0,
         "sospechosos": 0,
+        "duplicadas": 0,
         "planes": 0,
     }
 
@@ -7332,26 +7374,41 @@ async def get_tarjas_calendario(
     by_fecha: dict[str, dict] = {}
     total = aprobado = pendiente = max_count = 0
     sospechosos_total = 0
+    duplicadas_total = 0
     planes_total = 0
     contratistas: list[dict] = []
     try:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
+                WITH base AS (
+                  SELECT
+                    fecha::date AS fecha,
+                    LOWER(TRIM(estado)) AS estado_key,
+                    ({_REGISTROS_CAMPO_MAL_SQL}) AS mal,
+                    lower(regexp_replace(trim(COALESCE(trabajador, '')), '\\s+', ' ', 'g')) AS k_trab,
+                    lower(regexp_replace(trim(COALESCE(labor, '')), '\\s+', ' ', 'g')) AS k_labor,
+                    lower(regexp_replace(trim(COALESCE(nombre_campo, '')), '\\s+', ' ', 'g')) AS k_campo,
+                    lower(regexp_replace(trim(COALESCE(contratista, '')), '\\s+', ' ', 'g')) AS k_cont,
+                    lower(regexp_replace(trim(COALESCE(cuartel_cc, '')), '\\s+', ' ', 'g')) AS k_cc
+                  FROM appsheet.tarjas_pagos
+                  {where}
+                ),
+                marked AS (
+                  SELECT *,
+                    COUNT(*) OVER (
+                      PARTITION BY fecha, k_trab, k_labor, k_campo, k_cont, k_cc
+                    ) AS copies
+                  FROM base
+                )
                 SELECT
                   fecha::date::text AS fecha,
                   COUNT(*) AS total,
-                  COUNT(*) FILTER (
-                    WHERE LOWER(TRIM(estado)) = 'aprobado'
-                  ) AS aprobado,
-                  COUNT(*) FILTER (
-                    WHERE LOWER(TRIM(estado)) = 'pendiente'
-                  ) AS pendiente,
-                  COUNT(*) FILTER (
-                    WHERE {_REGISTROS_CAMPO_MAL_SQL}
-                  ) AS sospechosos
-                FROM appsheet.tarjas_pagos
-                {where}
+                  COUNT(*) FILTER (WHERE estado_key = 'aprobado') AS aprobado,
+                  COUNT(*) FILTER (WHERE estado_key = 'pendiente') AS pendiente,
+                  COUNT(*) FILTER (WHERE mal) AS sospechosos,
+                  COUNT(*) FILTER (WHERE copies > 1) AS duplicadas
+                FROM marked
                 GROUP BY fecha::date
                 ORDER BY fecha::date
                 """,
@@ -7366,12 +7423,14 @@ async def get_tarjas_calendario(
                 day["aprobado"] = int(row[2] or 0)
                 day["pendiente"] = int(row[3] or 0)
                 day["sospechosos"] = int(row[4] or 0)
+                day["duplicadas"] = int(row[5] or 0)
                 by_fecha[day["fecha"]] = day
                 if month_start <= fecha <= month_end:
                     total += day["total"]
                     aprobado += day["aprobado"]
                     pendiente += day["pendiente"]
                     sospechosos_total += day["sospechosos"]
+                    duplicadas_total += day["duplicadas"]
                     if day["total"] > max_count:
                         max_count = day["total"]
 
@@ -7448,6 +7507,7 @@ async def get_tarjas_calendario(
         "aprobado": aprobado,
         "pendiente": pendiente,
         "sospechosos": sospechosos_total,
+        "duplicadas": duplicadas_total,
         "planes": planes_total,
         "max": max_count,
         "contratistas": contratistas,

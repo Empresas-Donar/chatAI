@@ -46,7 +46,7 @@ const MAL_DIGITADO_FLAGS = new Set([
 ]);
 
 const EDITABLE_FIELDS = new Set([
-  'trabajador', 'rut_trabajador', 'horas_trabajadas', 'horas_extras',
+  'trabajador', 'rut_trabajador', 'horas_trabajadas', 'horas_extras', 'estado',
 ]);
 
 const FLAG_TO_FIELD = {
@@ -114,8 +114,10 @@ let dayRows = [];
 let dayPlanes = [];
 let monthContratistas = new Map();
 let openContratistas = new Set();
+let openUsers = new Set();
 let openFecha = null;
-let panelTab = 'aplicados';
+let dayDupCount = new Map();
+let panelTab = 'usuarios';
 let panelLoading = false;
 let dayRequestId = 0;
 let syncingPanel = false;
@@ -261,16 +263,6 @@ function currentParams() {
   return params;
 }
 
-function heatClass(count, max) {
-  if (!count || !max) return '';
-  const ratio = count / max;
-  if (ratio >= 0.8) return 'heat-5';
-  if (ratio >= 0.6) return 'heat-4';
-  if (ratio >= 0.4) return 'heat-3';
-  if (ratio >= 0.2) return 'heat-2';
-  return 'heat-1';
-}
-
 function buildMonthCells(year, month) {
   const first = new Date(year, month - 1, 1);
   const startOffset = (first.getDay() + 6) % 7;
@@ -294,7 +286,6 @@ function renderCalendar(data) {
   const mes = data.mes || document.getElementById('fil-month').value;
   const [year, month] = mes.split('-').map(Number);
   const byDate = new Map((data.days || []).map(d => [d.fecha, d]));
-  const max = data.max || 0;
   const today = todayISO();
   const cells = buildMonthCells(year, month);
 
@@ -306,13 +297,15 @@ function renderCalendar(data) {
     const total = info ? info.total : 0;
     const planes = info ? (info.planes || 0) : 0;
     const sospechosos = info ? (info.sospechosos || 0) : 0;
+    const duplicadas = info ? (info.duplicadas || 0) : 0;
+    const issue = sospechosos + duplicadas;
     const cls = [
       'tcal-day',
       cell.inMonth ? '' : 'is-outside',
       total ? 'has-data' : '',
       planes && !total ? 'has-plan' : '',
       total || planes ? 'is-clickable' : '',
-      heatClass(total, max),
+      issue ? 'has-issue' : '',
       cell.iso === today ? 'is-today' : '',
       cell.iso === openFecha ? 'is-open' : '',
     ].filter(Boolean).join(' ');
@@ -328,11 +321,15 @@ function renderCalendar(data) {
     const warn = sospechosos
       ? `<div class="tcal-suspect">${fmtInt(sospechosos)} mal digitado${sospechosos === 1 ? '' : 's'}</div>`
       : '';
+    const dupChip = duplicadas
+      ? `<div class="tcal-dupday">${fmtInt(duplicadas)} duplicada${duplicadas === 1 ? '' : 's'}</div>`
+      : '';
     const href = (total || planes) ? ` data-fecha="${esc(cell.iso)}"` : '';
     html += `<div class="${cls}"${href}>
       <div class="tcal-day-num">${cell.day}</div>
       ${count}
       ${planChip}
+      ${dupChip}
       ${warn}
     </div>`;
   });
@@ -344,11 +341,15 @@ function renderMeta(data) {
   const el = document.getElementById('meta-bar');
   el.style.display = '';
   const suspect = data.sospechosos || 0;
+  const dups = data.duplicadas || 0;
   el.innerHTML =
     `<span><strong>${fmtInt(data.total || 0)}</strong> registros en el mes</span>` +
     `<span><span class="tcal-dot tcal-dot-plan"></span><strong>${fmtInt(data.planes || 0)}</strong> planes (rango)</span>` +
     `<span><span class="tcal-dot tcal-dot-ok"></span>${fmtInt(data.aprobado || 0)} aprobados</span>` +
     `<span><span class="tcal-dot tcal-dot-pend"></span>${fmtInt(data.pendiente || 0)} pendientes</span>` +
+    (dups
+      ? `<span><span class="tcal-dot" style="background:#c2410c"></span>${fmtInt(dups)} duplicadas</span>`
+      : '') +
     (suspect
       ? `<span><span class="tcal-dot" style="background:#991b1b"></span>${fmtInt(suspect)} mal digitados</span>`
       : '');
@@ -361,18 +362,21 @@ function setBusy(on) {
   document.getElementById('btn-apply').textContent = on ? 'Cargando…' : 'Consultar';
 }
 
-async function queryData() {
+async function queryData(opts = {}) {
+  const quiet = Boolean(opts && opts.quiet);
   const mes = document.getElementById('fil-month').value;
   if (!mes) return;
 
   const emptyEl = document.getElementById('empty-state');
   const emptyTitle = emptyEl.querySelector('h3');
   const emptyP = emptyEl.querySelector('p');
-  emptyEl.style.display = 'none';
-  document.getElementById('calendar').style.display = 'none';
-  document.getElementById('meta-bar').style.display = 'none';
-  document.getElementById('loading-state').style.display = 'block';
-  setBusy(true);
+  if (!quiet) {
+    emptyEl.style.display = 'none';
+    document.getElementById('calendar').style.display = 'none';
+    document.getElementById('meta-bar').style.display = 'none';
+    document.getElementById('loading-state').style.display = 'block';
+    setBusy(true);
+  }
 
   try {
     const res = await fetch('/api/tarjas/calendario?' + currentParams(), {
@@ -402,7 +406,7 @@ async function queryData() {
     emptyP.textContent = e.message || 'Error de red o del servidor.';
     emptyEl.style.display = 'block';
   } finally {
-    setBusy(false);
+    if (!quiet) setBusy(false);
   }
 }
 
@@ -439,6 +443,84 @@ function isMalDigitado(row) {
   if (row.mal_digitado) return true;
   const flags = Array.isArray(row.flags) ? row.flags : [];
   return flags.some(f => MAL_DIGITADO_FLAGS.has(f));
+}
+
+function userKey(row) {
+  return String(row && row.id_supervisor || '').trim() || 'Sin usuario';
+}
+
+function normKeyPart(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function dupKey(row) {
+  return [
+    normKeyPart(row && row.trabajador),
+    normKeyPart(row && row.labor),
+    normKeyPart(row && row.nombre_campo),
+    normKeyPart(row && row.contratista),
+    normKeyPart(row && row.cuartel_cc),
+  ].join('|');
+}
+
+function refreshDupIndex(rows) {
+  const counts = new Map();
+  (rows || []).forEach(r => {
+    const key = dupKey(r);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  dayDupCount = counts;
+}
+
+function dupCount(row) {
+  return dayDupCount.get(dupKey(row)) || 1;
+}
+
+function groupByUsuario(rows) {
+  const map = new Map();
+  rows.forEach(r => {
+    const key = userKey(r);
+    if (!map.has(key)) {
+      map.set(key, { name: key, rows: [], bad: 0, aprobado: 0, pendiente: 0 });
+    }
+    const g = map.get(key);
+    g.rows.push(r);
+    if (isMalDigitado(r)) g.bad += 1;
+    if (isAprobado(r)) g.aprobado += 1;
+    else g.pendiente += 1;
+  });
+  return [...map.values()].sort((a, b) =>
+    b.bad - a.bad || b.rows.length - a.rows.length || a.name.localeCompare(b.name, 'es')
+  );
+}
+
+function seedOpenUsers(rows) {
+  refreshDupIndex(rows);
+  rows.forEach(r => {
+    if (isMalDigitado(r) || dupCount(r) > 1) openUsers.add(userKey(r));
+  });
+}
+
+function sortAuditRows(rows) {
+  return rows.slice().sort((a, b) => {
+    const ad = dupCount(a) > 1 ? 1 : 0;
+    const bd = dupCount(b) > 1 ? 1 : 0;
+    if (ad !== bd) return bd - ad;
+    if (ad && bd) {
+      const cmp = dupKey(a).localeCompare(dupKey(b), 'es');
+      if (cmp) return cmp;
+    }
+    return Number(isMalDigitado(b)) - Number(isMalDigitado(a))
+      || String(a.trabajador || '').localeCompare(String(b.trabajador || ''), 'es');
+  });
+}
+
+function daySummaryText() {
+  refreshDupIndex(dayRows);
+  const bad = dayRows.filter(isMalDigitado).length;
+  const dups = dayRows.filter(r => dupCount(r) > 1).length;
+  const nUsers = new Set(dayRows.map(userKey)).size;
+  return `${fmtInt(nUsers)} usuario${nUsers === 1 ? '' : 's'} · ${fmtInt(dayRows.length)} tarja${dayRows.length === 1 ? '' : 's'} · ${fmtInt(bad)} mal digitado${bad === 1 ? '' : 's'} · ${fmtInt(dups)} duplicada${dups === 1 ? '' : 's'}`;
 }
 
 function groupByContratista(rows) {
@@ -534,20 +616,23 @@ function dayKindTotals(rows) {
 }
 
 function setPanelTab(tab) {
-  panelTab = tab === 'planificados' ? 'planificados' : 'aplicados';
+  if (tab === 'planificados') panelTab = 'planificados';
+  else if (tab === 'aplicados') panelTab = 'aplicados';
+  else panelTab = 'usuarios';
   document.querySelectorAll('.tcal-tab').forEach(btn => {
     const on = btn.getAttribute('data-tab') === panelTab;
     btn.classList.toggle('is-active', on);
     btn.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  document.getElementById('day-panel-toolbar').hidden = panelTab !== 'aplicados';
+  document.getElementById('day-panel-toolbar').hidden = panelTab === 'planificados';
   renderDayRecords();
 }
 
 function updateTabCounts() {
   const solo = document.getElementById('fil-solo-sospechosos').checked;
-  const recCount = solo ? dayRows.filter(isMalDigitado).length : dayRows.length;
-  document.getElementById('tab-count-app').textContent = fmtInt(recCount);
+  const rows = solo ? dayRows.filter(isMalDigitado) : dayRows;
+  document.getElementById('tab-count-users').textContent = fmtInt(new Set(rows.map(userKey)).size);
+  document.getElementById('tab-count-app').textContent = fmtInt(rows.length);
   document.getElementById('tab-count-plan').textContent = fmtInt(dayPlanes.length);
 }
 
@@ -559,11 +644,18 @@ function renderDayRecords() {
       body.innerHTML = renderPlanSection(dayPlanes);
       return;
     }
+    refreshDupIndex(dayRows);
     const soloEl = document.getElementById('fil-solo-sospechosos');
+    const dupEl = document.getElementById('fil-solo-duplicadas');
     const solo = Boolean(soloEl && soloEl.checked);
-    const rows = solo ? dayRows.filter(isMalDigitado) : dayRows.slice();
-    rows.sort((a, b) => Number(isMalDigitado(b)) - Number(isMalDigitado(a)));
-    body.innerHTML = renderRecordSection(rows, solo);
+    const soloDup = Boolean(dupEl && dupEl.checked);
+    let rows = dayRows.slice();
+    if (solo) rows = rows.filter(isMalDigitado);
+    if (soloDup) rows = rows.filter(r => dupCount(r) > 1);
+    rows = sortAuditRows(rows);
+    body.innerHTML = panelTab === 'usuarios'
+      ? renderUserSection(rows, solo)
+      : renderRecordSection(rows, solo);
   } catch (e) {
     console.error('Render day panel:', e);
     body.innerHTML = `<p class="tcal-panel-hint">Error al mostrar el día: ${esc(e.message || e)}</p>`;
@@ -694,25 +786,18 @@ function renderCompactCard(r, idx) {
         : (typeof raw === 'number' && Number.isFinite(raw)
           ? raw.toLocaleString('es-CL')
           : esc(raw)));
-    const canEdit = bad && EDITABLE_FIELDS.has(key);
-    const valueAttr = (raw === null || raw === undefined) ? '' : esc(raw);
-    const dd = canEdit
-      ? `<input class="tcal-edit" data-field="${esc(key)}" value="${valueAttr}" />`
-      : shown;
-    return `<div class="tcal-kv${warn ? ' is-warn' : ''}${canEdit ? ' is-edit' : ''}">
+    return `<div class="tcal-kv${warn ? ' is-warn' : ''}">
       <dt>${esc(label)}${why}</dt>
-      <dd>${dd}</dd>
+      <dd>${shown}</dd>
     </div>`;
   }).join('');
-  const saveBar = bad
-    ? `<div class="tcal-save-row">
-        <button type="button" class="btn btn-primary btn-sm" data-save-rec="${esc(r.id_Resumen || '')}">Guardar corrección</button>
-        <span class="tcal-save-msg" hidden></span>
-      </div>`
-    : '';
-  const expanded = bad ? ' is-expanded' : '';
+  const copies = dupCount(r);
+  const duplicated = copies > 1;
+  const editing = bad || duplicated;
+  const expanded = editing ? ' is-expanded' : '';
   const tract = pagoKind(r.tipo_pago) === 'tractorista' ? ' is-tract' : '';
-  return `<article class="tcal-rec tcal-rec-compact${bad ? ' is-bad' : ''}${tract}${expanded}" data-rec="${idx}" data-id="${esc(r.id_Resumen || '')}">
+  const id = esc(r.id_Resumen || '');
+  return `<article class="tcal-rec tcal-rec-compact${bad ? ' is-bad' : ''}${duplicated ? ' is-dup' : ''}${tract}${expanded}" data-rec="${idx}" data-id="${id}">
     <div class="tcal-rec-top">
       <h3 class="tcal-rec-title">${esc(r.labor || 'Sin labor')}</h3>
       <div class="tcal-rec-prices">
@@ -720,15 +805,55 @@ function renderCompactCard(r, idx) {
         <div class="tcal-price tcal-price-donar"><span>Donar</span>${fmtMoney(costoEmpresa(r))}</div>
       </div>
     </div>
+    <div class="tcal-flow">
+      <div><span>Registró</span><strong>${esc(userKey(r))}</strong></div>
+      <div><span>Aprobación</span>${estadoBadge(r.estado)}</div>
+    </div>
     <div class="tcal-rec-line">
-      ${estadoBadge(r.estado)}
-      ${bad ? ' <span class="tcal-badge tcal-badge-bad">Mal digitado</span>' : ''}
+      ${bad ? '<span class="tcal-badge tcal-badge-bad">Mal digitado</span>' : ''}
+      ${duplicated ? `<span class="tcal-badge tcal-badge-dup">Duplicada · ${fmtInt(copies)} iguales</span>` : ''}
       <span>${meta.map(esc).join(' · ')}</span>
     </div>
     ${fieldChips ? `<div class="tcal-rec-flags">Campos: ${fieldChips}</div>` : ''}
+    <div class="tcal-actions">
+      <button type="button" class="btn btn-secondary btn-sm" data-edit-rec>Editar</button>
+      <button type="button" class="btn btn-secondary btn-sm tcal-btn-danger" data-delete-rec="${id}">Eliminar</button>
+    </div>
+    ${editForm(r, editing)}
     <dl class="tcal-rec-grid">${details}</dl>
-    ${saveBar}
   </article>`;
+}
+
+function estadoSelect(current) {
+  const cur = String(current || '').trim();
+  const options = ['Aprobado', 'Pendiente'];
+  if (cur && !options.some(o => o.toLowerCase() === cur.toLowerCase())) options.push(cur);
+  return `<select class="tcal-edit" data-field="estado">${options.map(o => {
+    const sel = o.toLowerCase() === cur.toLowerCase() ? ' selected' : '';
+    return `<option value="${esc(o)}"${sel}>${esc(o)}</option>`;
+  }).join('')}</select>`;
+}
+
+function editForm(r, open) {
+  const fields = [
+    ['trabajador', 'Trabajador', r.trabajador],
+    ['rut_trabajador', 'RUT', r.rut_trabajador],
+    ['horas_trabajadas', 'Horas trabajadas', r.horas_trabajadas],
+    ['horas_extras', 'Horas extras', r.horas_extras],
+  ];
+  const inputs = fields.map(([key, label, raw]) => {
+    const valueAttr = (raw === null || raw === undefined) ? '' : esc(raw);
+    return `<label class="tcal-edit-field"><span>${esc(label)}</span><input class="tcal-edit" data-field="${key}" value="${valueAttr}" /></label>`;
+  }).join('');
+  return `<form class="tcal-edit-form"${open ? '' : ' hidden'}>
+    ${inputs}
+    <label class="tcal-edit-field"><span>Aprobación</span>${estadoSelect(r.estado)}</label>
+    <div class="tcal-save-row">
+      <button type="button" class="btn btn-primary btn-sm" data-save-rec="${esc(r.id_Resumen || '')}">Guardar corrección</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit>Cancelar</button>
+      <span class="tcal-save-msg" hidden></span>
+    </div>
+  </form>`;
 }
 
 function renderKindGroups(rows) {
@@ -754,6 +879,47 @@ function renderKindGroups(rows) {
       ${cards}
     </div>`;
   }).join('');
+}
+
+function renderUserSection(rows, solo) {
+  const soloDup = Boolean(document.getElementById('fil-solo-duplicadas') && document.getElementById('fil-solo-duplicadas').checked);
+  const emptyHint = soloDup
+    ? 'No hay tarjas duplicadas este día.'
+    : (solo
+      ? 'No hay registros mal digitados este día.'
+      : 'Sin registros de tarjas este día.');
+  if (!rows.length) {
+    return `<p class="tcal-panel-hint">${emptyHint}</p>`;
+  }
+  const groups = groupByUsuario(rows);
+  const bad = rows.filter(isMalDigitado).length;
+  const dups = rows.filter(r => dupCount(r) > 1).length;
+  const hint = `<p class="tcal-section-hint">${fmtInt(groups.length)} usuario${groups.length === 1 ? '' : 's'} registraron ${fmtInt(rows.length)} tarja${rows.length === 1 ? '' : 's'}${bad ? ` · ${fmtInt(bad)} mal digitado${bad === 1 ? '' : 's'}` : ''}${dups ? ` · ${fmtInt(dups)} duplicada${dups === 1 ? '' : 's'}` : ''}. Quién registró es el supervisor de la app. La aprobación solo guarda el estado: Aprobado entra al documento final y Pendiente no.</p>`;
+  const blocks = groups.map(g => {
+    const n = g.rows.length;
+    const open = openUsers.has(g.name);
+    const badChip = g.bad
+      ? `<span class="tcal-badge tcal-badge-bad">${fmtInt(g.bad)} mal digitado${g.bad === 1 ? '' : 's'}</span>`
+      : '';
+    const dupN = g.rows.filter(r => dupCount(r) > 1).length;
+    const meta = `${fmtInt(g.aprobado)} aprobada${g.aprobado === 1 ? '' : 's'} · ${fmtInt(g.pendiente)} pendiente${g.pendiente === 1 ? '' : 's'}${dupN ? ` · ${fmtInt(dupN)} duplicada${dupN === 1 ? '' : 's'}` : ''}`;
+    const cards = sortAuditRows(g.rows).map((r, idx) => renderCompactCard(r, idx)).join('');
+    return `<section class="tcal-contractor tcal-user${g.bad ? ' is-bad' : ''}${dupN ? ' is-dup' : ''}${open ? ' is-open' : ''}" data-usuario="${esc(g.name)}">
+      <button type="button" class="tcal-contractor-toggle" data-user-toggle aria-expanded="${open ? 'true' : 'false'}">
+        <span class="tcal-chevron" aria-hidden="true"></span>
+        <div class="tcal-contractor-summary">
+          <div class="tcal-contractor-name">${esc(g.name)} ${badChip}</div>
+          <div class="tcal-contractor-meta">${esc(meta)}</div>
+        </div>
+        <div class="tcal-user-count">
+          <strong>${fmtInt(n)}</strong>
+          <span>tarja${n === 1 ? '' : 's'}</span>
+        </div>
+      </button>
+      <div class="tcal-contractor-body">${cards}</div>
+    </section>`;
+  }).join('');
+  return `${hint}${blocks}`;
 }
 
 function renderRecordSection(rows, solo) {
@@ -839,6 +1005,44 @@ function renderRecordSection(rows, solo) {
   return `${bill}${blocks}`;
 }
 
+async function deleteRegistro(id) {
+  const row = dayRows.find(r => String(r.id_Resumen) === String(id));
+  const who = row && row.trabajador ? row.trabajador : 'esta tarja';
+  const labor = row && row.labor ? row.labor : '';
+  const fecha = openFecha;
+  const ok = window.confirm(
+    `¿Estás seguro de eliminar?\n\n${who}${labor ? ` · ${labor}` : ''}\nSe borra solo este registro.`
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch(
+      '/api/tarjas/registros-campo/' + encodeURIComponent(id),
+      { method: 'DELETE' }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(apiDetail(data, res.status));
+    dayRows = dayRows.filter(r => String(r.id_Resumen) !== String(id));
+    const panel = document.getElementById('day-panel');
+    const overlay = document.getElementById('day-overlay');
+    panel.hidden = false;
+    overlay.hidden = false;
+    document.getElementById('day-panel-title').textContent = weekdayTitle(fecha);
+    document.getElementById('day-panel-sub').textContent = daySummaryText();
+    renderDayRecords();
+    await queryData({ quiet: true });
+    if (openFecha === fecha) {
+      panel.hidden = false;
+      overlay.hidden = false;
+      document.getElementById('day-panel-title').textContent = weekdayTitle(fecha);
+    }
+  } catch (e) {
+    console.error(e);
+    window.alert(e.message || 'No se pudo eliminar.');
+    const panel = document.getElementById('day-panel');
+    if (panel && openFecha === fecha) panel.hidden = false;
+  }
+}
+
 async function saveRegistro(id, article) {
   const msg = article.querySelector('.tcal-save-msg');
   const btn = article.querySelector('[data-save-rec]');
@@ -866,6 +1070,7 @@ async function saveRegistro(id, article) {
     const row = data.row;
     const idx = dayRows.findIndex(r => String(r.id_Resumen) === String(id));
     if (idx >= 0 && row) dayRows[idx] = row;
+    document.getElementById('day-panel-sub').textContent = daySummaryText();
     renderDayRecords();
   } catch (e) {
     console.error(e);
@@ -886,7 +1091,11 @@ async function openDay(fecha, opts = {}) {
   const keepTab = Boolean(opts.keepTab);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha || '')) return;
   const req = ++dayRequestId;
-  if (openFecha !== fecha) openContratistas.clear();
+  const fechaChanged = openFecha !== fecha;
+  if (fechaChanged) {
+    openContratistas.clear();
+    openUsers.clear();
+  }
   openFecha = fecha;
   document.querySelectorAll('.tcal-day[data-fecha]').forEach(el => {
     el.classList.toggle('is-open', el.getAttribute('data-fecha') === fecha);
@@ -904,13 +1113,15 @@ async function openDay(fecha, opts = {}) {
   document.getElementById('day-panel-body').innerHTML = '<p class="tcal-panel-hint">Cargando…</p>';
   if (!keepTab) {
     const soloEl = document.getElementById('fil-solo-sospechosos');
+    const dupEl = document.getElementById('fil-solo-duplicadas');
     if (soloEl) soloEl.checked = false;
+    if (dupEl) dupEl.checked = false;
   }
   panelLoading = true;
   dayRows = [];
   dayPlanes = [];
   updateTabCounts();
-  document.getElementById('day-panel-toolbar').hidden = panelTab !== 'aplicados';
+  document.getElementById('day-panel-toolbar').hidden = panelTab === 'planificados';
 
   const month = fecha.slice(0, 7);
   const monthInput = document.getElementById('fil-month');
@@ -950,14 +1161,15 @@ async function openDay(fecha, opts = {}) {
     if (req !== dayRequestId) return;
     dayRows = recData.rows || [];
     dayPlanes = planData.rows || [];
-    const bad = dayRows.filter(isMalDigitado).length;
-    const facturar = dayRows.reduce((s, r) => s + (isAprobado(r) ? costoEmpresa(r) : 0), 0);
-    const trab = dayRows.reduce((s, r) => s + (isAprobado(r) ? precioTrabajador(r) : 0), 0);
-    document.getElementById('day-panel-sub').textContent =
-      `${fmtInt(dayRows.length)} aplicadas · Donar ${fmtCLP.format(facturar)} · trabajador ${fmtCLP.format(trab)} · ${fmtInt(bad)} mal digitados`;
+    if (fechaChanged || !keepTab) seedOpenUsers(dayRows);
+    const totalRec = Number(recData.total) || dayRows.length;
+    const extra = totalRec > dayRows.length
+      ? ` · mostrando ${fmtInt(dayRows.length)} de ${fmtInt(totalRec)}`
+      : '';
+    document.getElementById('day-panel-sub').textContent = `${daySummaryText()}${extra}`;
     panelLoading = false;
     if (!keepTab) {
-      panelTab = dayRows.length ? 'aplicados' : (dayPlanes.length ? 'planificados' : 'aplicados');
+      panelTab = dayRows.length ? 'usuarios' : (dayPlanes.length ? 'planificados' : 'usuarios');
     }
     setPanelTab(panelTab);
   } catch (e) {
@@ -1003,6 +1215,17 @@ document.getElementById('calendar').addEventListener('click', (e) => {
 document.getElementById('day-panel-close').addEventListener('click', closeDayPanel);
 document.getElementById('day-overlay').addEventListener('click', closeDayPanel);
 document.getElementById('day-panel-body').addEventListener('click', (e) => {
+  const userToggle = e.target.closest('[data-user-toggle]');
+  if (userToggle) {
+    const section = userToggle.closest('[data-usuario]');
+    if (!section) return;
+    const name = section.getAttribute('data-usuario') || '';
+    const open = section.classList.toggle('is-open');
+    userToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) openUsers.add(name);
+    else openUsers.delete(name);
+    return;
+  }
   const toggle = e.target.closest('[data-contratista-toggle]');
   if (toggle) {
     const section = toggle.closest('.tcal-contractor');
@@ -1012,6 +1235,23 @@ document.getElementById('day-panel-body').addEventListener('click', (e) => {
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) openContratistas.add(name);
     else openContratistas.delete(name);
+    return;
+  }
+  const editBtn = e.target.closest('[data-edit-rec]');
+  if (editBtn) {
+    const form = editBtn.closest('article') && editBtn.closest('article').querySelector('.tcal-edit-form');
+    if (form) form.hidden = false;
+    return;
+  }
+  const cancelBtn = e.target.closest('[data-cancel-edit]');
+  if (cancelBtn) {
+    const form = cancelBtn.closest('.tcal-edit-form');
+    if (form) form.hidden = true;
+    return;
+  }
+  const delBtn = e.target.closest('[data-delete-rec]');
+  if (delBtn) {
+    deleteRegistro(delBtn.getAttribute('data-delete-rec'));
     return;
   }
   const btn = e.target.closest('[data-save-rec]');
@@ -1036,6 +1276,7 @@ document.getElementById('day-panel-body').addEventListener('keydown', (e) => {
   if (btn) saveRegistro(btn.getAttribute('data-save-rec'), article);
 });
 document.getElementById('fil-solo-sospechosos').addEventListener('change', renderDayRecords);
+document.getElementById('fil-solo-duplicadas').addEventListener('change', renderDayRecords);
 document.getElementById('day-prev').addEventListener('click', () => {
   if (!openFecha) return;
   openDay(addDaysISO(openFecha, -1), { keepTab: true });

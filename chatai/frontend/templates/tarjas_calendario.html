@@ -33,7 +33,7 @@
 {% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/tarjas_calendario.css?v={{ static_v }}-cal10" />
+<link rel="stylesheet" href="/static/tarjas_calendario.css?v={{ static_v }}-cal13" />
 {% endblock %}
 
 {% block body %}
@@ -42,7 +42,7 @@
   <div class="page-header">
     <div>
       <h1>Calendario</h1>
-      <p>Costo Empresa por día y contratista, para armar lo que se factura. Clic en un día para ver el detalle.</p>
+      <p>Clic en un día para ver quién registró cada tarja, si quedó aprobada, y corregir o eliminar un duplicado antes del documento final.</p>
     </div>
   </div>
 
@@ -78,7 +78,10 @@
     <button type="button" class="tcal-panel-close" id="day-panel-close" aria-label="Cerrar">✕</button>
   </div>
   <div class="tcal-tabs" role="tablist">
-    <button type="button" class="tcal-tab is-active" role="tab" id="tab-aplicados" data-tab="aplicados" aria-selected="true">
+    <button type="button" class="tcal-tab is-active" role="tab" id="tab-usuarios" data-tab="usuarios" aria-selected="true">
+      Usuarios <span id="tab-count-users">0</span>
+    </button>
+    <button type="button" class="tcal-tab" role="tab" id="tab-aplicados" data-tab="aplicados" aria-selected="false">
       Labores aplicadas <span id="tab-count-app">0</span>
     </button>
     <button type="button" class="tcal-tab" role="tab" id="tab-planificados" data-tab="planificados" aria-selected="false">
@@ -90,6 +93,10 @@
       <input type="checkbox" id="fil-solo-sospechosos" />
       Solo mal digitados
     </label>
+    <label class="tcal-toggle">
+      <input type="checkbox" id="fil-solo-duplicadas" />
+      Solo duplicadas
+    </label>
   </div>
   <div id="day-panel-body" class="tcal-panel-body">
     <p class="tcal-panel-hint">Selecciona un día en el calendario.</p>
@@ -98,5 +105,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_calendario.js?v={{ static_v }}-cal10"></script>
+<script src="/static/tarjas_calendario.js?v={{ static_v }}-cal13"></script>
 {% endblock %}

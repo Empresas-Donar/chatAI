@@ -15,9 +15,16 @@ Run locally:
     python -m pytest chatai/tests/test_136_registros_campo.py -v
 """
 
+import os
 import re
 import sys
 from pathlib import Path
+
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2 import sql as psql
+
+load_dotenv(Path(__file__).parent.parent / ".env", interpolate=False)
 
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
@@ -99,6 +106,34 @@ def test_136_mal_digitado_patch_is_allowlisted():
     assert "trc-edit" in js_tl
     assert "Guardar corrección" in js_tl
     assert "method: 'PATCH'" in js_tl
+
+
+def test_136_calendario_audit_flow_edit_and_delete():
+    """Day panel shows who registered, approval state, duplicates, edit and delete."""
+    block = _registros_campo_ctrl_block()
+    assert '"estado"' in block
+    assert "Estado debe ser Aprobado o Pendiente" in block
+    assert '@router.delete("/api/tarjas/registros-campo/{id_resumen}")' in block
+    assert "DELETE FROM appsheet.tarjas_pagos WHERE" in block
+    assert "cur.rowcount != 1" in block
+    assert "contraseña" not in block
+    js = CAL_JS.read_text(encoding="utf-8")
+    assert "Registró" in js
+    assert "Aprobación" in js
+    assert "dupKey" in js
+    assert "data-delete-rec" in js
+    assert "method: 'DELETE'" in js
+    start = js.index("async function deleteRegistro")
+    end = js.index("async function saveRegistro")
+    body = js[start:end]
+    assert "¿Estás seguro de eliminar?" in body
+    assert "closeDayPanel" not in body
+    assert "queryData({ quiet: true })" in body
+    assert "panel.hidden = false" in body
+    assert "heatClass" not in js
+    assert "has-issue" in js
+    html = CAL_HTML.read_text(encoding="utf-8")
+    assert "fil-solo-duplicadas" in html
 
 
 def test_136_excel_route_exists():
@@ -330,8 +365,12 @@ def test_136_calendario_reuses_registros_filters():
     assert "day-panel" in html
     assert "fil-solo-sospechosos" in html
     assert "pan-fecha" in html
+    assert "tab-usuarios" in html
     assert "tab-aplicados" in html
     assert "tab-planificados" in html
+    assert "groupByUsuario" in js
+    assert "id_supervisor" in js
+    assert "data-user-toggle" in js
     assert "pan-empresa" not in html
     assert "tcal-panel-filters" not in html
     assert "toMonthValue(new Date())" in js
@@ -396,3 +435,78 @@ def test_136_plan_diario_where_is_range_overlap():
     assert "id_supervisor" not in block
     assert 'filters.append("estado' not in block
     assert "generate_series" in src[src.index("App → Calendario") :]
+
+
+def _probe_conn():
+    return psycopg2.connect(
+        host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT", "5432")),
+        dbname=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        connect_timeout=20,
+    )
+
+
+def test_136_delete_one_duplicate_then_rollback():
+    """DELETE removes exactly one row. The transaction is rolled back.
+
+    Production rows are not removed. A second connection confirms the probe
+    ids never landed.
+    """
+    ids = ("cursor-delete-probe-a", "cursor-delete-probe-b")
+    conn = _probe_conn()
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM appsheet.tarjas_pagos")
+            before = cur.fetchone()[0]
+            for id_resumen in ids:
+                cur.execute(
+                    """
+                    INSERT INTO appsheet.tarjas_pagos (
+                      "id_Resumen", id_supervisor, fecha, nombre_campo, cuartel_cc,
+                      labor, contratista, trabajador, estado
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        id_resumen,
+                        "Probe Supervisor",
+                        "01/01/2099 00:00:00",
+                        "PROBE CAMPO",
+                        "PROBE-CC",
+                        "PROBE LABOR",
+                        "PROBE CONTRATISTA",
+                        "Probe Trabajador",
+                        "Aprobado",
+                    ),
+                )
+            delete_sql = psql.SQL(
+                "DELETE FROM appsheet.tarjas_pagos WHERE {} = %s"
+            ).format(psql.Identifier("id_Resumen"))
+            cur.execute(delete_sql, (ids[0],))
+            assert cur.rowcount == 1
+            cur.execute(
+                'SELECT "id_Resumen" FROM appsheet.tarjas_pagos WHERE "id_Resumen" = ANY(%s)',
+                (list(ids),),
+            )
+            left = {r[0] for r in cur.fetchall()}
+            assert left == {ids[1]}
+            cur.execute("SELECT COUNT(*) FROM appsheet.tarjas_pagos")
+            assert cur.fetchone()[0] == before + 1
+        conn.rollback()
+    finally:
+        conn.rollback()
+        conn.close()
+
+    check = _probe_conn()
+    check.set_session(readonly=True, autocommit=True)
+    try:
+        with check.cursor() as cur:
+            cur.execute(
+                'SELECT COUNT(*) FROM appsheet.tarjas_pagos WHERE "id_Resumen" = ANY(%s)',
+                (list(ids),),
+            )
+            assert cur.fetchone()[0] == 0
+    finally:
+        check.close()
