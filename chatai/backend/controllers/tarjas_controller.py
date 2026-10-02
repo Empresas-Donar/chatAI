@@ -6676,11 +6676,53 @@ FROM appsheet.tarjas_pagos
 
 _REGISTROS_CAMPO_EDITABLE = frozenset(
     {
+        "id_supervisor",
+        "fecha",
+        "nombre_campo",
+        "cuartel_cc",
+        "labor",
+        "contratista",
         "trabajador",
         "rut_trabajador",
-        "horas_trabajadas",
+        "tipo_pago",
+        "valor_jornada",
+        "valor_trato",
+        "base_trato",
+        "rendimiento",
         "horas_extras",
+        "horas_trabajadas",
+        "maquina",
+        "total_tractor",
+        "total_hora_extra",
+        "total_jornada",
+        "total_trato",
+        "total_trabajado",
+        "contratista_jornada",
+        "contratista_trato",
+        "total_contratista",
+        "total_pagar",
         "estado",
+        "id_tarja_supervisor",
+        "id_labor",
+    }
+)
+_REGISTROS_CAMPO_NUMERIC = frozenset(
+    {
+        "valor_jornada",
+        "valor_trato",
+        "base_trato",
+        "rendimiento",
+        "horas_extras",
+        "horas_trabajadas",
+        "total_tractor",
+        "total_hora_extra",
+        "total_jornada",
+        "total_trato",
+        "total_trabajado",
+        "contratista_jornada",
+        "contratista_trato",
+        "total_contratista",
+        "total_pagar",
     }
 )
 _REGISTROS_CAMPO_ESTADOS = {"aprobado": "Aprobado", "pendiente": "Pendiente"}
@@ -6954,7 +6996,7 @@ def _coerce_registro_campo_edit(col: str, raw):
                 detail="Estado debe ser Aprobado o Pendiente",
             )
         return _REGISTROS_CAMPO_ESTADOS[key]
-    if col in ("horas_trabajadas", "horas_extras"):
+    if col in _REGISTROS_CAMPO_NUMERIC:
         if raw is None or str(raw).strip() == "":
             return None
         n = _as_number(raw)

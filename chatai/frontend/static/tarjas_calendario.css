@@ -768,7 +768,13 @@
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.tcal-edit-form .tcal-save-row { grid-column: 1 / -1; }
+.tcal-edit-form .tcal-save-row,
+.tcal-edit-note { grid-column: 1 / -1; }
+.tcal-edit-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .tcal-badge-plan { background: #e9dcf3; color: #4c2d69; }
 
 .tcal-section { margin-bottom: 22px; }

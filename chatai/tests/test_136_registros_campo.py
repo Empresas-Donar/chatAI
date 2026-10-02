@@ -127,6 +127,9 @@ def test_136_calendario_audit_flow_edit_and_delete():
     end = js.index("async function saveRegistro")
     body = js[start:end]
     assert "¿Estás seguro de eliminar?" in body
+    assert "openTarjaEditor" in js
+    for col in ("labor", "fecha", "contratista", "nombre_campo", "tipo_pago", "id_supervisor"):
+        assert f'"{col}"' in block
     assert "closeDayPanel" not in body
     assert "queryData({ quiet: true })" in body
     assert "panel.hidden = false" in body
@@ -398,7 +401,8 @@ def test_136_calendario_bills_costo_empresa_from_api():
     assert "Máquinas" in js
     assert "1.45" not in js
     assert "1.50" not in js
-    assert "total_pagar" not in js
+    billed = js[js.index("function costoEmpresa"):js.index("function recargoLabel")]
+    assert "total_pagar" not in billed
     src = _ctrl_source()
     block = _registros_campo_ctrl_block()
     assert "annotate_detalle_rows" in block

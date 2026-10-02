@@ -45,9 +45,37 @@ const MAL_DIGITADO_FLAGS = new Set([
   'implausible_horas_extra', 'hours_and_extras', 'implausible_hours',
 ]);
 
-const EDITABLE_FIELDS = new Set([
-  'trabajador', 'rut_trabajador', 'horas_trabajadas', 'horas_extras', 'estado',
-]);
+const EDIT_FIELDS = [
+  ['id_supervisor', 'Registró'],
+  ['fecha', 'Fecha'],
+  ['labor', 'Labor'],
+  ['trabajador', 'Trabajador'],
+  ['rut_trabajador', 'RUT'],
+  ['contratista', 'Contratista'],
+  ['nombre_campo', 'Campo'],
+  ['cuartel_cc', 'Cuartel / CC'],
+  ['tipo_pago', 'Tipo de pago'],
+  ['horas_trabajadas', 'Horas trabajadas'],
+  ['horas_extras', 'Horas extras'],
+  ['rendimiento', 'Rendimiento'],
+  ['valor_jornada', 'Valor jornada'],
+  ['valor_trato', 'Valor trato'],
+  ['base_trato', 'Base trato'],
+  ['total_jornada', 'Total jornada'],
+  ['total_trato', 'Total trato'],
+  ['total_trabajado', 'Precio trabajador'],
+  ['total_hora_extra', 'Total hora extra'],
+  ['contratista_jornada', 'Contratista jornada'],
+  ['contratista_trato', 'Contratista trato'],
+  ['total_contratista', 'Total contratista'],
+  ['total_pagar', 'Total a pagar'],
+  ['maquina', 'Máquina'],
+  ['total_tractor', 'Total tractor'],
+  ['id_labor', 'ID labor'],
+  ['id_tarja_supervisor', 'ID tarja supervisor'],
+];
+
+const EDITABLE_FIELDS = new Set([...EDIT_FIELDS.map(([key]) => key), 'estado']);
 
 const FLAG_TO_FIELD = {
   bad_rut: 'rut_trabajador',
@@ -835,25 +863,30 @@ function estadoSelect(current) {
 }
 
 function editForm(r, open) {
-  const fields = [
-    ['trabajador', 'Trabajador', r.trabajador],
-    ['rut_trabajador', 'RUT', r.rut_trabajador],
-    ['horas_trabajadas', 'Horas trabajadas', r.horas_trabajadas],
-    ['horas_extras', 'Horas extras', r.horas_extras],
-  ];
-  const inputs = fields.map(([key, label, raw]) => {
+  const inputs = EDIT_FIELDS.map(([key, label]) => {
+    const raw = r[key];
     const valueAttr = (raw === null || raw === undefined) ? '' : esc(raw);
     return `<label class="tcal-edit-field"><span>${esc(label)}</span><input class="tcal-edit" data-field="${key}" value="${valueAttr}" /></label>`;
   }).join('');
   return `<form class="tcal-edit-form"${open ? '' : ' hidden'}>
-    ${inputs}
     <label class="tcal-edit-field"><span>Aprobación</span>${estadoSelect(r.estado)}</label>
+    ${inputs}
+    <p class="tcal-edit-note">Costo Empresa y el nombre del CC se recalculan al guardar. El id del registro no se cambia.</p>
     <div class="tcal-save-row">
       <button type="button" class="btn btn-primary btn-sm" data-save-rec="${esc(r.id_Resumen || '')}">Guardar corrección</button>
       <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit>Cancelar</button>
       <span class="tcal-save-msg" hidden></span>
     </div>
   </form>`;
+}
+
+function openTarjaEditor(article) {
+  if (!article) return;
+  const form = article.querySelector('.tcal-edit-form');
+  if (form) form.hidden = false;
+  article.classList.add('is-expanded');
+  const first = form && form.querySelector('.tcal-edit');
+  if (first && document.activeElement !== first) first.focus();
 }
 
 function renderKindGroups(rows) {
@@ -1069,7 +1102,14 @@ async function saveRegistro(id, article) {
     }
     const row = data.row;
     const idx = dayRows.findIndex(r => String(r.id_Resumen) === String(id));
-    if (idx >= 0 && row) dayRows[idx] = row;
+    if (idx >= 0 && row) {
+      const iso = String(row.fecha_iso || '').slice(0, 10);
+      if (openFecha && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso !== openFecha) {
+        dayRows.splice(idx, 1);
+      } else {
+        dayRows[idx] = row;
+      }
+    }
     document.getElementById('day-panel-sub').textContent = daySummaryText();
     renderDayRecords();
   } catch (e) {
@@ -1239,8 +1279,7 @@ document.getElementById('day-panel-body').addEventListener('click', (e) => {
   }
   const editBtn = e.target.closest('[data-edit-rec]');
   if (editBtn) {
-    const form = editBtn.closest('article') && editBtn.closest('article').querySelector('.tcal-edit-form');
-    if (form) form.hidden = false;
+    openTarjaEditor(editBtn.closest('article'));
     return;
   }
   const cancelBtn = e.target.closest('[data-cancel-edit]');
@@ -1264,7 +1303,7 @@ document.getElementById('day-panel-body').addEventListener('click', (e) => {
   if (e.target.closest('.tcal-edit, button, input, select, a, label')) return;
   const rec = e.target.closest('.tcal-rec[data-id]');
   if (rec && !rec.classList.contains('tcal-rec-plan')) {
-    rec.classList.toggle('is-expanded');
+    openTarjaEditor(rec);
   }
 });
 document.getElementById('day-panel-body').addEventListener('keydown', (e) => {
