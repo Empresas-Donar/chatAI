@@ -6868,9 +6868,33 @@ def _annotate_registros_campo(rows: list[dict]) -> list[dict]:
         flags = _registros_campo_flags(row)
         row["flags"] = flags
         row["mal_digitado"] = _is_mal_digitado(flags)
+        row["revisado"] = False
         recargo = markup_pct(row.get("tipo_pago"))
         row["recargo_pct"] = float(recargo)
         row["recargo"] = format_markup(recargo)
+    return rows
+
+
+def _attach_revisado(cur, rows: list[dict]) -> list[dict]:
+    """A reviewed row stays out of the red mal-digitado mark."""
+    ids = [r.get("id_Resumen") for r in rows if r.get("id_Resumen")]
+    marked: set[str] = set()
+    if ids:
+        cur.execute(
+            """
+            SELECT id_resumen
+            FROM appsheet.tarjas_pagos_revision
+            WHERE revisado IS TRUE
+              AND id_resumen = ANY(%s)
+            """,
+            (ids,),
+        )
+        marked = {row[0] for row in cur.fetchall()}
+    for row in rows:
+        ok = row.get("id_Resumen") in marked
+        row["revisado"] = ok
+        if ok:
+            row["mal_digitado"] = False
     return rows
 
 
@@ -6974,6 +6998,7 @@ async def get_tarjas_registros_campo(
             )
             rows = _annotate_registros_campo(_rows_to_dicts(cur))
             _attach_cc_nombres(cur, rows, "cuartel_cc")
+            _attach_revisado(cur, rows)
     finally:
         conn.close()
 
@@ -7062,6 +7087,7 @@ async def patch_tarjas_registro_campo(
                 )
                 rows = _annotate_registros_campo(_rows_to_dicts(cur))
                 _attach_cc_nombres(cur, rows, "cuartel_cc")
+                _attach_revisado(cur, rows)
     finally:
         conn.close()
 
@@ -7095,10 +7121,70 @@ async def delete_tarjas_registro_campo(id_resumen: str):
                     raise HTTPException(
                         status_code=404, detail="Registro no encontrado"
                     )
+                cur.execute(
+                    "DELETE FROM appsheet.tarjas_pagos_revision WHERE id_resumen = %s",
+                    (id_resumen,),
+                )
     finally:
         conn.close()
 
     return {"deleted": id_resumen}
+
+
+@router.patch("/api/tarjas/registros-campo/{id_resumen}/revision")
+async def patch_tarjas_registro_campo_revision(
+    id_resumen: str,
+    payload: dict = Body(...),
+):
+    """Mark a field record as reviewed so a false mal-digitado stops showing red."""
+    if not id_resumen or not str(id_resumen).strip():
+        raise HTTPException(status_code=400, detail="id_resumen is required")
+    revisado = payload.get("revisado") if isinstance(payload, dict) else None
+    if not isinstance(revisado, bool):
+        raise HTTPException(
+            status_code=422, detail="revisado debe ser true o false"
+        )
+
+    try:
+        conn = get_connection()
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="Error de conexión a la base de datos"
+        )
+
+    upsert_sql = """
+        INSERT INTO appsheet.tarjas_pagos_revision (id_resumen, revisado, revisado_en)
+        VALUES (%s, %s, now())
+        ON CONFLICT (id_resumen) DO UPDATE
+        SET revisado = EXCLUDED.revisado,
+            revisado_en = now()
+    """
+    rows: list[dict] = []
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT 1 FROM appsheet.tarjas_pagos WHERE "id_Resumen" = %s',
+                    (id_resumen,),
+                )
+                if cur.fetchone() is None:
+                    raise HTTPException(
+                        status_code=404, detail="Registro no encontrado"
+                    )
+                cur.execute(upsert_sql, (id_resumen, revisado))
+                cur.execute(
+                    f'{_REGISTROS_CAMPO_SELECT} WHERE "id_Resumen" = %s',
+                    (id_resumen,),
+                )
+                rows = _annotate_registros_campo(_rows_to_dicts(cur))
+                _attach_cc_nombres(cur, rows, "cuartel_cc")
+                _attach_revisado(cur, rows)
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return {"row": rows[0]}
 
 
 @router.get("/api/tarjas/registros-campo/download-excel")
@@ -7143,6 +7229,7 @@ async def download_tarjas_registros_campo_excel(
             )
             rows = _annotate_registros_campo(_rows_to_dicts(cur))
             _attach_cc_nombres(cur, rows, "cuartel_cc")
+            _attach_revisado(cur, rows)
     finally:
         conn.close()
 
@@ -7186,7 +7273,7 @@ async def download_tarjas_registros_campo_excel(
 
     for row_num, r in enumerate(rows, 2):
         flags = r.get("flags") or []
-        flagged = bool(flags)
+        flagged = bool(flags) and not r.get("revisado")
         for col, (key, _) in enumerate(headers, 1):
             if key == "flags":
                 value = ", ".join(flags)
@@ -7427,13 +7514,16 @@ async def get_tarjas_calendario(
                   SELECT
                     fecha::date AS fecha,
                     LOWER(TRIM(estado)) AS estado_key,
-                    ({_REGISTROS_CAMPO_MAL_SQL}) AS mal,
+                    (({_REGISTROS_CAMPO_MAL_SQL})
+                      AND NOT COALESCE(rev.revisado, false)) AS mal,
                     lower(regexp_replace(trim(COALESCE(trabajador, '')), '\\s+', ' ', 'g')) AS k_trab,
                     lower(regexp_replace(trim(COALESCE(labor, '')), '\\s+', ' ', 'g')) AS k_labor,
                     lower(regexp_replace(trim(COALESCE(nombre_campo, '')), '\\s+', ' ', 'g')) AS k_campo,
                     lower(regexp_replace(trim(COALESCE(contratista, '')), '\\s+', ' ', 'g')) AS k_cont,
                     lower(regexp_replace(trim(COALESCE(cuartel_cc, '')), '\\s+', ' ', 'g')) AS k_cc
                   FROM appsheet.tarjas_pagos
+                  LEFT JOIN appsheet.tarjas_pagos_revision rev
+                    ON rev.id_resumen = "id_Resumen"
                   {where}
                 ),
                 marked AS (

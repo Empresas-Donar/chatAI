@@ -468,9 +468,22 @@ function apiDetail(data, status) {
 
 function isMalDigitado(row) {
   if (!row || typeof row !== 'object') return false;
+  if (row.revisado) return false;
   if (row.mal_digitado) return true;
   const flags = Array.isArray(row.flags) ? row.flags : [];
   return flags.some(f => MAL_DIGITADO_FLAGS.has(f));
+}
+
+function warnFields(row) {
+  const out = new Set();
+  if (!row || row.revisado) return out;
+  const flags = Array.isArray(row.flags) ? row.flags : [];
+  flags.forEach(f => {
+    const mapped = FLAG_TO_FIELD[f];
+    if (!mapped) return;
+    (Array.isArray(mapped) ? mapped : [mapped]).forEach(field => out.add(field));
+  });
+  return out;
 }
 
 function userKey(row) {
@@ -765,7 +778,8 @@ function renderPlanSection(planes) {
 }
 
 function renderCompactCard(r, idx) {
-  const allFlags = Array.isArray(r.flags) ? r.flags : [];
+  const reviewed = Boolean(r.revisado);
+  const allFlags = reviewed ? [] : (Array.isArray(r.flags) ? r.flags : []);
   const flags = allFlags.filter(f => MAL_DIGITADO_FLAGS.has(f));
   const bad = isMalDigitado(r);
   const reasonsByField = {};
@@ -838,6 +852,7 @@ function renderCompactCard(r, idx) {
       <div><span>Aprobación</span>${estadoBadge(r.estado)}</div>
     </div>
     <div class="tcal-rec-line">
+      ${reviewed ? '<span class="tcal-badge tcal-badge-reviewed">Revisada</span>' : ''}
       ${bad ? '<span class="tcal-badge tcal-badge-bad">Mal digitado</span>' : ''}
       ${duplicated ? `<span class="tcal-badge tcal-badge-dup">Duplicada · ${fmtInt(copies)} iguales</span>` : ''}
       <span>${meta.map(esc).join(' · ')}</span>
@@ -845,6 +860,7 @@ function renderCompactCard(r, idx) {
     ${fieldChips ? `<div class="tcal-rec-flags">Campos: ${fieldChips}</div>` : ''}
     <div class="tcal-actions">
       <button type="button" class="btn btn-secondary btn-sm" data-edit-rec>Editar</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-review-rec="${id}" data-revisado="${reviewed ? '0' : '1'}">${reviewed ? 'Quitar marca' : 'Está bien'}</button>
       <button type="button" class="btn btn-secondary btn-sm tcal-btn-danger" data-delete-rec="${id}">Eliminar</button>
     </div>
     ${editForm(r, editing)}
@@ -852,24 +868,27 @@ function renderCompactCard(r, idx) {
   </article>`;
 }
 
-function estadoSelect(current) {
+function estadoSelect(current, warn) {
   const cur = String(current || '').trim();
   const options = ['Aprobado', 'Pendiente'];
   if (cur && !options.some(o => o.toLowerCase() === cur.toLowerCase())) options.push(cur);
-  return `<select class="tcal-edit" data-field="estado">${options.map(o => {
+  const cls = warn ? 'tcal-edit is-warn' : 'tcal-edit';
+  return `<select class="${cls}" data-field="estado">${options.map(o => {
     const sel = o.toLowerCase() === cur.toLowerCase() ? ' selected' : '';
     return `<option value="${esc(o)}"${sel}>${esc(o)}</option>`;
   }).join('')}</select>`;
 }
 
 function editForm(r, open) {
+  const warned = warnFields(r);
   const inputs = EDIT_FIELDS.map(([key, label]) => {
     const raw = r[key];
     const valueAttr = (raw === null || raw === undefined) ? '' : esc(raw);
-    return `<label class="tcal-edit-field"><span>${esc(label)}</span><input class="tcal-edit" data-field="${key}" value="${valueAttr}" /></label>`;
+    const cls = warned.has(key) ? 'tcal-edit is-warn' : 'tcal-edit';
+    return `<label class="tcal-edit-field"><span>${esc(label)}</span><input class="${cls}" data-field="${key}" value="${valueAttr}" /></label>`;
   }).join('');
   return `<form class="tcal-edit-form"${open ? '' : ' hidden'}>
-    <label class="tcal-edit-field"><span>Aprobación</span>${estadoSelect(r.estado)}</label>
+    <label class="tcal-edit-field"><span>Aprobación</span>${estadoSelect(r.estado, warned.has('estado'))}</label>
     ${inputs}
     <p class="tcal-edit-note">Costo Empresa y el nombre del CC se recalculan al guardar. El id del registro no se cambia.</p>
     <div class="tcal-save-row">
@@ -1038,6 +1057,48 @@ function renderRecordSection(rows, solo) {
   return `${bill}${blocks}`;
 }
 
+function replaceDayRow(id, row) {
+  const idx = dayRows.findIndex(r => String(r.id_Resumen) === String(id));
+  if (idx < 0 || !row) return;
+  const iso = String(row.fecha_iso || '').slice(0, 10);
+  if (openFecha && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso !== openFecha) {
+    dayRows.splice(idx, 1);
+  } else {
+    dayRows[idx] = row;
+  }
+}
+
+async function markRegistro(id, revisado) {
+  const fecha = openFecha;
+  try {
+    const res = await fetch(
+      '/api/tarjas/registros-campo/' + encodeURIComponent(id) + '/revision',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revisado }),
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(apiDetail(data, res.status));
+    replaceDayRow(id, data.row);
+    const panel = document.getElementById('day-panel');
+    const overlay = document.getElementById('day-overlay');
+    panel.hidden = false;
+    overlay.hidden = false;
+    document.getElementById('day-panel-sub').textContent = daySummaryText();
+    renderDayRecords();
+    await queryData({ quiet: true });
+    if (openFecha === fecha) {
+      panel.hidden = false;
+      overlay.hidden = false;
+    }
+  } catch (e) {
+    console.error(e);
+    window.alert(e.message || 'No se pudo guardar la marca.');
+  }
+}
+
 async function deleteRegistro(id) {
   const row = dayRows.find(r => String(r.id_Resumen) === String(id));
   const who = row && row.trabajador ? row.trabajador : 'esta tarja';
@@ -1100,16 +1161,7 @@ async function saveRegistro(id, article) {
     if (!res.ok) {
       throw new Error(apiDetail(data, res.status));
     }
-    const row = data.row;
-    const idx = dayRows.findIndex(r => String(r.id_Resumen) === String(id));
-    if (idx >= 0 && row) {
-      const iso = String(row.fecha_iso || '').slice(0, 10);
-      if (openFecha && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso !== openFecha) {
-        dayRows.splice(idx, 1);
-      } else {
-        dayRows[idx] = row;
-      }
-    }
+    replaceDayRow(id, data.row);
     document.getElementById('day-panel-sub').textContent = daySummaryText();
     renderDayRecords();
   } catch (e) {
@@ -1286,6 +1338,14 @@ document.getElementById('day-panel-body').addEventListener('click', (e) => {
   if (cancelBtn) {
     const form = cancelBtn.closest('.tcal-edit-form');
     if (form) form.hidden = true;
+    return;
+  }
+  const reviewBtn = e.target.closest('[data-review-rec]');
+  if (reviewBtn) {
+    markRegistro(
+      reviewBtn.getAttribute('data-review-rec'),
+      reviewBtn.getAttribute('data-revisado') === '1',
+    );
     return;
   }
   const delBtn = e.target.closest('[data-delete-rec]');

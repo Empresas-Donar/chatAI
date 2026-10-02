@@ -97,7 +97,8 @@ def test_136_mal_digitado_patch_is_allowlisted():
     assert "payload.get(\"fields\")" in block
     assert "@router.post" not in block
     assert "@router.put" not in block
-    assert "INSERT INTO" not in block.upper()
+    assert re.search(r"INSERT INTO appsheet\.tarjas_pagos\b", block, re.I) is None
+    assert "INSERT INTO appsheet.tarjas_pagos_revision" in block
     js_cal = CAL_JS.read_text(encoding="utf-8")
     assert "tcal-edit" in js_cal
     assert "Guardar corrección" in js_cal
@@ -128,6 +129,10 @@ def test_136_calendario_audit_flow_edit_and_delete():
     body = js[start:end]
     assert "¿Estás seguro de eliminar?" in body
     assert "openTarjaEditor" in js
+    assert "Está bien" in js
+    assert "tarjas_pagos_revision" in block
+    assert "/revision" in js
+    assert "is-warn" in js
     for col in ("labor", "fecha", "contratista", "nombre_campo", "tipo_pago", "id_supervisor"):
         assert f'"{col}"' in block
     assert "closeDayPanel" not in body
@@ -512,5 +517,92 @@ def test_136_delete_one_duplicate_then_rollback():
                 (list(ids),),
             )
             assert cur.fetchone()[0] == 0
+    finally:
+        check.close()
+
+
+def test_136_revision_mark_hides_mal_digitado_then_rollback():
+    """A reviewed row drops out of the red count. Nothing is committed."""
+    id_resumen = "cursor-revision-probe"
+    conn = _probe_conn()
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS appsheet.tarjas_pagos_revision (
+                    id_resumen TEXT NOT NULL PRIMARY KEY,
+                    revisado BOOLEAN NOT NULL DEFAULT TRUE,
+                    revisado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO appsheet.tarjas_pagos (
+                  "id_Resumen", id_supervisor, fecha, nombre_campo,
+                  labor, contratista, trabajador, rut_trabajador, estado
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    id_resumen,
+                    "Probe Supervisor",
+                    "01/01/2099 00:00:00",
+                    "PROBE CAMPO",
+                    "PROBE LABOR",
+                    "PROBE CONTRATISTA",
+                    "Probe  Trabajador",
+                    "1.2",
+                    "Aprobado",
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO appsheet.tarjas_pagos_revision (id_resumen, revisado)
+                VALUES (%s, TRUE)
+                ON CONFLICT (id_resumen) DO UPDATE
+                SET revisado = EXCLUDED.revisado, revisado_en = now()
+                """,
+                (id_resumen,),
+            )
+            cur.execute(
+                """
+                SELECT
+                  (position('  ' in trabajador) > 0) AS mal,
+                  COALESCE(rev.revisado, false) AS revisado
+                FROM appsheet.tarjas_pagos
+                LEFT JOIN appsheet.tarjas_pagos_revision rev
+                  ON rev.id_resumen = "id_Resumen"
+                WHERE "id_Resumen" = %s
+                """,
+                (id_resumen,),
+            )
+            mal, revisado = cur.fetchone()
+            assert mal is True
+            assert revisado is True
+        conn.rollback()
+    finally:
+        conn.rollback()
+        conn.close()
+
+    check = _probe_conn()
+    check.set_session(readonly=True, autocommit=True)
+    try:
+        with check.cursor() as cur:
+            cur.execute(
+                'SELECT COUNT(*) FROM appsheet.tarjas_pagos WHERE "id_Resumen" = %s',
+                (id_resumen,),
+            )
+            assert cur.fetchone()[0] == 0
+            cur.execute("SELECT to_regclass('appsheet.tarjas_pagos_revision')")
+            if cur.fetchone()[0]:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM appsheet.tarjas_pagos_revision
+                    WHERE id_resumen = %s
+                    """,
+                    (id_resumen,),
+                )
+                assert cur.fetchone()[0] == 0
     finally:
         check.close()
