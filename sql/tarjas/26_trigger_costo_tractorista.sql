@@ -66,6 +66,19 @@ ON CONFLICT (id) DO UPDATE SET
     con_operador = EXCLUDED.con_operador,
     carnet = EXCLUDED.carnet;
 
+-- Cristian González Dinamarca no es tractorista. Una versión anterior lo
+-- dejó en el esquema y su bono de septiembre quedó como tipo Tractorista.
+DELETE FROM appsheet.tarjas_esquema_tractorista
+ WHERE id = 'cristian-dinamarca'
+    OR trabajador = 'Cristian González Dinamarca';
+
+UPDATE appsheet.tarjas_pagos
+   SET tipo_pago = 'Bono',
+       total_tractor = 0
+ WHERE labor = 'Bono mensual'
+   AND trabajador = 'Cristian González Dinamarca'
+   AND lower(trim(COALESCE(tipo_pago, ''))) = 'tractorista';
+
 -- El catálogo de AppSheet tenía Operario Solo en 30.000. La regla es 60.000.
 UPDATE appsheet.tarjas_labor
    SET valor = 60000,
@@ -197,6 +210,21 @@ DECLARE
     v_duplicada BOOLEAN;
 BEGIN
     IF lower(trim(COALESCE(NEW.tipo_pago, ''))) IS DISTINCT FROM 'tractorista' THEN
+        RETURN NEW;
+    END IF;
+
+    -- Bono mensual de un tractorista: el monto lo escribe el fanout.
+    -- No se reemplaza por la tarifa de la jornada.
+    IF lower(trim(COALESCE(NEW.labor, ''))) = 'bono mensual' THEN
+        v_manual := COALESCE(
+            NULLIF(NEW.total_pagar, 0),
+            NULLIF(NEW.total_trabajado, 0),
+            NULLIF(NEW.total_tractor, 0),
+            0
+        );
+        NEW.total_tractor := v_manual;
+        NEW.total_trabajado := v_manual;
+        NEW.total_pagar := v_manual;
         RETURN NEW;
     END IF;
 

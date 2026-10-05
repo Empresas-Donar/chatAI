@@ -10,7 +10,10 @@
 --   1. Helper que resuelve nombre_campo (nombre real → id_campo → CC)
 --   2. INSERT fanout usa el helper y lo persiste en ambas tablas
 --   3. UPDATE fanout sincroniza la fila espejo en tarjas_pagos
---   4. Backfill de filas existentes con nombre_campo vacío o numérico
+--   4. Si el trabajador está en tarjas_esquema_tractorista, el espejo
+--      sale como tipo_pago Tractorista con total_tractor = monto, para
+--      que entre en Detalle / OC / pivote de tractoristas.
+--   5. Backfill de nombre_campo vacío o numérico y de bonos tractorista
 -- =============================================================================
 
 BEGIN;
@@ -59,10 +62,18 @@ CREATE OR REPLACE FUNCTION appsheet.fanout_bono_mensual_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
     v_id_resumen TEXT;
+    v_tractorista BOOLEAN;
 BEGIN
     NEW.mes := date_trunc('month', NEW.mes)::date;
     NEW.nombre_campo := appsheet.resolve_bono_nombre_campo(NEW.nombre_campo, NEW.id_cc);
     v_id_resumen := substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+    SELECT EXISTS (
+        SELECT 1
+          FROM appsheet.tarjas_esquema_tractorista e
+         WHERE e.trabajador = NEW.trabajador
+           AND e.desde <= (NEW.mes + INTERVAL '1 month - 1 day')::date
+           AND (e.hasta IS NULL OR e.hasta >= NEW.mes)
+    ) INTO v_tractorista;
 
     INSERT INTO appsheet.tarjas_pagos (
         "id_Resumen",
@@ -99,13 +110,13 @@ BEGIN
         NEW.contratista,
         NEW.trabajador,
         NEW.rut_trabajador,
-        'Bono',
+        CASE WHEN v_tractorista THEN 'Tractorista' ELSE 'Bono' END,
         0,
         0,
         0,
         0,
         0,
-        0,
+        CASE WHEN v_tractorista THEN NEW.monto ELSE 0 END,
         0,
         0,
         0,
@@ -126,9 +137,18 @@ $$;
 
 CREATE OR REPLACE FUNCTION appsheet.fanout_bono_mensual_update()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_tractorista BOOLEAN;
 BEGIN
     NEW.mes := date_trunc('month', NEW.mes)::date;
     NEW.nombre_campo := appsheet.resolve_bono_nombre_campo(NEW.nombre_campo, NEW.id_cc);
+    SELECT EXISTS (
+        SELECT 1
+          FROM appsheet.tarjas_esquema_tractorista e
+         WHERE e.trabajador = NEW.trabajador
+           AND e.desde <= (NEW.mes + INTERVAL '1 month - 1 day')::date
+           AND (e.hasta IS NULL OR e.hasta >= NEW.mes)
+    ) INTO v_tractorista;
 
     IF NEW.id_resumen_pagos IS NOT NULL THEN
         UPDATE appsheet.tarjas_pagos
@@ -138,6 +158,8 @@ BEGIN
             contratista    = NEW.contratista,
             trabajador     = NEW.trabajador,
             rut_trabajador = NEW.rut_trabajador,
+            tipo_pago       = CASE WHEN v_tractorista THEN 'Tractorista' ELSE 'Bono' END,
+            total_tractor   = CASE WHEN v_tractorista THEN NEW.monto ELSE 0 END,
             total_trabajado = NEW.monto,
             total_pagar     = NEW.monto,
             estado          = CASE
@@ -168,5 +190,42 @@ SET nombre_campo = appsheet.resolve_bono_nombre_campo(p.nombre_campo, p.cuartel_
 WHERE p.labor = 'Bono mensual'
   AND appsheet.resolve_bono_nombre_campo(p.nombre_campo, p.cuartel_cc)
       IS DISTINCT FROM p.nombre_campo;
+
+-- Bonos de tractoristas: suman en reportes de tractorista (total_tractor).
+UPDATE appsheet.tarjas_pagos p
+SET tipo_pago = 'Tractorista',
+    total_tractor = COALESCE(
+        NULLIF(p.total_pagar, 0),
+        NULLIF(p.total_trabajado, 0),
+        p.total_tractor,
+        0
+    ),
+    total_trabajado = COALESCE(
+        NULLIF(p.total_pagar, 0),
+        NULLIF(p.total_trabajado, 0),
+        p.total_tractor,
+        0
+    ),
+    total_pagar = COALESCE(
+        NULLIF(p.total_pagar, 0),
+        NULLIF(p.total_trabajado, 0),
+        p.total_tractor,
+        0
+    )
+FROM appsheet.tarjas_bono_mensual b
+WHERE p."id_Resumen" = b.id_resumen_pagos
+  AND EXISTS (
+      SELECT 1
+        FROM appsheet.tarjas_esquema_tractorista e
+       WHERE e.trabajador = b.trabajador
+         AND e.desde <= (b.mes + INTERVAL '1 month - 1 day')::date
+         AND (e.hasta IS NULL OR e.hasta >= b.mes)
+  )
+  AND (
+      lower(trim(COALESCE(p.tipo_pago, ''))) IS DISTINCT FROM 'tractorista'
+      OR COALESCE(p.total_tractor, 0) IS DISTINCT FROM COALESCE(
+          NULLIF(p.total_pagar, 0), NULLIF(p.total_trabajado, 0), p.total_tractor, 0
+      )
+  );
 
 COMMIT;
