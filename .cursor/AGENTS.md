@@ -71,6 +71,22 @@ The goal is zero structural changes so AppSheet can connect without breaking for
 
 Generate production-ready SQL strictly following these rules.
 
+## App de cosecha (`appsheet.cosecha_*`)
+
+Dos apps ya cargadas: `cosecha_isla_de_maipo_*` y `cosecha_zuniga_*`.
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` (`sql/cosecha/01_zuniga_cuadrillas.sql`): una fila de `contratistas` por contratista y N filas en `cuadrillas`. En Isla, `contratistas` sigue siendo una fila por cuadrilla.
+
+Al consultar o migrar:
+
+- 1 fila de `escaneo` = 1 capacho. `bins` es el id del bin, no una cantidad (`SUM(bins)` es incorrecto).
+- `escaneo.codigo_qr` une con `qr.qr_trabajador`. `escaneo.cuartel` es el nombre; `registro.cuartel` es `id_cuartel`.
+- Comillar `"Fecha_Solo_Dia"` solo en Isla. En Zúñiga la columna es `fecha_solo_dia`.
+- No unificar tipos entre predios: `escaneo.bins` es NUMERIC en Isla y TEXT en Zúñiga; `tratos.piso_garantizado_diario` es INTEGER en Isla y BOOLEAN en Zúñiga.
+- No leer ni copiar `usuarios.contraseña`.
+- No mezclar con tarjas ni aplicar `total_empresa()` (1.45 / 1.50).
+
+Detalle de grano, joins y volúmenes: `CLAUDE.md` y `.cursor/CLAUDE_CONTEXT.md`.
+
 ## Long Term Vision
 
 - CLI command:

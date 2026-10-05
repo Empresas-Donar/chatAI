@@ -106,6 +106,62 @@ appsheet.tarjas_reporte        — VIEW consolidada para reportes
 appsheet.tarjas_reporte_odoo   — VIEW formato Odoo (product_id, CC JSON)
 ```
 
+### Cosecha (escaneo de capachos)
+
+AppSheet de cosecha en campo, distinta de tarjas (pago por labor) y de `despacho_ingreso` (ingreso de fruta en kg). No hay controlador ni vistas. El corte contratista/cuadrillas de Zúñiga está en `sql/cosecha/01_zuniga_cuadrillas.sql`. El prompt del chat todavía no documenta estas tablas.
+
+Hay dos apps, una por predio. Isla tiene 8 tablas; Zúñiga agrega `cuadrillas`:
+
+| Sufijo | Rol |
+|---|---|
+| `cosecha_isla_de_maipo_*` | Isla de Maipo |
+| `cosecha_zuniga_*` | Zúñiga |
+
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas`.
+
+**Grano:**
+
+- 1 fila de `escaneo` = 1 capacho. El trabajador escanea su QR (`codigo_qr`, formato `cos;` + código) contra un bin. El pago observado es `COUNT(escaneos) × precio_trato_aplicado` (CLP por capacho). `piso_aplicado` es el piso diario garantizado en CLP, copiado del trato vigente.
+- `bins` es el número del bin, no una cantidad. No hacer `SUM(bins)`. El catálogo `*_bins` está vacío; el id vive en `escaneo.bins` y `registro.bins`.
+- `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo.
+- `tratos` fija `precio_capacho` y `piso_garantizado_diario` por cuartel y `fecha_inicio_vigencia`. El escaneo congela el precio en `precio_trato_aplicado`.
+- `qr` es la credencial del trabajador (`qr_trabajador` = `escaneo.codigo_qr`).
+- En Isla de Maipo, `contratistas` es una fila por cuadrilla activa (la columna `cuadrillas` es el número de cuadrilla, no un conteo).
+- En Zúñiga, `contratistas` es una fila por contratista y `cosecha_zuniga_cuadrillas` es la hija. `contratistas.cuadrillas` quedó obsoleta y en NULL. Registro, QR y escaneo guardan el nombre del contratista, no el id. El número de cuadrilla es único dentro del contratista y puede repetirse entre contratistas.
+- `cuarteles` es el catálogo (`id_cuartel` tipo `C05`, `nombre_cuartel`, `variedad`).
+- `usuarios` es el login AppSheet (`rol`: `Admin` o `Cuadrilla`). La columna `contraseña` tiene secretos en texto plano: no seleccionarla, no loguearla, no incluirla en exports.
+
+**Joins:**
+
+- `escaneo.codigo_qr` = `qr.qr_trabajador` (no `qr.id_qr`).
+- `escaneo.cuartel` = `cuarteles.nombre_cuartel` (texto del cuartel).
+- `registro.cuartel` = `cuarteles.id_cuartel`. El nombre va en `registro.nombre_cuartel_texto`.
+
+Estos montos no pasan por `tarjas_empresa.py`. No usar × 1.45 ni × 1.50.
+
+**Volúmenes revisados (2026-10-01):**
+
+| Predio | Escaneos | Qué se cosechó |
+|---|---|---|
+| Isla de Maipo | 2.087 | Cereza Rainier, 27–28 nov 2025 (precio $700, piso $15.000). 3 filas de prueba el 27 may 2026. |
+| Zúñiga | 21.386 | Ciruela D'Agen, cuartel `CIRUELOS ADULTOS CC-860`, 22–29 ene 2026. Precio baja 1.300 → 1.000. 386 filas con `bins = 'Manual'` (carga sin QR). |
+
+Isla: 12 cuarteles (cerezo Sweet Aryana, Santina, Glow, Lapins, Rainier, Red Pacific, y ciruela D'Agen). Zúñiga: 16 cuarteles (cerezo, kiwi, ciruelo). El catálogo es más amplio que los días con escaneo.
+
+**Deriva de esquema entre predios** (consultar con el tipo real; no unificar a ciegas):
+
+| Columna | Isla de Maipo | Zúñiga |
+|---|---|---|
+| `escaneo.bins` | `NUMERIC` | `TEXT` (incluye `'Manual'`) |
+| Día sin hora en escaneo | `"Fecha_Solo_Dia"` (comillar; mayúsculas) | `fecha_solo_dia` |
+| `registro.fecha_y_hora` | `TEXT` (ISO y `DD/MM/YYYY` mezclados) | `TIMESTAMP` |
+| `tratos.fecha_inicio_vigencia` | `TEXT` `DD/MM/YYYY` | `DATE` |
+| `tratos.piso_garantizado_diario` | `INTEGER` (15.000) | `BOOLEAN` (siempre false: el piso se perdió en la migración) |
+| `qr.cuadrilla` | `NUMERIC` | `TEXT` |
+| `contratistas.cuadrillas` | `INTEGER` (número de esa fila) | `NUMERIC`, obsoleta y en NULL |
+
+Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas` y `cosecha_zuniga_cuadrillas`. Hay `id_escaneo` y `id_qr` duplicados en filas incompletas (`fecha` nula). `id_fecha` es `YYYYMMDDHHMMSS` cuando viene poblado; en Isla hay al menos un valor corrupto por formato Excel. `registro.unnamed` es el timestamp crudo del navegador AppSheet.
+
 ### Chat IA
 Interfaz conversacional con streaming SSE. Gemini 2.5-pro decide qué SQL ejecutar, usa MCP para BigQuery y `pg_client` para PostgreSQL. Tiene auto-corrección: si el SQL falla, el LLM reintenta.
 
@@ -177,6 +233,9 @@ Convención de PKs: `TEXT NOT NULL PRIMARY KEY` (nunca SERIAL — AppSheet gener
 | **codigo_labor** | Código de producto Odoo para la labor |
 | **Despacho** | Transferencia de stock / guía DTE |
 | **Orden de Aplicación** | Aplicación de agroquímico en campo |
+| **Capacho** | Canasto de cosecha. En `cosecha_*_escaneo`, una fila = un capacho escaneado |
+| **Bin (cosecha)** | Identificador del bin en `escaneo.bins` / `registro.bins`. No es una cantidad |
+| **Cuadrilla** | Grupo de cosecha dentro de un contratista (`cuadrilla` / `cuadrillas`) |
 
 ---
 
