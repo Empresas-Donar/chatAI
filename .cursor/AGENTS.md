@@ -74,7 +74,7 @@ Generate production-ready SQL strictly following these rules.
 ## App de cosecha (`appsheet.cosecha_*`)
 
 Dos apps ya cargadas: `cosecha_isla_de_maipo_*` y `cosecha_zuniga_*`.
-Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` (`sql/cosecha/01_zuniga_cuadrillas.sql`): una fila de `contratistas` por contratista y N filas en `cuadrillas`. En Isla, `contratistas` sigue siendo una fila por cuadrilla.
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` (`sql/cosecha/01_zuniga_cuadrillas.sql`) y `cuadrilla_cuartel` (`sql/cosecha/02_zuniga_cuadrilla_cuartel.sql`): una fila de `contratistas` por contratista, N cuadrillas, y cada cuadrilla con N cuarteles. El mismo cuartel puede estar en otra cuadrilla. En Isla, `contratistas` sigue siendo una fila por cuadrilla.
 
 Al consultar o migrar:
 

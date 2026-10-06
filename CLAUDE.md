@@ -117,7 +117,7 @@ Hay dos apps, una por predio. Isla tiene 8 tablas; Zúñiga agrega `cuadrillas`:
 | `cosecha_isla_de_maipo_*` | Isla de Maipo |
 | `cosecha_zuniga_*` | Zúñiga |
 
-Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas`.
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` y `cuadrilla_cuartel`.
 
 **Grano:**
 
@@ -129,6 +129,7 @@ Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usu
 - En Isla de Maipo, `contratistas` es una fila por cuadrilla activa (la columna `cuadrillas` es el número de cuadrilla, no un conteo).
 - En Zúñiga, `contratistas` es una fila por contratista y `cosecha_zuniga_cuadrillas` es la hija. `contratistas.cuadrillas` quedó obsoleta y en NULL. Registro, QR y escaneo guardan el nombre del contratista, no el id. El número de cuadrilla es único dentro del contratista y puede repetirse entre contratistas.
 - `cuarteles` es el catálogo (`id_cuartel` tipo `C05`, `nombre_cuartel`, `variedad`).
+- En Zúñiga, `cosecha_zuniga_cuadrilla_cuartel` une cuadrilla y cuartel. Una cuadrilla tiene N cuarteles y el mismo cuartel puede estar en otra cuadrilla. La pareja no se repite (`sql/cosecha/02_zuniga_cuadrilla_cuartel.sql`).
 - `usuarios` es el login AppSheet (`rol`: `Admin` o `Cuadrilla`). La columna `contraseña` tiene secretos en texto plano: no seleccionarla, no loguearla, no incluirla en exports.
 
 **Joins:**
@@ -160,7 +161,7 @@ Isla: 12 cuarteles (cerezo Sweet Aryana, Santina, Glow, Lapins, Rainier, Red Pac
 | `qr.cuadrilla` | `NUMERIC` | `TEXT` |
 | `contratistas.cuadrillas` | `INTEGER` (número de esa fila) | `NUMERIC`, obsoleta y en NULL |
 
-Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas` y `cosecha_zuniga_cuadrillas`. Hay `id_escaneo` y `id_qr` duplicados en filas incompletas (`fecha` nula). `id_fecha` es `YYYYMMDDHHMMSS` cuando viene poblado; en Isla hay al menos un valor corrupto por formato Excel. `registro.unnamed` es el timestamp crudo del navegador AppSheet.
+Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas`, `cosecha_zuniga_cuadrillas`, `cosecha_zuniga_cuarteles` y `cosecha_zuniga_cuadrilla_cuartel`. Hay `id_escaneo` y `id_qr` duplicados en filas incompletas (`fecha` nula). `id_fecha` es `YYYYMMDDHHMMSS` cuando viene poblado; en Isla hay al menos un valor corrupto por formato Excel. `registro.unnamed` es el timestamp crudo del navegador AppSheet.
 
 ### Chat IA
 Interfaz conversacional con streaming SSE. Gemini 2.5-pro decide qué SQL ejecutar, usa MCP para BigQuery y `pg_client` para PostgreSQL. Tiene auto-corrección: si el SQL falla, el LLM reintenta.

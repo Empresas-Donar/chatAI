@@ -72,6 +72,7 @@ Grano:
 - `escaneo.codigo_qr` (`cos;` + código) = `qr.qr_trabajador`.
 - `escaneo.cuartel` = `cuarteles.nombre_cuartel`. `registro.cuartel` = `cuarteles.id_cuartel`.
 - En Isla, `contratistas.cuadrillas` es el número de cuadrilla, no un conteo. En Zúñiga, `contratistas` es una fila por contratista y `cosecha_zuniga_cuadrillas` es la hija (`sql/cosecha/01_zuniga_cuadrillas.sql`). La columna `contratistas.cuadrillas` de Zúñiga está obsoleta y en NULL. El número es único dentro del contratista y puede repetirse entre contratistas. Registro, QR y escaneo guardan el nombre, no el id.
+- En Zúñiga, `cosecha_zuniga_cuadrilla_cuartel` relaciona cuadrilla y cuartel (`sql/cosecha/02_zuniga_cuadrilla_cuartel.sql`). Una cuadrilla tiene varios cuarteles y el mismo cuartel puede estar en otra cuadrilla.
 - `usuarios.contraseña` es secreto en texto plano. No seleccionarla.
 
 No aplicar factores de Costo Empresa (1.45 / 1.50). Eso es solo tarjas.
@@ -82,6 +83,6 @@ Deriva entre predios (no normalizar nombres):
 - Isla el día sin hora es `"Fecha_Solo_Dia"` (comillar). Zúñiga es `fecha_solo_dia`.
 - Isla `tratos.piso_garantizado_diario` es INTEGER. Zúñiga es BOOLEAN (el piso se perdió).
 - Isla `registro.fecha_y_hora` y `tratos.fecha_inicio_vigencia` son TEXT. Zúñiga usa TIMESTAMP / DATE.
-- Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas` y `cosecha_zuniga_cuadrillas`. Hay ids duplicados en filas incompletas.
+- Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas`, `cosecha_zuniga_cuadrillas`, `cosecha_zuniga_cuarteles` y `cosecha_zuniga_cuadrilla_cuartel`. Hay ids duplicados en filas incompletas.
 
 Datos con escaneo (revisión 2026-10-01): Isla, cereza Rainier 27–28 nov 2025 (~2.000 capachos, $700, piso $15.000). Zúñiga, ciruela D'Agen 22–29 ene 2026 (~21.000 capachos, precio 1.300 → 1.000). El catálogo de cuarteles es más amplio que los días cosechados.
