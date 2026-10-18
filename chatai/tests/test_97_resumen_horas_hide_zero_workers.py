@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import controllers.tarjas_controller as tc
 
 CONTRATISTA_A = "HERBI ML SPA"
-CONTRATISTA_B = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA_B = "SERVICIOS AGRICOLAS PLP SPA"
 FECHA_INICIO = "2026-07-01"
 FECHA_TERMINO = "2026-08-10"
 

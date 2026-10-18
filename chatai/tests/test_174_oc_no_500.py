@@ -25,7 +25,7 @@ import controllers.purchase_orders_controller as poc  # noqa: E402
 
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
 AGRO = "AGROSERVICIOS C Y G SPA"
-BONHOMIA = "MULTISERVICIOS BONHOMIA SPA"
+BONHOMIA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 
 

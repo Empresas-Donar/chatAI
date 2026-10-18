@@ -4,7 +4,7 @@ total_pagar (issue #160). AppSheet leaves total_pagar at 0 on many rows.
 
 Reported URL:
   /tarjas/detalle?fil-from=2026-09-02&fil-to=2026-09-08
-  &fil-contratista=MULTISERVICIOS BONHOMIA SPA&fil-empresa=ZUÑIGA
+  &fil-contratista=SERVICIOS AGRICOLAS PLP SPA&fil-empresa=ZUÑIGA
 
 Run:
     python -m pytest chatai/tests/test_detalle_resumen_total_empresa.py -v
@@ -33,7 +33,7 @@ DETAIL_HTML = (
 )
 DETAIL_JS = Path(__file__).parent.parent / "frontend" / "static" / "tarjas_detail.js"
 
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 FECHA_INICIO = "2026-09-02"
 FECHA_TERMINO = "2026-09-08"

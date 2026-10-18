@@ -7,7 +7,7 @@ from total_pagar or trabajado+comisión.
 
 Reported URL:
   /odoo/tarjas?inp-date-from=2026-09-02&inp-date-to=2026-09-08
-  &inp-contratista=MULTISERVICIOS BONHOMIA SPA&inp-empresa=ZUÑIGA
+  &inp-contratista=SERVICIOS AGRICOLAS PLP SPA&inp-empresa=ZUÑIGA
 
 Run:
     python -m pytest chatai/tests/test_oc_cuadra_detalle_costo_empresa.py -v
@@ -26,7 +26,7 @@ import controllers.purchase_orders_controller as poc  # noqa: E402
 import controllers.tarjas_controller as tc  # noqa: E402
 import tarjas_empresa as te  # noqa: E402
 
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 FECHA_INICIO = "2026-09-02"
 FECHA_TERMINO = "2026-09-08"

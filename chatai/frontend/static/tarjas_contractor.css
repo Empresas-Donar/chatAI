@@ -131,11 +131,18 @@
   font-size: 12px;
 }
 
-/* Daily value above the highlight threshold (Hora ponderada 9h report) */
-.tc-pivot .cell-value.cell-highlight {
+/* Payment above tarjas_configuracion.umbral_diario (Detalle contratista
+   and Hora ponderada 9h). Beats the total-column background. */
+.tc-pivot tbody td.cell-highlight {
   background: #ffedd5;
   color: #c2410c;
   font-weight: 700;
+}
+
+.tc-umbral-note {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* Tipo de pago badges */
@@ -220,6 +227,11 @@
   background: #fffbeb;
   color: var(--text);
   padding: 4px 10px;
+}
+.tc-pivot tbody td.cell-total.cell-highlight {
+  background: #ffedd5;
+  color: #c2410c;
+  font-weight: 700;
 }
 
 /* Totals footer row */

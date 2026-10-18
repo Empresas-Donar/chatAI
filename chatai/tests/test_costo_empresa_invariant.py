@@ -5,7 +5,7 @@ Detalle, Orden de compra, Orden de facturación, Nota de crédito and the
 Dashboard tarjas totals must agree for the same Aprobado week. AppSheet
 total_pagar / trabajado+comisión is not the billed amount.
 
-Reported week: MULTISERVICIOS BONHOMIA SPA / ZUÑIGA / 2026-09-02..08
+Reported week: SERVICIOS AGRICOLAS PLP SPA / ZUÑIGA / 2026-09-02..08
 
 Run:
     python -m pytest chatai/tests/test_costo_empresa_invariant.py -v
@@ -27,7 +27,7 @@ import controllers.purchase_orders_controller as poc  # noqa: E402
 import controllers.tarjas_controller as tc  # noqa: E402
 import tarjas_empresa as te  # noqa: E402
 
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 FECHA_INICIO = "2026-09-02"
 FECHA_TERMINO = "2026-09-08"

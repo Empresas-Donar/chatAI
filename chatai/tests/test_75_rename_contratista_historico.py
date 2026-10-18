@@ -83,10 +83,10 @@ def test_75_other_contratistas_untouched_isolation(conn):
         cur.execute(
             """
             SELECT contratista, count(*) FROM appsheet.tarjas_pagos
-            WHERE contratista IN ('HERBI ML SPA', 'MULTISERVICIOS BONHOMIA SPA')
+            WHERE contratista IN ('HERBI ML SPA', 'SERVICIOS AGRICOLAS PLP SPA')
             GROUP BY contratista
             """
         )
         counts = dict(cur.fetchall())
     assert counts.get("HERBI ML SPA", 0) > 0
-    assert counts.get("MULTISERVICIOS BONHOMIA SPA", 0) > 0
+    assert counts.get("SERVICIOS AGRICOLAS PLP SPA", 0) > 0

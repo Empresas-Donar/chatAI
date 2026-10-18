@@ -104,7 +104,7 @@ async function queryData() {
 
     _lastData = data;
     document.getElementById('empty-state').style.display = 'none';
-    renderPivot(data.columns, data.rows);
+    renderPivot(data.columns, data.rows, data.umbral_diario);
     document.getElementById('pivot-section').style.display = '';
     _hasData = true;
   } catch (e) {
@@ -117,7 +117,18 @@ async function queryData() {
 }
 
 // ── Build & render the pivot table ────────────────────────────────────
-function renderPivot(columns, rows) {
+function renderPivot(columns, rows, umbralDiario) {
+  const umbral = Number(umbralDiario);
+  const mark = (val) => Number.isFinite(umbral) && val > umbral;
+  const note = document.getElementById('pivot-umbral');
+  if (note) {
+    if (Number.isFinite(umbral)) {
+      note.hidden = false;
+      note.textContent = `En naranja: montos sobre ${fmtCLP.format(umbral)}.`;
+    } else {
+      note.hidden = true;
+    }
+  }
   const mergeLabores = document.getElementById('chk-merge-labores')?.checked ?? false;
   const workerCol = detectWorkerCol(columns);
   if (!workerCol) {
@@ -218,13 +229,15 @@ function renderPivot(columns, rows) {
       const val = g.byDate[d];
       colTotals[d] += val || 0;
       if (val != null && val > 0) {
-        html += `<td class="cell-value">${fmtCLPDec.format(val)}</td>`;
+        const cls = mark(val) ? 'cell-value cell-highlight' : 'cell-value';
+        html += `<td class="${cls}">${fmtCLPDec.format(val)}</td>`;
       } else {
         html += `<td class="cell-value"><span class="cell-dash">-</span></td>`;
       }
     });
 
-    html += `<td class="cell-total">${fmtCLP.format(rowTotal)}</td>`;
+    const totalCls = mark(rowTotal) ? 'cell-total cell-highlight' : 'cell-total';
+    html += `<td class="${totalCls}">${fmtCLP.format(rowTotal)}</td>`;
     html += '</tr>';
   });
 
@@ -299,7 +312,7 @@ document.getElementById('btn-apply').addEventListener('click', () => {
 });
 
 document.getElementById('chk-merge-labores').addEventListener('change', () => {
-  if (_lastData) renderPivot(_lastData.columns, _lastData.rows);
+  if (_lastData) renderPivot(_lastData.columns, _lastData.rows, _lastData.umbral_diario);
 });
 document.getElementById('btn-excel').addEventListener('click', () => {
   window.location.href = '/api/tarjas/contratista/download-excel?' + currentParams();

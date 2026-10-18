@@ -8,7 +8,7 @@ resolved from the cost center so the Empresa filter still matches.
 
 Reported URL:
   /tarjas/detalle?fil-from=2026-08-26&fil-to=2026-09-01
-    &fil-contratista=MULTISERVICIOS BONHOMIA SPA&fil-empresa=ZUÑIGA
+    &fil-contratista=SERVICIOS AGRICOLAS PLP SPA&fil-empresa=ZUÑIGA
 
 Run:
     python -m pytest chatai/tests/test_158_detalle_bonos_pendiente.py -v
@@ -31,7 +31,7 @@ TARJAS_CTRL = (
     Path(__file__).parent.parent / "backend" / "controllers" / "tarjas_controller.py"
 )
 
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 FECHA_INICIO = "2026-08-26"
 FECHA_TERMINO = "2026-09-01"

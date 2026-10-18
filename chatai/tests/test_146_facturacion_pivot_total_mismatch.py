@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import controllers.purchase_orders_controller as poc
 
 # Real reported case (issue #146).
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "KONTROLAG"
 FECHA_INICIO = "2026-08-19"
 FECHA_TERMINO = "2026-08-25"

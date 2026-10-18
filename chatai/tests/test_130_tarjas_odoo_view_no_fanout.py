@@ -15,7 +15,7 @@ that gets exported/imported into Odoo, even though both matches resolved to
 the identical codigo_labor.
 
 Concretely: id_labor='8.1' had two catalog rows ("ASEO Y ORNATO" and "TALLER
-Y BODEGA"). Every "ASEO Y ORNATO" jornada for MULTISERVICIOS BONHOMIA SPA /
+Y BODEGA"). Every "ASEO Y ORNATO" jornada for SERVICIOS AGRICOLAS PLP SPA /
 ZUÑIGA and SERVICIOS AGRICOLAS GUTIERREZ II SPA / ZUÑIGA (2026-08-12 to
 2026-08-18) was exported twice, inflating the Excel total by $496,500 and
 $150,000 respectively versus what the on-screen "visor" (GET
@@ -59,7 +59,7 @@ from db import get_connection
 # Real case that surfaced the bug (issue #130), used as a concrete regression
 # fixture — kept narrow (one contractor/campo/date range) rather than
 # asserting over the whole table, to stay fast and stable over time.
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 NOMBRE_CAMPO = "ZUÑIGA"
 FECHA_INICIO = "2026-08-12"
 FECHA_TERMINO = "2026-08-18"

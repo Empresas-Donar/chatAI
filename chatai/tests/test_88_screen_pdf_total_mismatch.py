@@ -39,7 +39,7 @@ import tarjas_empresa as te
 #   tipo_pago='Bono'   ->  2 rows / $103,643   (dropped by the pre-fix bug)
 #   tipo_pago='trato'  ->  7 rows / $3,233,983
 # full total = 8,117,826 ; pre-fix (buggy) screen total = 8,014,183
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 EMPRESA = "ZUÑIGA"
 FECHA_INICIO = "2026-07-29"
 FECHA_TERMINO = "2026-08-04"
@@ -235,7 +235,7 @@ class TestPurchaseOrderPctDelTotal:
     def test_pct_pago_is_share_of_grand_total(self, conn):
         result = run(
             poc.get_purchase_order(
-                contratista="MULTISERVICIOS BONHOMIA SPA",
+                contratista="SERVICIOS AGRICOLAS PLP SPA",
                 empresa="ZUÑIGA",
                 fecha_inicio="2026-09-02",
                 fecha_termino="2026-09-08",

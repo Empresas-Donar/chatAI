@@ -51,7 +51,7 @@ from tarjas_empresa import total_empresa  # noqa: E402
 import controllers.purchase_orders_controller as poc  # noqa: E402
 
 # Concrete case from the original bug report (a week with the $65.290 delta)
-CONTRATISTA = "MULTISERVICIOS BONHOMIA SPA"
+CONTRATISTA = "SERVICIOS AGRICOLAS PLP SPA"
 NOMBRE_CAMPO = "ZUÑIGA"
 FECHA_INICIO = "2026-08-12"
 FECHA_TERMINO = "2026-08-18"

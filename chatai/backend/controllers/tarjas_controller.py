@@ -100,6 +100,90 @@ def _fmt_clp(v) -> str:
         return "-"
 
 
+# Detalle contratista marks a payment when it is strictly above this amount.
+# The live value is appsheet.tarjas_configuracion.umbral_diario (row 'general');
+# this default only applies before that row exists.
+_UMBRAL_DIARIO_DEFAULT = 30000
+_UMBRAL_HIGHLIGHT_STYLE = "background:#ffedd5;color:#c2410c;font-weight:bold;"
+
+
+def _exceeds_umbral_diario(amount, umbral) -> bool:
+    """True when a displayed payment is strictly above the configured cap."""
+    try:
+        return float(amount) > float(umbral)
+    except (TypeError, ValueError):
+        return False
+
+
+def _read_umbral_diario(cur) -> int:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'appsheet'
+          AND table_name = 'tarjas_configuracion'
+        """
+    )
+    if cur.fetchone() is None:
+        return _UMBRAL_DIARIO_DEFAULT
+    cur.execute(
+        """
+        SELECT "umbral_diario"
+        FROM appsheet.tarjas_configuracion
+        WHERE "id_configuracion" = 'general'
+        """
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return _UMBRAL_DIARIO_DEFAULT
+    value = int(row[0])
+    if value < 0:
+        return _UMBRAL_DIARIO_DEFAULT
+    return value
+
+
+def _umbral_diario(cur) -> int:
+    """Daily/line cap for Detalle contratista, in CLP.
+
+    Stored in appsheet.tarjas_configuracion so it can change without a code
+    edit. A missing table, a bad value, or a failed read keeps the default.
+
+    The read runs inside a savepoint. The bulk PDF and the contratista query
+    share this cursor; a failed SELECT would otherwise abort the whole
+    transaction and take the rest of the request down with it.
+    """
+    try:
+        cur.execute("SAVEPOINT umbral_diario")
+    except Exception:
+        logger.warning("umbral_diario savepoint failed; using default", exc_info=True)
+        return _UMBRAL_DIARIO_DEFAULT
+    try:
+        return _read_umbral_diario(cur)
+    except Exception:
+        logger.warning(
+            "umbral_diario unreadable; using %s",
+            _UMBRAL_DIARIO_DEFAULT,
+            exc_info=True,
+        )
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT umbral_diario")
+        except Exception:
+            logger.warning("umbral_diario savepoint rollback failed", exc_info=True)
+        return _UMBRAL_DIARIO_DEFAULT
+    finally:
+        try:
+            cur.execute("RELEASE SAVEPOINT umbral_diario")
+        except Exception:
+            logger.warning("umbral_diario savepoint release failed", exc_info=True)
+
+
+def _marked_money_td(css_class: str, width_style: str, text: str, mark: bool) -> str:
+    style = width_style
+    if mark:
+        style += ";" + _UMBRAL_HIGHLIGHT_STYLE
+    return f'<td class="{css_class}" style="{style}">{text}</td>'
+
+
 def _fmt_date_display(iso: str) -> str:
     try:
         d = datetime.date.fromisoformat(iso)
@@ -1745,6 +1829,7 @@ async def get_tarjas_contractor_data(
 
     try:
         with conn.cursor() as cur:
+            umbral = _umbral_diario(cur)
             cur.execute(
                 f"SELECT *, fecha::date::text AS fecha "
                 f"FROM appsheet.tarjas_pagos {where} "
@@ -1760,6 +1845,7 @@ async def get_tarjas_contractor_data(
         "columns": cols,
         "rows": rows,
         "count": len(rows),
+        "umbral_diario": umbral,
     }
 
 
@@ -2784,6 +2870,7 @@ async def download_tarjas_contratista_excel(
     _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
     try:
         with conn.cursor() as cur:
+            umbral = _umbral_diario(cur)
             cur.execute(
                 f"""
                 SELECT trabajador, contratista, labor, tipo_pago,
@@ -2829,6 +2916,8 @@ async def download_tarjas_contratista_excel(
     ws.cell(1, total_col_idx).alignment = align_hdr
 
     money = "#,##0"
+    highlight_fill = PatternFill("solid", fgColor="FFEDD5")
+    highlight_font = Font(bold=True, color="C2410C")
     for i, ((trabajador, cont, lab, tipo), g) in enumerate(groups.items(), 2):
         costo_hora = round(g["total_ganado"] / g["total_horas"]) if g["total_horas"] > 0 else None
         ws.cell(i, 1, trabajador)
@@ -2843,10 +2932,16 @@ async def download_tarjas_contratista_excel(
             if val:
                 dc = ws.cell(i, j, val)
                 dc.number_format = money
+                if _exceeds_umbral_diario(val, umbral):
+                    dc.fill = highlight_fill
+                    dc.font = highlight_font
         tc = ws.cell(i, total_col_idx, g["total_ganado"])
         tc.number_format = money
-        from openpyxl.styles import Font
-        tc.font = Font(bold=True)
+        if _exceeds_umbral_diario(g["total_ganado"], umbral):
+            tc.fill = highlight_fill
+            tc.font = highlight_font
+        else:
+            tc.font = Font(bold=True)
 
     fixed_widths = [28, 22, 28, 14, 12]
     date_widths = [10] * len(dates)
@@ -4167,6 +4262,7 @@ def _build_contratista_html(
         params,
     )
     rows = _rows_to_dicts(cur)
+    umbral = _umbral_diario(cur)
 
     def clp(v):
         return f"${float(v):,.0f}".replace(",", ".")
@@ -4196,6 +4292,16 @@ def _build_contratista_html(
         for d in dates
     )
 
+    def money_td(css_class, width, amount, *, dash_if_empty=False):
+        if dash_if_empty and not amount:
+            return f'<td class="{css_class}" style="{width}">-</td>'
+        return _marked_money_td(
+            css_class,
+            width,
+            clp(amount),
+            _exceeds_umbral_diario(amount, umbral),
+        )
+
     rows_html = ""
     prev_worker = None
     for (trabajador, cont, labor_, tipo), g in groups.items():
@@ -4210,8 +4316,7 @@ def _build_contratista_html(
             else "-"
         )
         date_cells = "".join(
-            f'<td class="num" style="{w["date"]}">'
-            f'{clp(g["by_date"][d]) if g["by_date"].get(d) else "-"}</td>'
+            money_td("num", w["date"], g["by_date"].get(d), dash_if_empty=True)
             for d in dates
         )
         rows_html += (
@@ -4221,7 +4326,7 @@ def _build_contratista_html(
             f"<td style='{w['tipo']}'>{tipo or ''}</td>"
             f"<td class='num' style='{w['rate']}'>{costo_hora}</td>"
             f"{date_cells}"
-            f"<td class='total' style='{w['total']}'>{clp(g['total_ganado'])}</td></tr>"
+            f"{money_td('total', w['total'], g['total_ganado'])}</tr>"
         )
 
     header = _pdf_header(
@@ -4238,6 +4343,7 @@ def _build_contratista_html(
     )
     return f"""
     {header}
+    <p class="pdf-note">En naranja: montos sobre {_fmt_clp(umbral)}.</p>
     <table class="pivot-wide" style="{w['table']}"><thead>
       <tr>
         <th style="{w['worker']}">Trabajador</th>
