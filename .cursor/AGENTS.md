@@ -74,14 +74,14 @@ Generate production-ready SQL strictly following these rules.
 ## App de cosecha (`appsheet.cosecha_*`)
 
 Dos apps ya cargadas: `cosecha_isla_de_maipo_*` y `cosecha_zuniga_*`.
-Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` (`sql/cosecha/01_zuniga_cuadrillas.sql`) y `cuadrilla_cuartel` (`sql/cosecha/02_zuniga_cuadrilla_cuartel.sql`): una fila de `contratistas` por contratista, N cuadrillas, y cada cuadrilla con N cuarteles. El mismo cuartel puede estar en otra cuadrilla. En Isla, `contratistas` sigue siendo una fila por cuadrilla.
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` (`sql/cosecha/01_zuniga_cuadrillas.sql`), `configuracion` (`sql/cosecha/12_zuniga_configuracion_key_value.sql`) y `tratos_cuarteles` (`sql/cosecha/16_zuniga_tratos_cuarteles.sql`): una fila de `contratistas` por contratista y N cuadrillas. La cuadrilla no se relaciona con cuarteles. Un trato sí: varios cuarteles por la tabla intermedia. `configuracion` es una sola fila (`general`) con la espera entre capachos. En Isla, `contratistas` sigue siendo una fila por cuadrilla.
 
 Al consultar o migrar:
 
 - 1 fila de `escaneo` = 1 capacho. `bins` es el id del bin, no una cantidad (`SUM(bins)` es incorrecto).
-- `escaneo.codigo_qr` une con `qr.qr_trabajador`. `escaneo.cuartel` es el nombre; `registro.cuartel` es `id_cuartel`.
+- `escaneo.id_qr` une con `qr.id_qr`. `escaneo.cuartel` guarda `id_cuartel`. En registro la columna es `id_cuartel`.
 - Comillar `"Fecha_Solo_Dia"` solo en Isla. En Zúñiga la columna es `fecha_solo_dia`.
-- No unificar tipos entre predios: `escaneo.bins` es NUMERIC en Isla y TEXT en Zúñiga; `tratos.piso_garantizado_diario` es INTEGER en Isla y BOOLEAN en Zúñiga.
+- No unificar tipos entre predios: `escaneo.bins` es NUMERIC en Isla y TEXT en Zúñiga; `tratos.piso_garantizado_diario` es INTEGER en Isla y NUMERIC(12,0) CLP en Zúñiga.
 - No leer ni copiar `usuarios.contraseña`.
 - No mezclar con tarjas ni aplicar `total_empresa()` (1.45 / 1.50).
 

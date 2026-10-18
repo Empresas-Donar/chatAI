@@ -117,26 +117,26 @@ Hay dos apps, una por predio. Isla tiene 8 tablas; Zúñiga agrega `cuadrillas`:
 | `cosecha_isla_de_maipo_*` | Isla de Maipo |
 | `cosecha_zuniga_*` | Zúñiga |
 
-Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas` y `cuadrilla_cuartel`.
+Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usuarios`, `bins`. Zúñiga además tiene `cuadrillas`, `configuracion` y `tratos_cuarteles`.
 
 **Grano:**
 
 - 1 fila de `escaneo` = 1 capacho. El trabajador escanea su QR (`codigo_qr`, formato `cos;` + código) contra un bin. El pago observado es `COUNT(escaneos) × precio_trato_aplicado` (CLP por capacho). `piso_aplicado` es el piso diario garantizado en CLP, copiado del trato vigente.
 - `bins` es el número del bin, no una cantidad. No hacer `SUM(bins)`. El catálogo `*_bins` está vacío; el id vive en `escaneo.bins` y `registro.bins`.
-- `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo.
-- `tratos` fija `precio_capacho` y `piso_garantizado_diario` por cuartel y `fecha_inicio_vigencia`. El escaneo congela el precio en `precio_trato_aplicado`.
+- `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo. `registro.cultivo` copia el cultivo del cuartel (`sql/cosecha/19_zuniga_registro_cultivo.sql`).
+- `tratos` fija `precio_capacho` y `piso_garantizado_diario` por `fecha_inicio_vigencia`. En Zúñiga un trato cubre varios cuarteles por `cosecha_zuniga_tratos_cuarteles` (`sql/cosecha/16_zuniga_tratos_cuarteles.sql`). `cuartel_id` y `nombre_cuartel` quedan en el trato sin ser la relación. El escaneo congela el precio en `precio_trato_aplicado`.
 - `qr` es la credencial del trabajador (`qr_trabajador` = `escaneo.codigo_qr`).
 - En Isla de Maipo, `contratistas` es una fila por cuadrilla activa (la columna `cuadrillas` es el número de cuadrilla, no un conteo).
-- En Zúñiga, `contratistas` es una fila por contratista y `cosecha_zuniga_cuadrillas` es la hija. `contratistas.cuadrillas` quedó obsoleta y en NULL. Registro, QR y escaneo guardan el nombre del contratista, no el id. El número de cuadrilla es único dentro del contratista y puede repetirse entre contratistas.
-- `cuarteles` es el catálogo (`id_cuartel` tipo `C05`, `nombre_cuartel`, `variedad`).
-- En Zúñiga, `cosecha_zuniga_cuadrilla_cuartel` une cuadrilla y cuartel. Una cuadrilla tiene N cuarteles y el mismo cuartel puede estar en otra cuadrilla. La pareja no se repite (`sql/cosecha/02_zuniga_cuadrilla_cuartel.sql`).
+- En Zúñiga, `contratistas` es una fila por contratista y `cosecha_zuniga_cuadrillas` es la hija (`sql/cosecha/06_zuniga_acceso_cuadrilla.sql`). La app puede guardar la lista EnumList (`1 , 2 , 3`) o el padre y después la cuadrilla hija; en los dos casos se crea el acceso (usuario = número, clave de 4 dígitos). El número es único en toda la empresa. Si se quita de la lista, la cuadrilla queda libre (`id_contratista` NULL) y su acceso inactivo. Registro, QR y escaneo guardan el nombre del contratista, no el id.
+- `cuarteles` es el catálogo (`id_cuartel` tipo `C05`, `nombre_cuartel`, `variedad`, `cultivo`). En Zúñiga `cultivo` es `cereza` o `ciruela`; ciruela solo en C06, `CC-860 CIRUELOS ADULTOS` (`sql/cosecha/18_zuniga_cuarteles_cultivo.sql`). La cuadrilla no se relaciona con cuarteles. El cuartel de un escaneo o de un registro es el lugar del capacho.
 - `usuarios` es el login AppSheet (`rol`: `Admin` o `Cuadrilla`). La columna `contraseña` tiene secretos en texto plano: no seleccionarla, no loguearla, no incluirla en exports.
 
 **Joins:**
 
-- `escaneo.codigo_qr` = `qr.qr_trabajador` (no `qr.id_qr`).
-- `escaneo.cuartel` = `cuarteles.nombre_cuartel` (texto del cuartel).
-- `registro.cuartel` = `cuarteles.id_cuartel`. El nombre va en `registro.nombre_cuartel_texto`.
+- `escaneo.id_qr` = `qr.id_qr`. `codigo_qr` se conserva y coincide con `qr.qr_trabajador`.
+- `escaneo.id_registro` = `registro.id_registro`. `escaneo.id_cuadrilla` y `escaneo.id_contratista` apuntan a la cuadrilla y al contratista. `escaneo.cuartel` guarda `id_cuartel`.
+- `registro.id_cuartel` = `cuarteles.id_cuartel`. El nombre sigue en `registro.nombre_cuartel_texto`. `registro.id_contratista` apunta al contratista. `registro.id_cuadrilla` a la cuadrilla.
+- `registro.id_bins` = `bins.id_bins`. `id_bins` es un id de sistema; el código (`bins`, por ejemplo 1212) puede repetirse. No hay FK de registro ni de escaneo a bins (`sql/cosecha/17_zuniga_registro_sin_fk_bins.sql`, `sql/cosecha/20_zuniga_escaneo_sin_fk_bins.sql`): AppSheet crea bin, registro y escaneo en el mismo guardado.
 
 Estos montos no pasan por `tarjas_empresa.py`. No usar × 1.45 ni × 1.50.
 
@@ -157,11 +157,11 @@ Isla: 12 cuarteles (cerezo Sweet Aryana, Santina, Glow, Lapins, Rainier, Red Pac
 | Día sin hora en escaneo | `"Fecha_Solo_Dia"` (comillar; mayúsculas) | `fecha_solo_dia` |
 | `registro.fecha_y_hora` | `TEXT` (ISO y `DD/MM/YYYY` mezclados) | `TIMESTAMP` |
 | `tratos.fecha_inicio_vigencia` | `TEXT` `DD/MM/YYYY` | `DATE` |
-| `tratos.piso_garantizado_diario` | `INTEGER` (15.000) | `BOOLEAN` (siempre false: el piso se perdió en la migración) |
+| `tratos.piso_garantizado_diario` | `INTEGER` (15.000) | `NUMERIC(12,0)` CLP (`sql/cosecha/15_zuniga_piso_garantizado.sql`) |
 | `qr.cuadrilla` | `NUMERIC` | `TEXT` |
-| `contratistas.cuadrillas` | `INTEGER` (número de esa fila) | `NUMERIC`, obsoleta y en NULL |
+| `contratistas.cuadrillas` | `INTEGER` (número de esa fila) | `TEXT` EnumList (`1 , 2 , 3`) |
 
-Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas`, `cosecha_zuniga_cuadrillas`, `cosecha_zuniga_cuarteles` y `cosecha_zuniga_cuadrilla_cuartel`. Hay `id_escaneo` y `id_qr` duplicados en filas incompletas (`fecha` nula). `id_fecha` es `YYYYMMDDHHMMSS` cuando viene poblado; en Isla hay al menos un valor corrupto por formato Excel. `registro.unnamed` es el timestamp crudo del navegador AppSheet.
+Isla y el resto de tablas de Zúñiga siguen sin PK, FK ni índices. Excepción: `cosecha_zuniga_contratistas`, `cosecha_zuniga_cuadrillas`, `cosecha_zuniga_cuarteles` y `cosecha_zuniga_usuarios`. Hay `id_escaneo` y `id_qr` duplicados en filas incompletas (`fecha` nula). `id_fecha` es `YYYYMMDDHHMMSS` cuando viene poblado; en Isla hay al menos un valor corrupto por formato Excel. `registro.unnamed` es el timestamp crudo del navegador AppSheet.
 
 ### Chat IA
 Interfaz conversacional con streaming SSE. Gemini 2.5-pro decide qué SQL ejecutar, usa MCP para BigQuery y `pg_client` para PostgreSQL. Tiene auto-corrección: si el SQL falla, el LLM reintenta.

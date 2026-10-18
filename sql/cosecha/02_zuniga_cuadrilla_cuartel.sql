@@ -1,8 +1,11 @@
 -- =============================================================================
--- Cosecha Zúñiga: cuadrilla ↔ cuartel (varios a varios)
+-- OBSOLETO. La cuadrilla ya no se relaciona con cuarteles.
+-- sql/cosecha/07_zuniga_sin_cuadrilla_cuartel.sql elimina esta tabla.
+-- No volver a crearla.
 --
--- Una cuadrilla trabaja N cuarteles. El mismo cuartel puede estar en otra
--- cuadrilla. La pareja (cuadrilla, cuartel) no se repite.
+-- Histórico: cuadrilla ↔ cuartel (varios a varios).
+-- Una cuadrilla trabajaba N cuarteles. El mismo cuartel podía estar en otra
+-- cuadrilla. La pareja (cuadrilla, cuartel) no se repetía.
 --
 -- AppSheet guarda el padre primero y después los hijos, así que la base no
 -- exige cuarteles en el mismo INSERT de la cuadrilla. En el formulario de
