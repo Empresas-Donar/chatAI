@@ -78,6 +78,13 @@
         ]
       },
       {
+        "label": "Cosecha",
+        "icon": "harvest",
+        "children": [
+          { "href": "/cosecha/detalle", "label": "Detalle operacional" },
+        ]
+      },
+      {
         "label": "Descargas",
         "icon": "download",
         "children": [
@@ -272,7 +279,7 @@
 </nav>
 
 {% set _gf_path = request.url.path %}
-{% set show_global_filters = _gf_path.startswith('/tarjas') or _gf_path.startswith('/dashboard') or _gf_path.startswith('/reportes') or _gf_path.startswith('/odoo') or _gf_path.startswith('/despacho') %}
+{% set show_global_filters = _gf_path.startswith('/tarjas') or _gf_path.startswith('/dashboard') or _gf_path.startswith('/reportes') or _gf_path.startswith('/odoo') or _gf_path.startswith('/despacho') or _gf_path.startswith('/cosecha') %}
 {% if show_global_filters %}
 {% set _gf_attrs %}{% block gf_attrs %}{% endblock %}{% endset %}
 <div class="global-filter-bar" id="global-filter-bar" {{ _gf_attrs|trim }}>

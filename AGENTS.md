@@ -108,7 +108,7 @@ appsheet.tarjas_reporte_odoo   — VIEW formato Odoo (product_id, CC JSON)
 
 ### Cosecha (escaneo de capachos)
 
-AppSheet de cosecha en campo, distinta de tarjas (pago por labor) y de `despacho_ingreso` (ingreso de fruta en kg). No hay controlador ni vistas. El corte contratista/cuadrillas de Zúñiga está en `sql/cosecha/01_zuniga_cuadrillas.sql`. El prompt del chat todavía no documenta estas tablas.
+AppSheet de cosecha en campo, distinta de tarjas (pago por labor) y de `despacho_ingreso` (ingreso de fruta en kg). El detalle operacional de rendimiento está en `/cosecha/detalle` (`cosecha_controller.py`): capachos, trato y piso, con los filtros globales de empresa, contratista y fechas. El corte contratista/cuadrillas de Zúñiga está en `sql/cosecha/01_zuniga_cuadrillas.sql`. El prompt del chat todavía no documenta estas tablas.
 
 Hay dos apps, una por predio. Isla tiene 8 tablas; Zúñiga agrega `cuadrillas`:
 
@@ -123,7 +123,7 @@ Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usu
 
 - 1 fila de `escaneo` = 1 capacho. El trabajador escanea su QR (`codigo_qr`, formato `cos;` + código) contra un bin. El pago observado es `COUNT(escaneos) × precio_trato_aplicado` (CLP por capacho). `piso_aplicado` es el piso diario garantizado en CLP, copiado del trato vigente.
 - `bins` es el número del bin, no una cantidad. No hacer `SUM(bins)`. El catálogo `*_bins` está vacío; el id vive en `escaneo.bins` y `registro.bins`.
-- `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo. `registro.cultivo` copia el cultivo del cuartel (`sql/cosecha/19_zuniga_registro_cultivo.sql`).
+- `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo. `registro.cultivo` copia el cultivo del cuartel (`sql/cosecha/19_zuniga_registro_cultivo.sql`). En registro, QR y escaneo, `id_cuadrilla` e `id_contratista` son obligatorios (`sql/cosecha/21_zuniga_cuadrilla_contratista_obligatorios.sql`).
 - `tratos` fija `precio_capacho` y `piso_garantizado_diario` por `fecha_inicio_vigencia`. En Zúñiga un trato cubre varios cuarteles por `cosecha_zuniga_tratos_cuarteles` (`sql/cosecha/16_zuniga_tratos_cuarteles.sql`). `cuartel_id` y `nombre_cuartel` quedan en el trato sin ser la relación. El escaneo congela el precio en `precio_trato_aplicado`.
 - `qr` es la credencial del trabajador (`qr_trabajador` = `escaneo.codigo_qr`).
 - En Isla de Maipo, `contratistas` es una fila por cuadrilla activa (la columna `cuadrillas` es el número de cuadrilla, no un conteo).
@@ -136,7 +136,7 @@ Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usu
 - `escaneo.id_qr` = `qr.id_qr`. `codigo_qr` se conserva y coincide con `qr.qr_trabajador`.
 - `escaneo.id_registro` = `registro.id_registro`. `escaneo.id_cuadrilla` y `escaneo.id_contratista` apuntan a la cuadrilla y al contratista. `escaneo.cuartel` guarda `id_cuartel`.
 - `registro.id_cuartel` = `cuarteles.id_cuartel`. El nombre sigue en `registro.nombre_cuartel_texto`. `registro.id_contratista` apunta al contratista. `registro.id_cuadrilla` a la cuadrilla.
-- `registro.id_bins` = `bins.id_bins`. `id_bins` es un id de sistema; el código (`bins`, por ejemplo 1212) puede repetirse. No hay FK de registro ni de escaneo a bins (`sql/cosecha/17_zuniga_registro_sin_fk_bins.sql`, `sql/cosecha/20_zuniga_escaneo_sin_fk_bins.sql`): AppSheet crea bin, registro y escaneo en el mismo guardado.
+- `registro.id_bins` = `bins.id_bins`. `id_bins` es un id de sistema; el código (`bins`, por ejemplo 1212) puede repetirse. Al insertar el registro, el trigger crea la fila en `bins` con el número y el trato vigente de ese cuartel y fecha (`sql/cosecha/25_zuniga_registro_crea_bin.sql`). Sin trato, el registro se rechaza. El escaneo hereda `id_trato`, el número, `precio_trato_aplicado` y `piso_aplicado` desde ese trato (`sql/cosecha/26_zuniga_escaneo_congela_trato.sql`).
 
 Estos montos no pasan por `tarjas_empresa.py`. No usar × 1.45 ni × 1.50.
 

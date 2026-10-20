@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle operacional — Cosecha{% endblock %}
+
+{% block page_filters %}
+<div class="global-filter-actions">
+  <button class="btn btn-primary btn-sm" id="btn-apply">Consultar</button>
+  <button class="btn btn-secondary btn-sm" id="btn-excel" disabled>Excel</button>
+</div>
+{% endblock %}
+
+{% block advanced_filters %}
+<div class="adv-modal-field">
+  <label for="fil-cuartel">Cuartel</label>
+  <select id="fil-cuartel"><option value="">Todos</option></select>
+</div>
+<div class="adv-modal-field">
+  <label for="fil-cuadrilla">Cuadrilla</label>
+  <select id="fil-cuadrilla"><option value="">Todas</option></select>
+</div>
+<div class="adv-modal-field">
+  <label for="fil-cultivo">Cultivo</label>
+  <select id="fil-cultivo"><option value="">Todos</option></select>
+</div>
+{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/cosecha_detalle.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container cosecha-detalle">
+
+  <div class="page-header">
+    <div>
+      <h1>Detalle operacional</h1>
+      <p>Rendimiento de cosecha — capachos, trato y piso por cuadrilla y trabajador</p>
+    </div>
+  </div>
+
+  <div class="summary-grid" id="summary-cards" style="display:none">
+    <div class="summary-card">
+      <div class="card-label">Capachos</div>
+      <div class="card-main" id="card-capachos">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">Trabajadores</div>
+      <div class="card-main" id="card-trabajadores">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">Capachos / persona-día</div>
+      <div class="card-main" id="card-rendimiento">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">Trato</div>
+      <div class="card-main" id="card-trato">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">A pagar con piso</div>
+      <div class="card-main" id="card-pagar">—</div>
+    </div>
+  </div>
+
+  <div class="table-card" id="resumen-section" style="display:none">
+    <div class="table-header">
+      <span>Rendimiento por día</span>
+      <span class="count" id="resumen-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Predio</th>
+            <th>Contratista</th>
+            <th class="num">Cuadrilla</th>
+            <th>Cuartel</th>
+            <th>Cultivo</th>
+            <th>Variedad</th>
+            <th class="num">Trabajadores</th>
+            <th class="num">Capachos</th>
+            <th class="num">Capachos / persona</th>
+            <th class="num">Bins</th>
+            <th class="num">Trato</th>
+            <th class="num">A pagar con piso</th>
+          </tr>
+        </thead>
+        <tbody id="resumen-tbody"></tbody>
+        <tfoot id="resumen-tfoot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <div class="table-card" id="detail-section" style="display:none">
+    <div class="table-header">
+      <span>Por trabajador</span>
+      <span class="count" id="detail-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th class="num">Cuadrilla</th>
+            <th>Trabajador</th>
+            <th>Cuartel</th>
+            <th>Variedad</th>
+            <th class="num">Capachos</th>
+            <th class="num">Precio</th>
+            <th class="num">Trato</th>
+            <th class="num">Piso</th>
+            <th class="num">A pagar</th>
+          </tr>
+        </thead>
+        <tbody id="detail-tbody"></tbody>
+        <tfoot id="detail-tfoot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <div id="empty-state" class="cosecha-empty" style="display:none">
+    <h3>No hay escaneos en este período</h3>
+    <p id="empty-text">No hay capachos para la empresa, el contratista y las fechas seleccionadas.</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/cosecha_detalle.js?v={{ static_v }}"></script>
+{% endblock %}

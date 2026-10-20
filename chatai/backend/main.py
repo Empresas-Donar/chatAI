@@ -39,6 +39,7 @@ import controllers.tarjas_controller as tarjas
 import controllers.purchase_orders_controller as purchase_orders
 import controllers.sensors_controller as sensors
 import controllers.despacho_controller as despacho
+import controllers.cosecha_controller as cosecha
 import controllers.chat_controller as chat
 import controllers.looker_controller as looker
 import controllers.roles_controller as roles
@@ -132,6 +133,7 @@ tarjas.init(templates=templates)
 purchase_orders.init(templates=templates)
 sensors.init(templates=templates)
 despacho.init(templates=templates)
+cosecha.init(templates=templates)
 chat.init(templates=templates)
 looker.init(templates=templates)
 roles.init(templates=templates)
@@ -147,6 +149,7 @@ app.include_router(tarjas.router,          dependencies=_auth)
 app.include_router(purchase_orders.router, dependencies=_auth)
 app.include_router(sensors.router,         dependencies=_auth)
 app.include_router(despacho.router,        dependencies=_auth)
+app.include_router(cosecha.router,         dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
 app.include_router(looker.router,          dependencies=_auth)
 app.include_router(roles.router,           dependencies=_auth)

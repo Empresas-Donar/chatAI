@@ -20,7 +20,7 @@ const DATE_IDS = ['fil-from', 'fil-to'];
 const STORAGE_KEY = 'donar.globalFilters';
 const DATE_SESSION_KEY = 'donar.globalFilterDates';
 const FILTERS_ENDPOINT = '/api/tarjas/general/filters';
-const REPORT_PREFIXES = ['/tarjas', '/dashboard', '/reportes', '/odoo', '/despacho'];
+const REPORT_PREFIXES = ['/tarjas', '/dashboard', '/reportes', '/odoo', '/despacho', '/cosecha'];
 
 function _toLocalISO(d) {
   const y = d.getFullYear();

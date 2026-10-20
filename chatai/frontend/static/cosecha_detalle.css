@@ -1,0 +1,26 @@
+.cosecha-detalle .table-card + .table-card {
+  margin-top: 22px;
+}
+
+.cosecha-detalle .tbl tfoot td {
+  padding: 8px 12px;
+  font-weight: 700;
+  border-top: 2px solid var(--ink);
+  background: var(--bg-warm);
+}
+
+.cosecha-empty {
+  margin-top: 28px;
+  padding: 28px 8px;
+}
+
+.cosecha-empty h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.cosecha-empty p {
+  margin: 0;
+  color: var(--text-muted);
+  max-width: 52em;
+}
