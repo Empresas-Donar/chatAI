@@ -121,7 +121,7 @@ Tablas: `escaneo`, `registro`, `qr`, `tratos`, `cuarteles`, `contratistas`, `usu
 
 **Grano:**
 
-- 1 fila de `escaneo` = 1 capacho. El trabajador escanea su QR (`codigo_qr`, formato `cos;` + código) contra un bin. El pago observado es `COUNT(escaneos) × precio_trato_aplicado` (CLP por capacho). `piso_aplicado` es el piso diario garantizado en CLP, copiado del trato vigente.
+- 1 fila de `escaneo` = 1 capacho. El trabajador escanea su QR (`codigo_qr`, formato `cos;` + código) contra un bin. El pago de capachos es `COUNT(escaneos) × precio_trato_aplicado` (CLP por capacho). `piso_aplicado` es un monto diario en CLP, copiado del trato vigente: se suma una vez por persona y día. No es un mínimo que reemplace el pago de los capachos.
 - `bins` es el número del bin, no una cantidad. No hacer `SUM(bins)`. El catálogo `*_bins` está vacío; el id vive en `escaneo.bins` y `registro.bins`.
 - `registro` abre el bin (una fila por bin asignado a cuadrilla y cuartel). `registro.bins` es el mismo identificador, no un conteo. `registro.cultivo` copia el cultivo del cuartel (`sql/cosecha/19_zuniga_registro_cultivo.sql`). En registro, QR y escaneo, `id_cuadrilla` e `id_contratista` son obligatorios (`sql/cosecha/21_zuniga_cuadrilla_contratista_obligatorios.sql`).
 - `tratos` fija `precio_capacho` y `piso_garantizado_diario` por `fecha_inicio_vigencia`. En Zúñiga un trato cubre varios cuarteles por `cosecha_zuniga_tratos_cuarteles` (`sql/cosecha/16_zuniga_tratos_cuarteles.sql`). `cuartel_id` y `nombre_cuartel` quedan en el trato sin ser la relación. El escaneo congela el precio en `precio_trato_aplicado`.

@@ -157,7 +157,7 @@ def _xlsx(data: dict) -> bytes:
         "Capachos por persona",
         "Bins",
         "Trato",
-        "A pagar con piso",
+        "Trato + piso",
     ]
     detalle_headers = [
         "Fecha",
@@ -172,7 +172,7 @@ def _xlsx(data: dict) -> bytes:
         "Precio",
         "Trato",
         "Piso",
-        "A pagar",
+        "Trato + piso",
     ]
     for col, label in enumerate(resumen_headers, 1):
         cell = resumen.cell(1, col, label)

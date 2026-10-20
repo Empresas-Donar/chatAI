@@ -44,8 +44,8 @@ def predios_for_empresa(empresa: str | None) -> list[str]:
 
 
 def amount_due(trato, piso) -> int:
-    """What the worker is owed for one day: piece rate, or the floor if higher."""
-    return max(_money(trato), _money(piso))
+    """Capacho pay plus the daily floor. The floor is added once; it does not replace the piece rate."""
+    return _money(trato) + _money(piso)
 
 
 def _money(value) -> int:

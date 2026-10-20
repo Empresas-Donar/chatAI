@@ -32,10 +32,10 @@ def test_predios_for_empresa():
     assert predios_for_empresa("KONTROLAG") == []
 
 
-def test_amount_due_uses_the_higher_of_piece_rate_and_floor():
-    assert amount_due(10000, 10000) == 10000
-    assert amount_due(4000, 10000) == 10000
-    assert amount_due(12000, 10000) == 12000
+def test_amount_due_adds_the_daily_floor_to_the_piece_rate():
+    assert amount_due(10000, 10000) == 20000
+    assert amount_due(4000, 10000) == 14000
+    assert amount_due(12000, 10000) == 22000
     assert amount_due(None, None) == 0
 
 
@@ -71,7 +71,7 @@ def test_zuniga_day_squares_trato_and_floor(cur):
     assert data["totales"]["a_pagar"] == sum(r["a_pagar"] for r in rows)
     assert data["totales"]["capachos"] == sum(r["capachos"] for r in data["resumen"])
     for row in rows:
-        assert row["a_pagar"] == amount_due(row["trato"], row["piso"])
+        assert row["a_pagar"] == row["trato"] + row["piso"]
         assert row["predio"] == "Zúñiga"
         if row["precio"] is not None:
             assert row["trato"] == row["capachos"] * row["precio"]
@@ -97,7 +97,7 @@ def test_tarjas_contractor_name_matches_harvest_short_name(cur):
     assert other["totales"]["capachos"] == 0
 
 
-def test_isla_branch_keeps_floor_rule(cur):
+def test_isla_branch_adds_floor_once(cur):
     data = query_detalle(cur, "2025-11-01", "2025-11-30", empresa="ISLA DE MAIPO")
     assert data["totales"]["capachos"] > 0
     assert {r["predio"] for r in data["rows"]} == {"Isla de Maipo"}
