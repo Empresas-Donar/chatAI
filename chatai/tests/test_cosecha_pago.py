@@ -127,3 +127,103 @@ def test_harvest_odoo_line_uses_cosecha_manual_and_cuartel_center():
             assert '"411": 67.12' in daily[0]["analytic"]
     finally:
         conn.close()
+
+
+def test_bulk_reportes_include_the_same_harvest_as_the_web():
+    """The /reportes PDF builders are the web PDF. Harvest is added, not factored."""
+    import controllers.tarjas_controller as tc
+    from tarjas_empresa import annotate_detalle_resumen
+
+    fi, ft = "2026-10-26", "2026-10-27"
+    contratista = "SERVICIOS AGRICOLAS PLP SPA"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            pay = payable(cur, fi, ft, contratista, "ZUÑIGA")
+            where, params = tc._build_detalle_filters(
+                fi, ft, contratista, "ZUÑIGA", None, None, None, None
+            )
+            tarjas_only = annotate_detalle_resumen(
+                tc._query_detalle_resumen(cur, where, params)
+            )
+            detalle = tc._build_detalle_html(
+                cur, fi, ft, contratista=contratista, empresa="ZUÑIGA"
+            )
+            general = tc._build_general_html(
+                cur, fi, ft, contratista=contratista, empresa="ZUÑIGA"
+            )
+            persona = tc._build_contratista_html(
+                cur, fi, ft, contratista=contratista, empresa="ZUÑIGA"
+            )
+            resumen = tc._build_resumen_persona_html(
+                cur, fi, ft, contratista=contratista, empresa="ZUÑIGA"
+            )
+            isla = tc._build_general_html(
+                cur, fi, ft, contratista=contratista, empresa="ISLA DE MAIPO"
+            )
+    finally:
+        conn.close()
+
+    assert pay["total"] == 528_000
+    assert pay["pago_al_dia"] == 528_000
+    wrong_rows = []
+    for row in tarjas_only:
+        copy = {
+            "tipo_pago": row["tipo_pago"],
+            "total_trabajado": float(row["total_trabajado"] or 0),
+            "jornadas": row["jornadas"],
+        }
+        if tc._fold_tipo(copy["tipo_pago"]) == "al dia":
+            copy["total_trabajado"] += pay["total"]
+        wrong_rows.append(copy)
+    if not any(tc._fold_tipo(row["tipo_pago"]) == "al dia" for row in wrong_rows):
+        wrong_rows.append(
+            {"tipo_pago": "Al dia", "total_trabajado": pay["total"], "jornadas": 24}
+        )
+    wrong = sum(row["total_empresa"] for row in annotate_detalle_resumen(wrong_rows))
+    right = sum(float(row["total_empresa"]) for row in tarjas_only) + pay["total"]
+    assert tc._fmt_clp(right) in detalle
+    assert wrong != right
+    assert tc._fmt_clp(wrong) not in detalle
+    assert "COSECHA" in detalle
+    assert "Cosecha · Al día" in general
+    assert tc._fmt_clp(pay["total"]) in general
+    assert "COSECHA · al día" in persona
+    assert tc._fmt_clp(22_000) in resumen
+    assert "Cosecha · Al día" not in isla
+
+    import asyncio
+    import io
+
+    import openpyxl
+
+    async def sheet(coro):
+        resp = await coro
+        body = b""
+        async for chunk in resp.body_iterator:
+            body += chunk
+        return openpyxl.load_workbook(io.BytesIO(body)).active
+
+    detalle_xl = asyncio.run(
+        sheet(tc.download_tarjas_detalle_excel(fi, ft, contratista, "ZUÑIGA", None, None, None, None))
+    )
+    general_xl = asyncio.run(
+        sheet(tc.download_tarjas_general_excel(fi, ft, None, None, None, contratista, "ZUÑIGA"))
+    )
+    persona_xl = asyncio.run(
+        sheet(tc.download_tarjas_contratista_excel(fi, ft, contratista, "ZUÑIGA", None, None, None))
+    )
+    assert int(detalle_xl.cell(detalle_xl.max_row, 9).value) == int(right)
+    cosecha_general = sum(
+        row[7] or 0
+        for row in general_xl.iter_rows(min_row=2, values_only=True)
+        if row[2] in ("Cosecha", "Cosecha · Al día")
+    )
+    assert cosecha_general == pay["total"]
+    cosecha_persona = [
+        row
+        for row in persona_xl.iter_rows(min_row=2, values_only=True)
+        if row[2] in ("COSECHA", "COSECHA · al día")
+    ]
+    assert cosecha_persona
+    assert sum(row[-1] or 0 for row in cosecha_persona) == pay["total"]

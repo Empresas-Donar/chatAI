@@ -315,7 +315,14 @@ def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
     (kept for call-site arity); money and % never use total_pagar
     (issue #160)."""
     _ = total
-    rows = annotate_detalle_resumen(resumen)
+    # A caller that already folded harvest leaves total_empresa as
+    # the tarjas company cost plus the harvest amount. Annotating again
+    # would apply the tarjas factor to that harvest.
+    ready = bool(resumen) and all(
+        "total_empresa" in row and "recargo" in row and "pct" in row
+        for row in resumen
+    )
+    rows = list(resumen) if ready else annotate_detalle_resumen(resumen)
     total_trab = sum(float(r.get("total_trabajado") or 0) for r in rows)
     total_emp = sum(float(r.get("total_empresa") or 0) for r in rows)
     # Column widths are % of this table's own (now narrower-than-100%) box
@@ -2965,8 +2972,49 @@ async def download_tarjas_general_excel(
                 params,
             )
             rows = _rows_to_dicts(cur)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(
+                    centro_costo
+                    or labor
+                    or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+                ),
+                tipo_pago=tipo_pago,
+            )
     finally:
         conn.close()
+    if cosecha:
+        buckets: dict = {}
+        for person in cosecha["personas_dias"]:
+            labor_name = "Cosecha · Al día" if person.get("al_dia") else "Cosecha"
+            key = (
+                person["trabajador"],
+                person["contratista"],
+                labor_name,
+                person.get("tipo_pago") or "",
+            )
+            bucket = buckets.setdefault(key, {"total": 0.0, "days": 0})
+            bucket["total"] += float(person["a_pagar"] or 0)
+            bucket["days"] += 1
+        for (trab, cont, labor_name, tipo), bucket in buckets.items():
+            rows.append(
+                {
+                    "trabajador": trab,
+                    "contratista": cont,
+                    "labor": labor_name,
+                    "tipo_pago": tipo,
+                    "promedio_diario": round(bucket["total"] / bucket["days"])
+                    if bucket["days"]
+                    else None,
+                    "ganancia_hora": None,
+                    "costo_hora": None,
+                    "total": bucket["total"],
+                }
+            )
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "General"
@@ -3039,7 +3087,26 @@ async def download_tarjas_detalle_excel(
     )
     try:
         with conn.cursor() as cur:
+            resumen = annotate_detalle_resumen(
+                _query_detalle_resumen(cur, where, params)
+            )
             rows = _query_detalle_rows(cur, where, params)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(
+                    centro_costo
+                    or labor
+                    or campo
+                    or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+                ),
+                tipo_pago=tipo_pago,
+            )
+            if cosecha:
+                _append_cosecha_detalle(resumen, rows, cosecha)
     finally:
         conn.close()
     wb = openpyxl.Workbook()
@@ -3148,8 +3215,35 @@ async def download_tarjas_contratista_excel(
                 params,
             )
             rows = _rows_to_dicts(cur)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(
+                    centro_costo
+                    or labor
+                    or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+                ),
+                tipo_pago=tipo_pago,
+            )
     finally:
         conn.close()
+
+    if cosecha:
+        for person in cosecha["personas_dias"]:
+            rows.append(
+                {
+                    "trabajador": person["trabajador"],
+                    "contratista": person["contratista"],
+                    "labor": "COSECHA · al día" if person.get("al_dia") else "COSECHA",
+                    "tipo_pago": person.get("tipo_pago") or "",
+                    "fecha": person["fecha"],
+                    "total": person["a_pagar"],
+                    "horas": 0,
+                }
+            )
 
     # Build pivot in Python
     from collections import OrderedDict
@@ -4091,6 +4185,33 @@ def _build_resumen_persona_html(
         params,
     )
     rows = _rows_to_dicts(cur)
+    if _cosecha_tipo_mode(tipo_pago) is not None:
+        cosecha = _cosecha_if_open(
+            cur,
+            fecha_inicio,
+            fecha_termino,
+            contratista,
+            empresa,
+            blocked=False,
+            tipo_pago=tipo_pago,
+        )
+        if cosecha and trabajador:
+            wanted = trabajador.casefold()
+            cosecha["personas_dias"] = [
+                row
+                for row in cosecha["personas_dias"]
+                if (row["trabajador"] or "").casefold() == wanted
+            ]
+        if cosecha:
+            for person in cosecha["personas_dias"]:
+                rows.append(
+                    {
+                        "trabajador": person["trabajador"],
+                        "tipo_pago": person.get("tipo_pago") or "",
+                        "fecha": person["fecha"],
+                        "total": person["a_pagar"],
+                    }
+                )
 
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
@@ -4234,6 +4355,39 @@ def _build_general_html(
         params,
     )
     ranking_rows = _rows_to_dicts(cur)
+    cosecha = _cosecha_if_open(
+        cur,
+        fecha_inicio,
+        fecha_termino,
+        contratista,
+        empresa,
+        blocked=bool(
+            centro_costo or labor or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+        ),
+        tipo_pago=tipo_pago,
+    )
+    if cosecha and cosecha.get("pago_trato"):
+        jornadas = cosecha.get("jornadas_trato") or 0
+        labor_rows.append(
+            {
+                "labor": "Cosecha",
+                "promedio_diario": round(cosecha["pago_trato"] / jornadas) if jornadas else None,
+                "ganancia_hora": None,
+                "total_horas": None,
+                "total": cosecha["pago_trato"],
+            }
+        )
+    if cosecha and cosecha.get("pago_al_dia"):
+        jornadas = cosecha.get("jornadas_al_dia") or 0
+        labor_rows.append(
+            {
+                "labor": "Cosecha · Al día",
+                "promedio_diario": round(cosecha["pago_al_dia"] / jornadas) if jornadas else None,
+                "ganancia_hora": None,
+                "total_horas": None,
+                "total": cosecha["pago_al_dia"],
+            }
+        )
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v is not None else "—"
     fmtHrs = lambda v: f"{float(v):,.1f} h".replace(",", ".") if v else "—"
@@ -4357,8 +4511,24 @@ def _build_detalle_html(
         labor,
         campo,
     )
-    resumen = _query_detalle_resumen(cur, where, params)
+    resumen = annotate_detalle_resumen(_query_detalle_resumen(cur, where, params))
     rows = _query_detalle_rows(cur, where, params)
+    cosecha = _cosecha_if_open(
+        cur,
+        fecha_inicio,
+        fecha_termino,
+        contratista,
+        empresa,
+        blocked=bool(
+            centro_costo
+            or labor
+            or campo
+            or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+        ),
+        tipo_pago=tipo_pago,
+    )
+    if cosecha:
+        _append_cosecha_detalle(resumen, rows, cosecha)
 
     fmtCLP = lambda v: f"${float(v):,.0f}".replace(",", ".") if v else "—"
     fmtPct = lambda v: f"{float(v):.2f} %" if v is not None else "—"
@@ -4526,6 +4696,30 @@ def _build_contratista_html(
         params,
     )
     rows = _rows_to_dicts(cur)
+    cosecha = _cosecha_if_open(
+        cur,
+        fecha_inicio,
+        fecha_termino,
+        contratista,
+        empresa,
+        blocked=bool(
+            centro_costo or labor or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)
+        ),
+        tipo_pago=tipo_pago,
+    )
+    if cosecha:
+        for person in cosecha["personas_dias"]:
+            rows.append(
+                {
+                    "trabajador": person["trabajador"],
+                    "contratista": person["contratista"],
+                    "labor": "COSECHA · al día" if person.get("al_dia") else "COSECHA",
+                    "tipo_pago": person.get("tipo_pago") or "",
+                    "fecha": person["fecha"],
+                    "total": person["a_pagar"],
+                    "horas": 0,
+                }
+            )
     umbral = _umbral_diario(cur)
 
     def clp(v):
