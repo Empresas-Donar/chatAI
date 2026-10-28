@@ -110,7 +110,7 @@ async function generate() {
       total_pagar: person.a_pagar,
       total_trabajado: person.a_pagar,
       total_contratista: 0,
-      tipo_pago: person.al_dia ? 'Al día' : 'trato',
+      tipo_pago: person.tipo_pago || 'trato',
       es_cosecha: true,
       cuarteles: (person.cuarteles || []).join(', '),
     }));

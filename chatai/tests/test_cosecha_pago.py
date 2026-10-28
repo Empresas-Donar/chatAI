@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from db import get_connection  # noqa: E402
 from controllers.purchase_orders_controller import cosecha_odoo_lines  # noqa: E402
-from services.cosecha_pago import TIPO_AL_DIA, payable  # noqa: E402
+from services.cosecha_pago import payable  # noqa: E402
 from services.cosecha_rendimiento import amount_due  # noqa: E402
 
 
@@ -54,11 +54,11 @@ def test_zuniga_pay_is_piece_rate_plus_one_daily_floor():
         conn.close()
 
 
-def test_zero_piece_rate_with_floor_is_daily_pay():
+def test_floor_only_day_stays_cosecha_trato():
     """Trato dafea3cb sets the capacho price to 0 and the floor to 22000.
 
-    Those person-days are Al día. The amount is the floor once per person
-    and day, with no tarjas 50 % markup.
+    Those person-days are still cosecha a trato. The line is identified as
+    piso. The amount is the floor once per person and day, with no tarjas factor.
     """
     conn = get_connection()
     try:
@@ -70,17 +70,23 @@ def test_zero_piece_rate_with_floor_is_daily_pay():
                 "SERVICIOS AGRICOLAS PLP SPA",
                 "ZUÑIGA",
             )
-            daily = [row for row in data["personas_dias"] if row["al_dia"]]
-            assert len(daily) == 24
-            assert data["pago_al_dia"] == 24 * 22_000
-            assert data["pago_trato"] == 0
-            for row in daily:
+            solo = [row for row in data["personas_dias"] if row["solo_piso"]]
+            assert len(solo) == 24
+            assert data["pago_trato"] == 24 * 22_000
+            assert data["pago_al_dia"] == 0
+            assert data["total"] == 24 * 22_000
+            for row in solo:
                 assert row["trato"] == 0
                 assert row["piso"] == 22_000
                 assert row["a_pagar"] == 22_000
-                assert row["tipo_pago"] == TIPO_AL_DIA
-                assert row["tipo_pago"] == "Al dia"
-            assert data["total"] == sum(line["total_labor"] for line in data["lines"])
+                assert row["tipo_pago"] == "trato"
+                assert row["labor"] == "COSECHA"
+                assert row["al_dia"] is False
+            floors = [line for line in data["lines"] if line["labor"] == "COSECHA"]
+            assert {line["cc"] for line in floors} == {"894", "895"}
+            assert sum(line["total_labor"] for line in floors) == 24 * 22_000
+            assert all(line["tipo_pago"] == "trato" and not line["al_dia"] for line in floors)
+            assert all(row["labor"] == "COSECHA" for row in solo)
             piece = payable(
                 cur,
                 "2026-10-20",
@@ -92,6 +98,22 @@ def test_zero_piece_rate_with_floor_is_daily_pay():
             assert piece["pago_trato"] == piece["total"]
             assert piece["total"] > 0
             assert all(row["tipo_pago"] == "trato" for row in piece["personas_dias"])
+            gutierrez = payable(
+                cur,
+                "2026-10-21",
+                "2026-10-27",
+                "SERVICIOS AGRICOLAS GUTIERREZ II SPA",
+                "ZUÑIGA",
+            )
+            assert gutierrez["total"] == 218_400 + 360_000 + 264_000
+            assert gutierrez["pago_al_dia"] == 0
+            assert len(gutierrez["lines"]) == 1
+            line = gutierrez["lines"][0]
+            assert line["labor"] == "COSECHA"
+            assert line["tipo_pago"] == "trato"
+            assert line["cc"] == "864"
+            assert line["total_labor"] == gutierrez["total"]
+            assert "SANTINA" in (line["cultivo"] or "").upper()
     finally:
         conn.close()
 
@@ -109,9 +131,12 @@ def test_harvest_odoo_line_uses_cosecha_manual_and_cuartel_center():
             )
             assert sum(line["total"] for line in lines) == 193_000
             assert {line["product_id"] for line in lines} == {"12.2"}
-            assert {line["cc"] for line in lines} == {"894"}
-            assert all('"410": 100.00' in line["analytic"] for line in lines)
-            assert {line["price_unit"] for line in lines} == {1000, 10000}
+            assert len(lines) == 1
+            assert lines[0]["cc"] == "894"
+            assert lines[0]["qty"] == 1
+            assert lines[0]["price_unit"] == 193_000
+            assert '"410": 100.00' in lines[0]["analytic"]
+            assert lines[0]["labor"] == "COSECHA"
             daily = cosecha_odoo_lines(
                 cur,
                 "SERVICIOS AGRICOLAS PLP SPA",
@@ -120,11 +145,13 @@ def test_harvest_odoo_line_uses_cosecha_manual_and_cuartel_center():
                 "2026-10-27",
             )
             assert sum(item["total"] for item in daily) == 24 * 22_000
-            assert len(daily) == 1
-            assert daily[0]["qty"] == 24
-            assert daily[0]["price_unit"] == 22_000
-            assert '"410": 32.88' in daily[0]["analytic"]
-            assert '"411": 67.12' in daily[0]["analytic"]
+            assert {item["cc"] for item in daily} == {"894", "895"}
+            assert {item["labor"] for item in daily} == {"COSECHA"}
+            by_cc = {item["cc"]: item for item in daily}
+            assert by_cc["894"]["total"] == 173_599
+            assert by_cc["895"]["total"] == 354_401
+            assert '"410": 100.00' in by_cc["894"]["analytic"]
+            assert '"411": 100.00' in by_cc["895"]["analytic"]
     finally:
         conn.close()
 
@@ -165,7 +192,8 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
         conn.close()
 
     assert pay["total"] == 528_000
-    assert pay["pago_al_dia"] == 528_000
+    assert pay["pago_trato"] == 528_000
+    assert pay["pago_al_dia"] == 0
     wrong_rows = []
     for row in tarjas_only:
         copy = {
@@ -173,12 +201,12 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
             "total_trabajado": float(row["total_trabajado"] or 0),
             "jornadas": row["jornadas"],
         }
-        if tc._fold_tipo(copy["tipo_pago"]) == "al dia":
+        if tc._fold_tipo(copy["tipo_pago"]) == "trato":
             copy["total_trabajado"] += pay["total"]
         wrong_rows.append(copy)
-    if not any(tc._fold_tipo(row["tipo_pago"]) == "al dia" for row in wrong_rows):
+    if not any(tc._fold_tipo(row["tipo_pago"]) == "trato" for row in wrong_rows):
         wrong_rows.append(
-            {"tipo_pago": "Al dia", "total_trabajado": pay["total"], "jornadas": 24}
+            {"tipo_pago": "trato", "total_trabajado": pay["total"], "jornadas": 24}
         )
     wrong = sum(row["total_empresa"] for row in annotate_detalle_resumen(wrong_rows))
     right = sum(float(row["total_empresa"]) for row in tarjas_only) + pay["total"]
@@ -186,9 +214,13 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
     assert wrong != right
     assert tc._fmt_clp(wrong) not in detalle
     assert "COSECHA" in detalle
-    assert "Cosecha · Al día" in general
+    assert "894" in detalle and "895" in detalle
+    assert "COSECHA ·" not in detalle
+    assert "Cosecha" in general
+    assert "Cosecha · Al día" not in general
     assert tc._fmt_clp(pay["total"]) in general
-    assert "COSECHA · al día" in persona
+    assert "COSECHA" in persona
+    assert "COSECHA · piso" not in persona
     assert tc._fmt_clp(22_000) in resumen
     assert "Cosecha · Al día" not in isla
 
@@ -217,13 +249,13 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
     cosecha_general = sum(
         row[7] or 0
         for row in general_xl.iter_rows(min_row=2, values_only=True)
-        if row[2] in ("Cosecha", "Cosecha · Al día")
+        if row[2] == "COSECHA"
     )
     assert cosecha_general == pay["total"]
     cosecha_persona = [
         row
         for row in persona_xl.iter_rows(min_row=2, values_only=True)
-        if row[2] in ("COSECHA", "COSECHA · al día")
+        if row[2] == "COSECHA"
     ]
     assert cosecha_persona
     assert sum(row[-1] or 0 for row in cosecha_persona) == pay["total"]

@@ -97,8 +97,8 @@ async function queryData() {
 
     const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
       trabajador: person.trabajador,
-      labor: person.al_dia ? 'COSECHA · al día' : 'COSECHA',
-      tipo_pago: person.tipo_pago || 'Cosecha',
+      labor: person.labor || 'COSECHA',
+      tipo_pago: person.tipo_pago || 'trato',
       fecha: person.fecha,
       total_trabajado: person.a_pagar,
       horas_trabajadas: 0,

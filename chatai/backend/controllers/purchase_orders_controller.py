@@ -448,9 +448,9 @@ def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
             analytic = _analytic_export_json(valor) if valor is not None else None
             code = code or ""
             nombre = nombre or cuartel or ""
-        qty = float(item["jornadas"] or 0)
+        qty = float(item["jornadas"]) if item.get("jornadas") else 1.0
         total = float(item["total_labor"])
-        price = float(item["total_unitario"] or 0)
+        price = float(item["total_unitario"]) if item.get("total_unitario") not in (None, "") else total
         lines.append(
             {
                 "partner_id": contratista,
@@ -1716,7 +1716,7 @@ async def billing_order_pdf(
                 "cosecha": prev.get("cosecha", 0.0) + person["a_pagar"],
             }
             lugares = ", ".join(person["cuarteles"])
-            worker_tipos[worker].add("Al dia" if person.get("al_dia") else "trato")
+            worker_tipos[worker].add(person.get("tipo_pago") or "trato")
         dates = sorted(set(dates) | {p["fecha"] for p in cosecha["personas_dias"] if p["fecha"]})
 
     sorted_workers = sorted(workers.items())

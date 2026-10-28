@@ -266,7 +266,7 @@ function renderDetail(rows, count) {
       <td>${esc(String(r.centro_costo ?? ''))}</td>
       <td>${esc(r.centro_costo_nombre || '—')}</td>
       <td class="num">${r.costo_hora != null ? fmtCLP.format(r.costo_hora) : '—'}</td>
-      <td class="num">${fmtNum.format(r.jornadas ?? 0)}</td>
+      <td class="num">${r.jornadas != null ? fmtNum.format(r.jornadas) : '—'}</td>
       <td class="num">${r.total_unitario != null ? fmtCLP.format(r.total_unitario) : '—'}</td>
       <td class="num">${r.total_trabajado != null ? fmtCLP.format(r.total_trabajado) : '—'}</td>
       <td class="num">${fmtCLP.format(r.total_empresa || 0)}</td>

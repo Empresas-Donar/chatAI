@@ -1168,30 +1168,28 @@ def _add_cosecha_into_tipo(resumen: list[dict], tipo: str, amount, jornadas) -> 
 
 
 def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict) -> None:
-    """Fold harvest into Trato or Al día. Piece rate joins Trato. A day whose
-    piece rate is 0 and only the floor was set joins Al día. Neither amount
-    is multiplied by the tarjas 45 % or 50 %.
+    """Fold every harvest line into Trato. Capachos and the floor are both
+    cosecha a trato. The amount is not multiplied by the tarjas factor.
     """
     _add_cosecha_into_tipo(
-        resumen, "trato", cosecha.get("pago_trato") or 0, cosecha.get("jornadas_trato") or 0
-    )
-    _add_cosecha_into_tipo(
-        resumen, "Al dia", cosecha.get("pago_al_dia") or 0, cosecha.get("jornadas_al_dia") or 0
+        resumen, "trato", cosecha.get("total") or 0, cosecha.get("jornadas") or 0
     )
     grand = sum(float(row.get("total_trabajado") or 0) for row in resumen)
     for row in resumen:
         trab = float(row.get("total_trabajado") or 0)
         row["pct"] = round(trab / grand * 100, 2) if grand else None
+    harvest_rows = []
     for line in cosecha["lines"]:
-        rows.append(
+        harvest_rows.append(
             {
                 "tipo_pago": line.get("tipo_pago") or COSECHA_TIPO,
-                "labor": line["labor"],
-                "centro_costo": "",
-                "centro_costo_nombre": line["cultivo"] or line["cuartel"] or "—",
-                "jornadas": line["jornadas"],
+                "labor": line.get("labor") or "COSECHA",
+                "centro_costo": line.get("cc") or "",
+                "centro_costo_nombre": line.get("cultivo") or "",
+                "valor_odoo": line.get("valor_odoo"),
+                "jornadas": line.get("jornadas"),
                 "horas_trabajadas": None,
-                "total_unitario": line["total_unitario"],
+                "total_unitario": line.get("total_unitario"),
                 "costo_total": line["total_labor"],
                 "total_trabajado": line["total_trabajado"],
                 "costo_hora": None,
@@ -1200,6 +1198,8 @@ def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict
                 "es_cosecha": True,
             }
         )
+    _apply_nombre_cc(harvest_rows, "centro_costo", "centro_costo_nombre")
+    rows.extend(harvest_rows)
     detail_grand = sum(float(row.get("total_trabajado") or 0) for row in rows)
     for row in rows:
         trab = float(row.get("total_trabajado") or 0)
@@ -2990,7 +2990,7 @@ async def download_tarjas_general_excel(
     if cosecha:
         buckets: dict = {}
         for person in cosecha["personas_dias"]:
-            labor_name = "Cosecha · Al día" if person.get("al_dia") else "Cosecha"
+            labor_name = person.get("labor") or "Cosecha"
             key = (
                 person["trabajador"],
                 person["contratista"],
@@ -3237,7 +3237,7 @@ async def download_tarjas_contratista_excel(
                 {
                     "trabajador": person["trabajador"],
                     "contratista": person["contratista"],
-                    "labor": "COSECHA · al día" if person.get("al_dia") else "COSECHA",
+                    "labor": person.get("labor") or "COSECHA",
                     "tipo_pago": person.get("tipo_pago") or "",
                     "fecha": person["fecha"],
                     "total": person["a_pagar"],
@@ -4553,7 +4553,7 @@ def _build_detalle_html(
         f'<td style="{DW["labor"]}">{r["labor"]}</td><td style="{DW["cc"]}">{r["centro_costo"]}</td>'
         f'<td style="{DW["nombre_cc"]}">{_escape_html(r["centro_costo_nombre"] or "—")}</td>'
         f'<td class="num" style="{DW["costo_hora"]}">{fmtCLP(r["costo_hora"])}</td>'
-        f'<td class="num" style="{DW["jornadas"]}">{r["jornadas"]}</td>'
+        f'<td class="num" style="{DW["jornadas"]}">{"—" if r.get("jornadas") is None else r["jornadas"]}</td>'
         f'<td class="num" style="{DW["trab"]}">{fmtCLP(r.get("total_trabajado"))}</td>'
         f'<td class="total" style="{DW["total"]}">{fmtCLP(r.get("total_empresa"))}</td>'
         f'<td class="num" style="{DW["pct"]}">{fmtPct(r["pct_pago"])}</td></tr>'
@@ -4713,7 +4713,7 @@ def _build_contratista_html(
                 {
                     "trabajador": person["trabajador"],
                     "contratista": person["contratista"],
-                    "labor": "COSECHA · al día" if person.get("al_dia") else "COSECHA",
+                    "labor": person.get("labor") or "COSECHA",
                     "tipo_pago": person.get("tipo_pago") or "",
                     "fecha": person["fecha"],
                     "total": person["a_pagar"],

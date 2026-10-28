@@ -666,7 +666,7 @@ Solo existe para Zúñiga. Isla de Maipo, Talagante y KONTROLAG no tienen estas 
 Grano: 1 fila de cosecha_zuniga_escaneo = 1 capacho. El trabajador escanea su QR contra un bin.
 Pago, por persona y día:
   SUM(precio_trato_aplicado) + MAX(piso_aplicado) una sola vez.
-El piso no reemplaza los capachos: se suman. Si el precio del día es 0 y el piso es mayor que 0, ese día es Al día y se paga solo el piso.
+El piso no reemplaza los capachos: se suman. Si el precio del día es 0 y el piso es mayor que 0, ese día sigue siendo cosecha a trato y se paga solo el piso. No es el jornal Al día de tarjas.
 No multiplicar por 1.45 ni por 1.50. Esos factores son solo el costo empresa de tarjas.
 
 No usar appsheet.cosecha_zuniga_resumen_bin_trabajador.total_a_recibir para pagar: esa vista se queda con el mayor entre capachos y piso. El pago los suma.

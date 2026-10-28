@@ -151,8 +151,8 @@ function renderDocument(h, rows, cosecha) {
       <td>${esc(line.CC || line.cc || '')}</td>
       <td>${esc(line['Nombre CC'] || line.cultivo || line.cuartel || '—')}</td>
       <td>${esc(line['Nombre Labor'] || line.labor || '')}</td>
-      <td class="num">${line.jornadas ?? ''}</td>
-      <td class="num">${fmtCLP.format(line.total_unitario ?? 0)}</td>
+      <td class="num">${line.jornadas != null ? line.jornadas : '—'}</td>
+      <td class="num">${line.total_unitario != null ? fmtCLP.format(line.total_unitario) : '—'}</td>
       <td class="num">${fmtCLP.format(amount)}</td>
       <td class="num">${fmtPct(pctVal)}</td>
     `;

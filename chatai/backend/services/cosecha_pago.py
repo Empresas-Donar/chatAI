@@ -8,13 +8,14 @@ day. Nothing here is multiplied by the tarjas company factors.
 from __future__ import annotations
 
 import datetime
+import re
 
 from services.cosecha_rendimiento import _money, amount_due, predios_for_empresa
 
 TIPO = "Cosecha"
-# Same tipo strings as tarjas, so harvest folds into those rows.
+# Harvest is piece rate. The floor is part of that trato, including a day
+# that only paid the floor. It is not the tarjas "Al día" wage.
 TIPO_TRATO = "trato"
-TIPO_AL_DIA = "Al dia"
 LABOR = "COSECHA"
 
 
@@ -85,17 +86,46 @@ def _line(tipo_pago, labor, cuartel, qty, total, *, al_dia=False, cultivo="", sh
     }
 
 
+def _cc_code(text: str) -> str:
+    match = re.search(r"(\d{3})", text or "")
+    return match.group(1) if match else ""
+
+
+def _collapse_lines_by_cc(lines: list[dict]) -> list[dict]:
+    """One Cosecha line per cost center. Capachos and the floor add up.
+
+    The quantity is not a single rate, so jornadas and the unit price stay
+    empty. The amount is the sum, with no tarjas factor.
+    """
+    totals: dict[str, int] = {}
+    for line in lines:
+        for cuartel, pesos in (line.get("shares") or {}).items():
+            code = _cc_code(cuartel)
+            totals[code] = totals.get(code, 0) + int(pesos)
+    collapsed = []
+    for code in sorted(totals):
+        total = totals[code]
+        if not total:
+            continue
+        row = _line(TIPO_TRATO, LABOR, code, 0, total, shares={code: total})
+        row["cc"] = code
+        row["jornadas"] = None
+        row["total_unitario"] = None
+        collapsed.append(row)
+    return collapsed
+
+
 def _document_lines(days: dict) -> list[dict]:
     """Lines shared by the order screen, the PDF and the Odoo file.
 
     Piece rate is capachos at the price actually scanned. Days with price 0
     are not capachos to bill. The floor is paid once per person-day, and the
-    pesos follow the capachos of each registro.
+    pesos follow the capachos of each registro. Reports then show one
+    Cosecha line per cost center.
     """
     piece: dict[tuple, dict] = {}
-    floors: dict[tuple, dict] = {}
+    floors: dict[int, dict] = {}
     for day in days.values():
-        al_dia = day["trato"] == 0 and day["piso"] > 0
         for cuartel, part in day["por_cuartel"].items():
             for precio, count in part["precios"].items():
                 bucket = piece.setdefault(
@@ -107,14 +137,14 @@ def _document_lines(days: dict) -> list[dict]:
         if not day["piso"] or not day["por_cuartel"]:
             continue
         # The trato's daily floor is paid once. Scans still belong to their
-        # registro and cuartel, so the amount follows the capachos.
+        # registro and cuartel, so the amount follows the capachos. A day
+        # with no capacho price is the same floor, still cosecha a trato.
         names = sorted(day["por_cuartel"])
         pesos = _split_int(
             day["piso"], [day["por_cuartel"][name]["capachos"] for name in names]
         )
-        tipo = TIPO_AL_DIA if al_dia else TIPO_TRATO
         bucket = floors.setdefault(
-            (tipo, day["piso"]),
+            day["piso"],
             {"jornadas": 0, "total": 0, "shares": {}},
         )
         bucket["jornadas"] += 1
@@ -135,22 +165,20 @@ def _document_lines(days: dict) -> list[dict]:
                 bucket["trato"],
             )
         )
-    for (tipo, _piso) in sorted(floors, key=lambda item: (item[0] == TIPO_AL_DIA, item[1])):
-        bucket = floors[(tipo, _piso)]
-        al_dia = tipo == TIPO_AL_DIA
+    for piso in sorted(floors):
+        bucket = floors[piso]
         cuarteles = sorted(bucket["shares"])
         lines.append(
             _line(
-                tipo,
-                f"{LABOR} · al día" if al_dia else f"{LABOR} · piso",
+                TIPO_TRATO,
+                f"{LABOR} · piso",
                 " / ".join(cuarteles),
                 bucket["jornadas"],
                 bucket["total"],
-                al_dia=al_dia,
                 shares=bucket["shares"],
             )
         )
-    return lines
+    return _collapse_lines_by_cc(lines)
 
 
 def _pay_by_cuartel(days: dict) -> list[dict]:
@@ -258,8 +286,9 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
     personas_dias = []
     for day in days.values():
         pago = amount_due(day["trato"], day["piso"])
-        # A harvest day with no piece rate and only the floor is a daily wage.
-        al_dia = day["trato"] == 0 and day["piso"] > 0
+        # A day with only the floor is still cosecha a trato. The label
+        # identifies it; the amount is the floor, unchanged.
+        solo_piso = day["trato"] == 0 and day["piso"] > 0
         personas_dias.append(
             {
                 "fecha": day["fecha"],
@@ -271,32 +300,42 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
                 "a_pagar": pago,
                 "cuarteles": sorted(day["cuarteles"]),
                 "es_cosecha": True,
-                "al_dia": al_dia,
-                "tipo_pago": TIPO_AL_DIA if al_dia else TIPO_TRATO,
+                "al_dia": False,
+                "solo_piso": solo_piso,
+                "tipo_pago": TIPO_TRATO,
+                "labor": LABOR,
             }
         )
     personas_dias.sort(key=lambda row: (row["trabajador"], row["fecha"]))
 
     lines = _document_lines(days)
-    piso_trato = sum(row["piso"] for row in personas_dias if not row["al_dia"])
-    piso_al_dia = sum(row["piso"] for row in personas_dias if row["al_dia"])
-
+    codes = [line["cc"] for line in lines if line.get("cc")]
+    if codes:
+        cur.execute(
+            """
+            SELECT id_cc::text, cultivo, valor_odoo
+            FROM appsheet.tarjas_cc
+            WHERE id_campo = 3 AND id_cc::text = ANY(%s)
+            """,
+            (codes,),
+        )
+        names = {code: (cultivo, valor) for code, cultivo, valor in cur.fetchall()}
+        for line in lines:
+            cultivo, valor = names.get(line.get("cc"), ("", None))
+            line["cultivo"] = cultivo or ""
+            line["valor_odoo"] = valor
     cuarteles_pago = _pay_by_cuartel(days)
     total = sum(row["a_pagar"] for row in personas_dias)
     jornadas = len(personas_dias)
-    pago_al_dia = sum(row["a_pagar"] for row in personas_dias if row["al_dia"])
-    jornadas_al_dia = sum(1 for row in personas_dias if row["al_dia"])
-    pago_trato = total - pago_al_dia
-    jornadas_trato = jornadas - jornadas_al_dia
     return {
         "es_cosecha": True,
         "total": total,
         "trato": sum(row["trato"] for row in personas_dias),
-        "piso": piso_trato + piso_al_dia,
-        "pago_trato": pago_trato,
-        "pago_al_dia": pago_al_dia,
-        "jornadas_trato": jornadas_trato,
-        "jornadas_al_dia": jornadas_al_dia,
+        "piso": sum(row["piso"] for row in personas_dias),
+        "pago_trato": total,
+        "pago_al_dia": 0,
+        "jornadas_trato": jornadas,
+        "jornadas_al_dia": 0,
         "capachos": sum(row["capachos"] for row in personas_dias),
         "jornadas": jornadas,
         "personas": len({row["trabajador"] for row in personas_dias}),
