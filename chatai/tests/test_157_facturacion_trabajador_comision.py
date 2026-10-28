@@ -161,8 +161,11 @@ class TestWorkerCommissionSplit:
         assert "function toISO" in js
         assert "badge-trato" in js
         assert "badge-aldia" in js
-        assert "renderPivot(data.columns, data.rows, header)" in js
+        assert "renderPivot(data.columns, rows, header)" in js
         assert "h.total_contratista" in js
+        assert "data.cosecha?.pago_trato" in js
+        assert "data.cosecha?.pago_al_dia" in js
+        assert "data.cosecha.pago_trato" not in js
 
 
 class TestCrossFarmIsolation:

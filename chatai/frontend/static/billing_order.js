@@ -131,8 +131,8 @@ async function generate() {
       header = {
         ...header,
         total: (Number(header.total) || 0) + cosechaTotal,
-        total_trato: (Number(header.total_trato) || 0) + (Number(data.cosecha.pago_trato) || 0),
-        total_al_dia: (Number(header.total_al_dia) || 0) + (Number(data.cosecha.pago_al_dia) || 0),
+        total_trato: (Number(header.total_trato) || 0) + (Number(data.cosecha?.pago_trato) || 0),
+        total_al_dia: (Number(header.total_al_dia) || 0) + (Number(data.cosecha?.pago_al_dia) || 0),
       };
     }
 
