@@ -1,4 +1,6 @@
-// global-filters.js — Persist Empresa / Contratista / date range across report pages
+// global-filters.js — Persist dates / empresa / contratista across report pages.
+// Dates lead. Empresa lists campos with tarjas in that range, then contratista
+// lists whoever worked in the chosen campo.
 // Empresa/contratista: localStorage. Dates: sessionStorage (custom range lasts the tab).
 // URL query params win per-key on load (shareable links).
 // Nav links to report pages are rewritten with the current globals so they survive navigation.
@@ -139,8 +141,7 @@ function decorateNavLinks() {
   const values = {};
   GLOBAL_FILTER_IDS.forEach(id => {
     const el = _el(id);
-    const live = el ? el.value : '';
-    values[id] = live || _desired(id) || '';
+    values[id] = el ? el.value : (_desired(id) || '');
   });
   document.querySelectorAll('a[href]').forEach(a => {
     const href = a.getAttribute('href');
@@ -214,48 +215,114 @@ function _hydrateDates() {
   _applyValue('fil-to', to);
 }
 
-function _hydrateSelects() {
-  GLOBAL_FILTER_IDS.slice(2).forEach(id => {
-    _applyValue(id, _desired(id));
+function _matchItem(items, preferred) {
+  if (!preferred) return '';
+  const raw = String(preferred);
+  const nfc = raw.normalize('NFC');
+  const folded = _fold(nfc);
+  const hit = (items || []).find(value => {
+    const text = String(value);
+    return text === raw || text.normalize('NFC') === nfc || _fold(text) === folded;
   });
+  return hit == null ? '' : String(hit);
 }
 
-function _fillSelect(id, items, emptyLabel) {
+function _writeSelect(id, items, emptyLabel, preferred) {
   const sel = _el(id);
-  if (!sel) return;
-  const preferred = _desired(id) || sel.value;
+  if (!sel) return '';
   const list = Array.isArray(items) ? items : [];
+  const chosen = _matchItem(list, preferred);
   sel.innerHTML = `<option value="">${emptyLabel}</option>` +
-    list.map(v => {
-      const s = String(v);
-      const safe = s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    list.map(value => {
+      const text = String(value);
+      const safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       return `<option value="${safe}">${safe}</option>`;
     }).join('');
-  _setSelectValue(sel, preferred);
+  sel.value = chosen;
+  return chosen;
 }
 
-async function _loadEmpresaContratista() {
-  const selE = _el('fil-empresa');
-  const selC = _el('fil-contratista');
-  if (!selE || !selC) return;
-  _hydrateSelects();
+function _scopeParams(empresa) {
+  const params = new URLSearchParams();
+  const from = _el('fil-from')?.value || '';
+  const to = _el('fil-to')?.value || '';
+  if (from && to) {
+    params.set('fecha_inicio', from);
+    params.set('fecha_termino', to);
+  }
+  if (empresa) params.set('empresa', empresa);
+  return params;
+}
+
+let _scopeGen = 0;
+
+async function _fetchScope(empresa) {
+  const params = _scopeParams(empresa);
+  const qs = params.toString();
+  const res = await fetch(FILTERS_ENDPOINT + (qs ? '?' + qs : ''));
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function _usesDateCascade() {
+  return !location.pathname.startsWith('/cosecha');
+}
+
+async function _loadScopedOptions(reloadEmpresas) {
+  const gen = ++_scopeGen;
+  const wanted = reloadEmpresas
+    ? (_el('fil-empresa')?.value || _desired('fil-empresa') || '')
+    : (_el('fil-empresa')?.value || '');
+  let data;
   try {
-    const res = await fetch(FILTERS_ENDPOINT);
-    if (!res.ok) return;
-    const data = await res.json();
-    _fillSelect('fil-empresa', data.empresas, 'Todas');
-    _fillSelect('fil-contratista', data.contratistas, 'Todos');
-  } catch (_) { /* non-fatal — placeholder options remain */ }
-  _hydrateSelects();
+    data = await _fetchScope(wanted);
+  } catch (_) {
+    return;
+  }
+  if (!data || gen !== _scopeGen) return;
+  let empresa = wanted;
+  if (reloadEmpresas) {
+    empresa = _writeSelect('fil-empresa', data.empresas, 'Todas', wanted);
+  }
+  let contratistas = data.contratistas || [];
+  if (reloadEmpresas && _fold(empresa) !== _fold(wanted)) {
+    try {
+      data = await _fetchScope(empresa);
+    } catch (_) {
+      return;
+    }
+    if (!data || gen !== _scopeGen) return;
+    contratistas = data.contratistas || [];
+  }
+  _writeSelect(
+    'fil-contratista',
+    contratistas,
+    'Todos',
+    _el('fil-contratista')?.value || _desired('fil-contratista') || '',
+  );
 }
 
 function _bindPersistence() {
   const bar = document.getElementById('global-filter-bar');
   if (!bar) return;
-  bar.addEventListener('change', () => {
-    saveGlobalFilters();
-    window.dispatchEvent(new CustomEvent('global-filters-change'));
+  bar.addEventListener('change', async evt => {
+    const id = evt.target && evt.target.id;
+    // Empresa and dates reload the lists before the report runs. Cover the
+    // previous report for that whole wait, not only once the query starts.
+    const cover = _usesDateCascade() && (id === 'fil-from' || id === 'fil-to' || id === 'fil-empresa');
+    if (cover && typeof showReportLoading === 'function') showReportLoading();
+    try {
+      if (_usesDateCascade() && (id === 'fil-from' || id === 'fil-to')) {
+        await _loadScopedOptions(true);
+      } else if (_usesDateCascade() && id === 'fil-empresa') {
+        await _loadScopedOptions(false);
+      }
+      saveGlobalFilters();
+      window.dispatchEvent(new CustomEvent('global-filters-change'));
+    } finally {
+      if (cover && typeof hideReportLoading === 'function') hideReportLoading();
+    }
   });
   bar.addEventListener('input', evt => {
     if (evt.target && (evt.target.id === 'fil-from' || evt.target.id === 'fil-to')) {
@@ -268,7 +335,7 @@ async function initGlobalFilters() {
   const bar = document.getElementById('global-filter-bar');
   if (!bar) return;
   _hydrateDates();
-  await _loadEmpresaContratista();
+  await _loadScopedOptions(true);
   _bindPersistence();
   saveGlobalFilters();
 }

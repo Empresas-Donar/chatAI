@@ -25,7 +25,7 @@ load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -43,6 +43,7 @@ import controllers.cosecha_controller as cosecha
 import controllers.chat_controller as chat
 import controllers.looker_controller as looker
 import controllers.roles_controller as roles
+import controllers.contratistas_controller as contratistas
 import controllers.reports_controller as reports
 
 logging.basicConfig(
@@ -122,6 +123,14 @@ templates.TemplateResponse = _template_response_with_user
 @app.exception_handler(_LoginRedirect)
 async def login_redirect_handler(request: Request, exc: _LoginRedirect):
     next_path = exc.next_path or "/"
+    # Fetch callers parse JSON. A login HTML page becomes
+    # "Unexpected token '<'" in the export preview.
+    if next_path.startswith("/api/"):
+        return JSONResponse(
+            {"detail": "Sesión expirada"},
+            status_code=401,
+            headers={"Cache-Control": "no-store"},
+        )
     return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
 
 
@@ -137,6 +146,7 @@ cosecha.init(templates=templates)
 chat.init(templates=templates)
 looker.init(templates=templates)
 roles.init(templates=templates)
+contratistas.init(templates=templates)
 reports.init(templates=templates)
 
 _auth = [Depends(require_auth)]
@@ -153,6 +163,7 @@ app.include_router(cosecha.router,         dependencies=_auth)
 app.include_router(chat.router,            dependencies=_auth)
 app.include_router(looker.router,          dependencies=_auth)
 app.include_router(roles.router,           dependencies=_auth)
+app.include_router(contratistas.router,    dependencies=_auth)
 app.include_router(reports.router,         dependencies=_auth)
 
 

@@ -145,26 +145,70 @@ def test_166_manual_payment_is_kept_when_the_day_does_not_change(conn):
     assert (int(tt), int(tw), int(tp)) == (36000, 36000, 36000)
 
 
-def test_166_other_campo_same_day_is_not_a_duplicate(conn):
+def test_166_day_and_a_half_both_are_paid(conn):
     cur = conn.cursor()
-    rows = [
-        ("t166-isla", "ISLA DE MAIPO", "400", 25000),
-        ("t166-tala", "TALAGANTE", "616", 25000),
-        ("t166-dup", "ISLA DE MAIPO", "400", 0),
+    inserted = [
+        ("t166-full", "ZUÑIGA", "890", "Tractor-A", 9, 27600),
+        ("t166-half", "ZUÑIGA", "890", "Tractor-A", 4.5, 13800),
+        ("t166-other-tractor", "ZUÑIGA", "890", "Tractor-B", 9, 27600),
+        ("t166-other-cc", "ZUÑIGA", "891", "Tractor-A", 9, 27600),
+        ("t166-other-campo", "ISLA DE MAIPO", "890", "Tractor-A", 9, 27600),
     ]
-    for row_id, campo, cc, expected in rows:
+    for row_id, campo, cc, maquina, horas, expected in inserted:
         cur.execute(
             """
             INSERT INTO appsheet.tarjas_pagos (
                 "id_Resumen", fecha, trabajador, labor, horas_trabajadas,
-                tipo_pago, nombre_campo, cuartel_cc, total_tractor
+                tipo_pago, nombre_campo, cuartel_cc, maquina, total_tractor
             ) VALUES (
-                %s, '12/31/2098 00:00:00', 'Operario Fundo',
-                'Jornada Tractor simple', 9, 'Tractorista', %s, %s, 0
+                %s, '12/31/2099 00:00:00', 'Operario Fundo',
+                'Jornada Tractor normal', %s, 'Tractorista', %s, %s, %s, 0
             )
             RETURNING total_tractor
             """,
-            (row_id, campo, cc),
+            (row_id, horas, campo, cc, maquina),
         )
         got = int(cur.fetchone()[0])
-        assert got == expected, f"{campo} {cc} -> {got}, expected {expected}"
+        assert got == expected, f"{row_id} -> {got}, expected {expected}"
+
+    cur.execute(
+        """
+        SELECT total_tractor FROM appsheet.tarjas_pagos
+        WHERE "id_Resumen" = 't166-full'
+        """
+    )
+    assert int(cur.fetchone()[0]) == 27600
+
+    cur.execute(
+        """
+        INSERT INTO appsheet.tarjas_pagos (
+            "id_Resumen", fecha, trabajador, labor, horas_trabajadas,
+            tipo_pago, nombre_campo, cuartel_cc, maquina, total_tractor
+        ) VALUES (
+            't166-full-again', '12/31/2099 00:00:00', 'Operario Fundo',
+            'Jornada Tractor normal', 9, 'Tractorista', 'ZUÑIGA', '890', 'Tractor-A', 0
+        )
+        RETURNING total_tractor
+        """
+    )
+    assert int(cur.fetchone()[0]) == 27600
+
+    cur.execute(
+        """
+        SELECT "id_Resumen", total_tractor
+        FROM appsheet.tarjas_pagos
+        WHERE "id_Resumen" IN (
+            't166-full', 't166-half', 't166-full-again',
+            't166-other-tractor', 't166-other-cc', 't166-other-campo'
+        )
+        ORDER BY "id_Resumen"
+        """
+    )
+    assert [(r[0], int(r[1])) for r in cur.fetchall()] == [
+        ("t166-full", 0),
+        ("t166-full-again", 27600),
+        ("t166-half", 13800),
+        ("t166-other-campo", 27600),
+        ("t166-other-cc", 27600),
+        ("t166-other-tractor", 27600),
+    ]

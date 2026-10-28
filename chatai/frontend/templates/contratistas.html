@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Contratistas — Donar{% endblock %}
+{% block gf_attrs %}data-skip-auto-report{% endblock %}
+
+{% block body %}
+<div class="container">
+  <div class="page-header">
+    <h1>Contratistas</h1>
+    <p>Catálogo maestro de la intranet. Las apps conservan su nombre. El enlace es opcional: borrar aquí deja esa columna vacía y no borra la fila de la app.</p>
+  </div>
+
+  <form id="ct-form" class="filter-bar">
+    <div>
+      <label for="ct-nombre">Nombre</label>
+      <input id="ct-nombre" maxlength="200" required />
+    </div>
+    <div>
+      <label for="ct-corto">Nombre corto</label>
+      <input id="ct-corto" maxlength="80" />
+    </div>
+    <div>
+      <label for="ct-rut">RUT</label>
+      <input id="ct-rut" maxlength="20" />
+    </div>
+    <div>
+      <label for="ct-activo">Activo</label>
+      <select id="ct-activo">
+        <option value="1" selected>Sí</option>
+        <option value="0">No</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary" id="ct-save">Agregar</button>
+    <button type="button" class="btn btn-secondary" id="ct-cancel" hidden>Cancelar</button>
+  </form>
+  <p class="err-text" id="ct-error" hidden></p>
+
+  <p id="ct-empty" style="padding:16px;margin:0">Cargando…</p>
+
+  <div class="table-card ct-card ct-card--active" id="ct-active-card" hidden>
+    <div class="table-header">
+      <span>Con actividad el último mes</span>
+      <span class="count" id="ct-active-count"></span>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Nombre corto</th>
+          <th>RUT</th>
+          <th>Activo</th>
+          <th class="num">Tarjas</th>
+          <th class="num">Cosecha</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="ct-active-body"></tbody>
+    </table>
+  </div>
+
+  <div class="table-card ct-card ct-card--quiet" id="ct-quiet-card" hidden>
+    <div class="table-header">
+      <span>Sin actividad el último mes</span>
+      <span class="count" id="ct-quiet-count"></span>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Nombre corto</th>
+          <th>RUT</th>
+          <th>Activo</th>
+          <th class="num">Tarjas</th>
+          <th class="num">Cosecha</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="ct-quiet-body"></tbody>
+    </table>
+  </div>
+</div>
+<style>
+.ct-card { margin-top: 20px; }
+.ct-card--active { border-left: 4px solid var(--terra); }
+.ct-card--quiet { border-left: 4px solid var(--border-mid); }
+.ct-card--quiet .table-header { background: var(--bg-warm); }
+.ct-card--quiet .table-header span { color: var(--text-muted); }
+</style>
+<script src="/static/contratistas.js?v={{ static_v }}"></script>
+{% endblock %}

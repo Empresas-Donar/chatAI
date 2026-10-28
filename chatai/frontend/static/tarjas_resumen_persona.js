@@ -76,14 +76,22 @@ async function queryData() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    if (!data.rows.length) {
+    if (!data.rows.length && !data.cosecha?.total) {
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
       return;
     }
 
     document.getElementById('empty-state').style.display = 'none';
-    renderPivot(data.rows);
+    const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
+      trabajador: person.trabajador,
+      tipo_pago: person.tipo_pago || 'Cosecha',
+      fecha: person.fecha,
+      total_trabajado: person.a_pagar,
+      es_cosecha: true,
+      cuarteles: (person.cuarteles || []).join(', '),
+    }));
+    renderPivot(data.rows.concat(cosechaRows));
     document.getElementById('pivot-section').style.display = '';
     _hasData = true;
   } catch (e) {
@@ -106,10 +114,13 @@ function renderPivot(rows) {
     const w = r.trabajador ?? '(sin nombre)';
     if (!workers.has(w)) workers.set(w, new Map());
     const tipos = workers.get(w);
-    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0 });
+    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0, es_cosecha: !!r.es_cosecha, cuarteles: r.cuarteles || '' });
     const entry = tipos.get(r.tipo_pago);
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + Number(r.total_trabajado || 0);
     entry.total += Number(r.total_trabajado || 0);
+    if (r.cuarteles && !String(entry.cuarteles).includes(r.cuarteles)) {
+      entry.cuarteles = entry.cuarteles ? `${entry.cuarteles}, ${r.cuarteles}` : r.cuarteles;
+    }
   });
 
   // Sort workers by total descending
@@ -153,7 +164,8 @@ function renderPivot(rows) {
 
       html += `<tr class="${rowClass}">`;
       html += `<td class="cell-worker" title="${esc(w.name)}">${workerCell}</td>`;
-      html += `<td class="cell-tipo">${esc(tipo)}</td>`;
+      const tipoLabel = tipo === 'trato' ? 'Trato' : (tipo === 'Al dia' || tipo === 'Al día' ? 'Al Día' : tipo);
+      html += `<td class="cell-tipo"${entry.cuarteles ? ` title="${esc(entry.cuarteles)}"` : ''}>${esc(tipoLabel)}</td>`;
 
       dates.forEach(d => {
         const val = entry.byDate[d];

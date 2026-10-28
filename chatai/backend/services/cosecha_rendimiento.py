@@ -14,9 +14,8 @@ from typing import Any
 _FOLD_FROM = "ÁÉÍÓÚÜÑÀÈÌÒÙ"
 _FOLD_TO = "AEIOUUNAEIOU"
 
-_SOURCES = ("zuniga", "isla")
+_SOURCES = ("zuniga",)
 _EMPRESA_LABEL = {
-    "isla": "ISLA DE MAIPO",
     "zuniga": "ZUÑIGA",
 }
 
@@ -28,18 +27,14 @@ def fold(value: str | None) -> str:
 
 
 def predios_for_empresa(empresa: str | None) -> list[str]:
-    """Map the shared Empresa filter onto harvest apps.
+    """Map the shared Empresa filter onto the harvest app.
 
-    Empty means both predios. Tarjas companies without a harvest app
-    (KONTROLAG, TALAGANTE) return no predio.
+    The detail report reads only cosecha_zuniga. Empty or Zúñiga returns
+    that predio. Isla de Maipo, Talagante and KONTROLAG return none.
     """
     folded = fold(empresa)
-    if not folded:
-        return ["zuniga", "isla"]
-    if "ZUNIGA" in folded:
+    if not folded or "ZUNIGA" in folded:
         return ["zuniga"]
-    if "ISLA" in folded and "MAIPO" in folded:
-        return ["isla"]
     return []
 
 
@@ -84,25 +79,6 @@ def _scan_sql(source: str) -> str:
             LEFT JOIN appsheet.cosecha_zuniga_contratistas c
               ON c."id_contratista" = e."id_contratista"
             LEFT JOIN appsheet.cosecha_zuniga_cuarteles cu
-              ON cu."id_cuartel" = e."cuartel"
-        """
-    if source == "isla":
-        return """
-            SELECT
-              'Isla de Maipo'::text AS predio,
-              COALESCE(e."fecha", e."fecha_y_hora"::date) AS fecha,
-              e."contratista" AS contratista,
-              trunc(e."cuadrilla")::int AS cuadrilla,
-              COALESCE(cu."nombre_cuartel", e."cuartel") AS cuartel,
-              e."cuartel" AS cuartel_id,
-              NULL::text AS cultivo,
-              COALESCE(e."variedad", cu."variedad") AS variedad,
-              e."trabajador" AS trabajador,
-              e."precio_trato_aplicado" AS precio,
-              e."piso_aplicado" AS piso,
-              e."bins"::text AS bin_key
-            FROM appsheet.cosecha_isla_de_maipo_escaneo e
-            LEFT JOIN appsheet.cosecha_isla_de_maipo_cuarteles cu
               ON cu."id_cuartel" = e."cuartel"
         """
     raise ValueError(source)
@@ -355,8 +331,8 @@ def _hint(cur, predios: list[str], params: dict) -> dict | None:
 def _scope_predios(empresa: str | None) -> list[str]:
     """Predios for a cosecha filter. An empresa without harvest does not narrow."""
     if not fold(empresa):
-        return ["zuniga", "isla"]
-    return predios_for_empresa(empresa) or ["zuniga", "isla"]
+        return ["zuniga"]
+    return predios_for_empresa(empresa) or ["zuniga"]
 
 
 def _empresas_con_cosecha(
@@ -368,7 +344,7 @@ def _empresas_con_cosecha(
     """Predios with at least one capacho in the selected period and contractor."""
     found = []
     params = _params(fecha_inicio, fecha_termino, contratista, None, None, None)
-    for source in ("isla", "zuniga"):
+    for source in _SOURCES:
         cur.execute(
             _scans_cte([source]) + " SELECT 1 FROM scans LIMIT 1",
             params,

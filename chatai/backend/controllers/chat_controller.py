@@ -119,7 +119,7 @@ FUNCIONES SQL POSTGRESQL PERMITIDAS (versión 16):
 - Columnas TEXT que contienen fechas: castear con ::date o ::timestamp antes de comparar.
 - Para temperatura: NUNCA reportes valores 0.0 — son lecturas fallidas. Filtrar siempre con WHERE columna > 0.
 - Para temperatura diaria: usar public.status_system (⭐ tabla principal).
-- "ayer" = CURRENT_DATE - 1, "hoy" = CURRENT_DATE.
+- "ayer" y "hoy" salen de la FECHA DE HOY al final del prompt. No uses CURRENT_DATE: la base está en UTC.
 
 FUNCIONES SQL POSTGRESQL PERMITIDAS (versión 16):
 - Fechas: CURRENT_DATE, NOW(), DATE_TRUNC('month', fecha), EXTRACT(YEAR FROM fecha), TO_CHAR(fecha, 'YYYY-MM'), fecha::date, fecha::text
@@ -658,6 +658,56 @@ Las fechas en tarjas_pagos y otros son tipo TEXT — usar CAST(fecha AS DATE) o 
 ### appsheet.despacho_productos — Productos de despacho con CC
 - id, producto, calidad, cc
 
+### appsheet.cosecha_zuniga_* — Cosecha de capachos en Zúñiga
+La app de cosecha de Zúñiga. No es tarjas y no es despacho_ingreso.
+Sirve para preguntar qué se está cosechando, cuántos capachos van y cuánto hay que pagar.
+Solo existe para Zúñiga. Isla de Maipo, Talagante y KONTROLAG no tienen estas filas.
+
+Grano: 1 fila de cosecha_zuniga_escaneo = 1 capacho. El trabajador escanea su QR contra un bin.
+Pago, por persona y día:
+  SUM(precio_trato_aplicado) + MAX(piso_aplicado) una sola vez.
+El piso no reemplaza los capachos: se suman. Si el precio del día es 0 y el piso es mayor que 0, ese día es Al día y se paga solo el piso.
+No multiplicar por 1.45 ni por 1.50. Esos factores son solo el costo empresa de tarjas.
+
+No usar appsheet.cosecha_zuniga_resumen_bin_trabajador.total_a_recibir para pagar: esa vista se queda con el mayor entre capachos y piso. El pago los suma.
+No hacer SUM(bins): bins es el número del bin, no una cantidad.
+No seleccionar cosecha_zuniga_usuarios."contraseña".
+
+Tablas y columnas:
+- cosecha_zuniga_escaneo: id_escaneo, fecha (DATE), trabajador, rut_trabajador, cuartel (id, ej. C08), precio_trato_aplicado, piso_aplicado, id_registro, id_qr, id_contratista, id_cuadrilla, id_trato, id_bins, bins (TEXT, puede ser 'Manual')
+- cosecha_zuniga_registro: abre el bin. id_registro, id_cuartel, id_contratista, id_cuadrilla, bins (número), cultivo
+- cosecha_zuniga_cuarteles: id_cuartel, nombre_cuartel (ej. '894 IVU 115'), variedad, cultivo (cereza o ciruela)
+- cosecha_zuniga_tratos: id_trato, fecha_inicio_vigencia (DATE), precio_capacho, piso_garantizado_diario. Un trato cubre varios cuarteles por cosecha_zuniga_tratos_cuarteles
+- cosecha_zuniga_contratistas: id_contratista, contratistas (nombre en la app), id_intranet_contratistas
+- intranet.contratistas: id_intranet, nombre (razón social, la de tarjas), nombre_corto
+- cosecha_zuniga_cuadrillas: id_cuadrilla, cuadrilla, id_contratista
+- cosecha_zuniga_qr: id_qr, qr_trabajador, trabajador, rut
+
+Joins:
+- escaneo.id_registro = registro.id_registro
+- escaneo.cuartel = cuarteles.id_cuartel
+- escaneo.id_contratista = contratistas.id_contratista
+- contratistas.id_intranet_contratistas = intranet.contratistas.id_intranet
+- escaneo.id_trato = tratos.id_trato
+- Los tres primeros dígitos de nombre_cuartel son tarjas_cc.id_cc del campo Zúñiga (id_campo 3). Ejemplo: '894 IVU 115' → id_cc 894.
+
+Los escaneos vivos empiezan el 2026-10-20. fecha ya es DATE.
+
+EJEMPLO — cuánto pagar de cosecha entre dos fechas:
+  WITH dias AS (
+    SELECT e.fecha, btrim(e.trabajador) AS trabajador,
+           SUM(COALESCE(e.precio_trato_aplicado, 0)) AS trato,
+           MAX(COALESCE(e.piso_aplicado, 0)) AS piso,
+           COUNT(*) FILTER (WHERE COALESCE(e.precio_trato_aplicado, 0) > 0) AS capachos
+    FROM appsheet.cosecha_zuniga_escaneo e
+    WHERE e.fecha BETWEEN DATE '2026-10-21' AND DATE '2026-10-27'
+    GROUP BY 1, 2
+  )
+  SELECT SUM(trato + piso) AS a_pagar, SUM(capachos) AS capachos, COUNT(*) AS jornadas
+  FROM dias;
+
+Para filtrar contratista, unir intranet.contratistas y comparar nombre o nombre_corto con el nombre legal de tarjas.
+
 ### public.status_system — ⭐ RESUMEN DIARIO POR CAMPO (USAR PARA TEMPERATURA Y RIEGO)
 Esta es la tabla principal para preguntas de temperatura ambiente y riego por campo y fecha.
 - date (DATE): fecha del día
@@ -829,6 +879,11 @@ PREGUNTAS FRECUENTES Y CÓMO RESPONDERLAS:
    → Consultar wc_ema para datos diarios completos (temp, humedad, viento, radiación)
    → Complementar con status_system para temp_min/max
 
+6. "¿Cómo va la cosecha?" o "¿Cuánto hay que pagar de cosecha?"
+   → Consultar appsheet.cosecha_zuniga_escaneo. Una fila es un capacho
+   → Pago = SUM(precio_trato_aplicado) + MAX(piso_aplicado) una vez por trabajador y fecha
+   → No usar el factor 1.45 ni 1.50, y no usar total_a_recibir de la vista resumen
+
 GLOSARIO AGRONÓMICO:
 - Dormancia: período de reposo invernal del árbol que requiere frío para completarse
 - Brotación: inicio del crecimiento vegetativo en primavera tras completar el frío
@@ -883,11 +938,15 @@ _TOOLS = [
         name="query_postgres",
         description=(
             "Ejecuta SQL en PostgreSQL (appsheet y public schemas) y devuelve resultados. "
-            "Schemas disponibles: appsheet (tarjas, despacho) y public (sensores, riego). "
+            "Schemas disponibles: appsheet (tarjas, despacho, cosecha Zúñiga) y public (sensores, riego). "
             "Tablas: appsheet.tarjas_pagos, appsheet.tarjas_reporte, appsheet.tarjas_contratistas, "
             "appsheet.tarjas_personal, appsheet.tarjas_campo, appsheet.tarjas_cc, "
             "appsheet.tarjas_labor, appsheet.despacho_ingreso, appsheet.despacho_guia, "
             "appsheet.despacho_venta, appsheet.despacho_cliente, appsheet.despacho_productos, "
+            "appsheet.cosecha_zuniga_escaneo (1 fila = 1 capacho; pago = suma del precio + piso una vez por persona y día, sin factor 1.45/1.50), "
+            "appsheet.cosecha_zuniga_registro, appsheet.cosecha_zuniga_cuarteles, appsheet.cosecha_zuniga_tratos, "
+            "appsheet.cosecha_zuniga_tratos_cuarteles, appsheet.cosecha_zuniga_contratistas, appsheet.cosecha_zuniga_cuadrillas, "
+            "appsheet.cosecha_zuniga_qr, intranet.contratistas, "
             "public.sensor_inventory, public.ubi_soil_sensors, public.wc_farms_irrigation, "
             "public.field_sectors, "
             "public.looker_reports (id, name, description, url, category) — catálogo de reportes Looker Studio."
@@ -1012,6 +1071,39 @@ def _extract_table_name(sql: str) -> str:
         parts = table.split(".")
         table = parts[-1] if len(parts) >= 3 else table
     return table
+
+
+_RUT_RE = re.compile(r"\b\d{1,2}\.\d{3}\.\d{3}-[\dkK]\b")
+
+
+def _reply_claims_data(text: str) -> bool:
+    """True when the answer states figures, a table, a RUT, or a source line."""
+    if not text:
+        return False
+    if "📊" in text or "Fuente:" in text:
+        return True
+    if _RUT_RE.search(text):
+        return True
+    if re.search(r"^\s*\|.+\|\s*$", text, re.M):
+        return True
+    if re.search(r"\$\s*[\d.]", text):
+        return True
+    return bool(re.search(r"\b\d[\d.]{2,}\b", text))
+
+
+def _answer_is_ungrounded(text: str, traces: list, grounded: str, has_chart: bool = False) -> bool:
+    """A data answer is ungrounded when this turn did not query, or it quotes rows the query did not return."""
+    if not traces and not has_chart:
+        return _reply_claims_data(text)
+    if not traces and has_chart:
+        return bool(_RUT_RE.search(text) or re.search(r"^\s*\|.+\|\s*$", text, re.M))
+    for rut in _RUT_RE.findall(text):
+        if rut.lower() not in grounded:
+            return True
+    queried_nothing = all(int(t.get("row_count") or 0) == 0 for t in traces)
+    if queried_nothing and (re.search(r"^\s*\|.+\|\s*$", text, re.M) or _RUT_RE.search(text)):
+        return True
+    return False
 
 
 def _has_valid_traces(traces: list) -> bool:
@@ -1423,6 +1515,40 @@ Si el usuario pregunta sobre estos temas, responde exactamente:
 """
 
 
+def _today_note(client_today: str | None) -> str:
+    """Calendar date for 'hoy'. The browser wins when it is within a day of Chile."""
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    chile = datetime.now(ZoneInfo("America/Santiago")).date()
+    chosen = chile
+    if isinstance(client_today, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", client_today):
+        try:
+            parsed = date.fromisoformat(client_today)
+        except ValueError:
+            parsed = None
+        if parsed is not None and abs((parsed - chile).days) <= 1:
+            chosen = parsed
+    yesterday = chosen - timedelta(days=1)
+    months = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    weekdays = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+    return (
+        f"\n\nFECHA DE HOY: {weekdays[chosen.weekday()]} "
+        f"{chosen.day} de {months[chosen.month - 1]} de {chosen.year} "
+        f"({chosen.isoformat()}).\n"
+        f"- \"hoy\" = DATE '{chosen.isoformat()}'. \"ayer\" = DATE '{yesterday.isoformat()}'.\n"
+        "- Escribe esa fecha literal en el SQL. No uses CURRENT_DATE ni NOW() para hoy o ayer: "
+        "PostgreSQL está en UTC y puede ser otro día.\n"
+        "- No inventes el día. Si esa fecha devuelve 0 filas, dilo con esta fecha y consulta "
+        "el último día que sí tenga registros.\n"
+        "- El historial del chat no es una fuente. Cada cifra, nombre, RUT, bin y monto "
+        "tiene que salir de una consulta ejecutada en este turno.\n"
+    )
+
+
 @router.post("/ask")
 async def chat_ask(request: Request):
     from auth import get_current_user, get_user_role
@@ -1486,7 +1612,7 @@ async def chat_ask(request: Request):
 
     effective_system = _SYSTEM + (
         _ROLE_RESTRICTION_USER if user_role != "admin" else ""
-    )
+    ) + _today_note(body.get("today"))
     chat = _client.chats.create(
         model=MODEL,
         config=types.GenerateContentConfig(
@@ -1502,47 +1628,59 @@ async def chat_ask(request: Request):
     collected_badges: list[str] = []
     collected_traces: list[dict] = []
     collected_charts: list[dict] = []
-    for _ in range(8):
-        fn_calls = [p for p in response.candidates[0].content.parts if p.function_call]
-        if not fn_calls:
-            break
+    grounded_values: list[str] = []
 
-        tool_parts = []
-        for part in fn_calls:
-            fn = part.function_call
-            result = _call_tool(fn.name, dict(fn.args))
-            _log.info("tool_call name=%s result_len=%d", fn.name, len(result))
-            # Collect source badges, traces and charts
-            try:
-                parsed = json.loads(result)
-                badge = parsed.get("__source_badge__", "")
-                trace = parsed.get("__trace__")
-                chart = parsed.get("__chart__")
-                _log.info(
-                    "tool_result has_trace=%s has_badge=%s has_chart=%s row_count=%s",
-                    trace is not None,
-                    bool(badge),
-                    chart is not None,
-                    trace.get("row_count") if trace else "n/a",
-                )
-                if badge:
-                    collected_badges.append(badge.strip())
-                if trace:
-                    collected_traces.append(trace)
-                if chart:
-                    collected_charts.append(chart)
-            except Exception as e:
-                _log.error("tool_result parse error: %s", e)
-            tool_parts.append(
-                types.Part(
-                    function_response=types.FunctionResponse(
-                        name=fn.name,
-                        response={"result": result},
+    def _consume_tools(pending):
+        for _ in range(8):
+            fn_calls = [
+                p for p in pending.candidates[0].content.parts if p.function_call
+            ]
+            if not fn_calls:
+                break
+            tool_parts = []
+            for part in fn_calls:
+                fn = part.function_call
+                result = _call_tool(fn.name, dict(fn.args))
+                _log.info("tool_call name=%s result_len=%d", fn.name, len(result))
+                try:
+                    parsed = json.loads(result)
+                    badge = parsed.get("__source_badge__", "")
+                    trace = parsed.get("__trace__")
+                    chart = parsed.get("__chart__")
+                    _log.info(
+                        "tool_result has_trace=%s has_badge=%s has_chart=%s row_count=%s",
+                        trace is not None,
+                        bool(badge),
+                        chart is not None,
+                        trace.get("row_count") if trace else "n/a",
+                    )
+                    if badge:
+                        collected_badges.append(badge.strip())
+                    if trace:
+                        collected_traces.append(trace)
+                    if chart:
+                        collected_charts.append(chart)
+                    for row in parsed.get("rows") or []:
+                        if isinstance(row, dict):
+                            grounded_values.extend(
+                                str(v).strip().lower()
+                                for v in row.values()
+                                if v is not None and str(v).strip()
+                            )
+                except Exception as e:
+                    _log.error("tool_result parse error: %s", e)
+                tool_parts.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=fn.name,
+                            response={"result": result},
+                        )
                     )
                 )
-            )
+            pending = chat.send_message(tool_parts)
+        return pending
 
-        response = chat.send_message(tool_parts)
+    response = _consume_tools(response)
 
     _log.info(
         "agentic_loop done badges=%d traces=%d charts=%d",
@@ -1551,19 +1689,41 @@ async def chat_ask(request: Request):
         len(collected_charts),
     )
 
-    try:
-        # Join all text parts (Gemini may split text + function_response across parts)
-        text_parts = [
-            p.text
-            for p in response.candidates[0].content.parts
-            if hasattr(p, "text") and p.text
-        ]
-        final_text = "\n".join(text_parts).strip()
-    except (IndexError, AttributeError) as e:
-        _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
-        raise HTTPException(
-            status_code=502, detail="No se pudo obtener respuesta del modelo"
+    def _text_of(pending) -> str:
+        try:
+            text_parts = [
+                p.text
+                for p in pending.candidates[0].content.parts
+                if hasattr(p, "text") and p.text
+            ]
+            return "\n".join(text_parts).strip()
+        except (IndexError, AttributeError) as e:
+            _log.error("chat/ask failed to extract response user=%s error=%s", username, e)
+            raise HTTPException(
+                status_code=502, detail="No se pudo obtener respuesta del modelo"
+            )
+
+    final_text = _text_of(response)
+    grounded = "\n".join(grounded_values)
+    if _answer_is_ungrounded(
+        final_text, collected_traces, grounded, bool(collected_charts)
+    ) and not collected_traces and not collected_charts:
+        _log.warning(
+            "chat/ask answer had no query user=%s reply_preview=%.120s",
+            username,
+            final_text,
         )
+        response = chat.send_message(
+            "Esa respuesta no vale: no ejecutaste una consulta en este turno. "
+            "Llama ahora a query_postgres o query_bigquery. "
+            "Responde solo con las filas que devuelva la tool. "
+            "El historial del chat no es una fuente. "
+            "No inventes trabajadores, RUTs, bins, cuadrillas ni montos, "
+            "y no escribas la línea Fuente si la tool no la devolvió."
+        )
+        response = _consume_tools(response)
+        final_text = _text_of(response)
+        grounded = "\n".join(grounded_values)
 
     # Strip stray HTML tags Gemini sometimes emits (e.g. <br>)
     final_text = re.sub(
@@ -1593,32 +1753,32 @@ async def chat_ask(request: Request):
         if missing:
             final_text = final_text.rstrip() + "\n\n" + "\n".join(missing)
 
-    # Anti-hallucination guard: block responses with numbers but no source badge
-    # and no tool was called (i.e. Gemini answered from memory)
-    _has_numbers = bool(re.search(r"\b\d[\d\.]{2,}\b", final_text))
-    _has_source = "__source_badge__" in final_text or "📊 Fuente:" in final_text
     _tool_was_called = (
         len(collected_badges) > 0
         or len(collected_charts) > 0
         or len(collected_traces) > 0
     )
-
-    if _has_numbers and not _has_source and not _tool_was_called:
+    blocked = _answer_is_ungrounded(
+        final_text, collected_traces, grounded, bool(collected_charts)
+    )
+    if blocked:
         _log.warning(
-            "chat/ask blocked hallucination — numbers without source user=%s reply_preview=%.120s",
+            "chat/ask blocked ungrounded answer user=%s reply_preview=%.120s",
             username,
             final_text,
         )
         final_text = (
-            "⚠️ No puedo responder esta pregunta sin consultar la base de datos primero. "
-            "Por favor reformula tu pregunta sobre datos internos de Empresas Donar "
-            "(facturas, remuneraciones, tarjas, despacho, sensores, etc.)."
+            "No puedo mostrar esa respuesta: no está respaldada por las filas "
+            "de la consulta. Vuelve a pedir el dato y lo busco de nuevo."
         )
+        collected_badges.clear()
+        collected_charts.clear()
+        collected_traces.clear()
 
     # Store in cache only when at least one trace has real query data (sql + row_count > 0).
     # Caching chart-only or list_tables responses would produce cache hits without download
     # buttons for later users (issue #30).
-    if embedding and _has_valid_traces(collected_traces):
+    if embedding and not blocked and _has_valid_traces(collected_traces):
         cache.put(
             user_question,
             embedding,

@@ -70,6 +70,8 @@ from psycopg2 import sql as psql
 
 from auth import require_auth
 from db import get_connection
+from services.cosecha_pago import TIPO as COSECHA_TIPO
+from services.cosecha_pago import payable as cosecha_payable
 from tarjas_empresa import (
     annotate_detalle_resumen,
     annotate_detalle_rows,
@@ -538,9 +540,61 @@ async def tarjas_general_page(request: Request):
     return _templates.TemplateResponse(request, "tarjas_general.html")
 
 
+def bar_options_for_period(cur, fecha_inicio, fecha_termino, empresa=None):
+    """Contractors and campos that have tarjas_pagos rows in the date range.
+
+    Empresas are every campo with rows in the range. Contratistas are whoever
+    worked in the chosen campo during that range. Tractorista rows stay
+    included: the purchase order must still find them.
+    """
+    filters = [
+        "contratista IS NOT NULL",
+        "fecha::date BETWEEN %s AND %s",
+    ]
+    params = [fecha_inicio, fecha_termino]
+    if empresa:
+        filters.append("nombre_campo = %s")
+        params.append(empresa)
+    cur.execute(
+        "SELECT DISTINCT ON (unaccent(contratista)) contratista "
+        "FROM appsheet.tarjas_pagos WHERE " + " AND ".join(filters) + " "
+        "ORDER BY unaccent(contratista), contratista",
+        params,
+    )
+    contratistas = [row[0] for row in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT DISTINCT nombre_campo FROM appsheet.tarjas_pagos
+        WHERE nombre_campo IS NOT NULL
+          AND fecha::date BETWEEN %s AND %s
+        ORDER BY nombre_campo
+        """,
+        (fecha_inicio, fecha_termino),
+    )
+    empresas = [row[0] for row in cur.fetchall()]
+    return contratistas, empresas
+
+
 @router.get("/api/tarjas/general/filters")
-async def get_tarjas_general_filters():
-    """Distinct values for filter dropdowns (from tarjas_pagos)."""
+async def get_tarjas_general_filters(
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
+    empresa: str = Query(None),
+):
+    """Distinct values for filter dropdowns (from tarjas_pagos).
+
+    With both dates, contratistas and empresas are limited to rows in that
+    range. An empresa further limits contratistas to who worked in that campo.
+    """
+    scoped = bool(fecha_inicio or fecha_termino or empresa)
+    if scoped and (
+        not fecha_inicio
+        or not fecha_termino
+        or not _DATE_RE.match(fecha_inicio)
+        or not _DATE_RE.match(fecha_termino)
+    ):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
     try:
         conn = get_connection()
     except Exception:
@@ -571,13 +625,18 @@ async def get_tarjas_general_filters():
             # tractorista purchase order. A contractor who only has
             # tipo_pago Tractorista must stay selectable. Report queries
             # still exclude those rows via not_tractorista_sql().
-            cur.execute(
-                "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
-                "WHERE contratista IS NOT NULL "
-                "ORDER BY unaccent(contratista), contratista"
-            )
-            contratistas = [r[0] for r in cur.fetchall()]
-            empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
+            if scoped:
+                contratistas, empresas = bar_options_for_period(
+                    cur, fecha_inicio, fecha_termino, empresa or None
+                )
+            else:
+                cur.execute(
+                    "SELECT DISTINCT ON (unaccent(contratista)) contratista FROM appsheet.tarjas_pagos "
+                    "WHERE contratista IS NOT NULL "
+                    "ORDER BY unaccent(contratista), contratista"
+                )
+                contratistas = [r[0] for r in cur.fetchall()]
+                empresas = _get_empresas(cur, "appsheet.tarjas_pagos")
     finally:
         conn.close()
 
@@ -731,14 +790,26 @@ async def get_tarjas_general(
                 params + p_params,
             )
             chart_data = _rows_to_dicts(cur)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(centro_costo or labor or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)),
+                tipo_pago=tipo_pago,
+            )
     finally:
         conn.close()
 
-    return {
+    payload = {
         "labor_summary": labor_summary,
         "person_ranking": person_ranking,
         "chart_data": chart_data,
     }
+    if cosecha:
+        payload["cosecha"] = cosecha
+    return payload
 
 
 # ===========================================================================
@@ -1059,6 +1130,125 @@ def _tipo_pago_badge_class(tipo_pago: str) -> str:
     return _TIPO_PAGO_BADGE_CLASS.get(tipo_pago, "")
 
 
+def _fold_tipo(tipo) -> str:
+    return (tipo or "").casefold().replace("í", "i")
+
+
+def _add_cosecha_into_tipo(resumen: list[dict], tipo: str, amount, jornadas) -> None:
+    """Fold harvest pay into the matching tarjas row. The amount is already final."""
+    if not amount:
+        return
+    wanted = _fold_tipo(tipo)
+    row = next((item for item in resumen if _fold_tipo(item.get("tipo_pago")) == wanted), None)
+    if row is None:
+        resumen.append(
+            {
+                "tipo_pago": tipo,
+                "total_pagar": amount,
+                "total_trabajado": amount,
+                "jornadas": jornadas,
+                "total_empresa": amount,
+                "recargo_pct": 0.0,
+                "recargo": "—",
+                "es_cosecha": True,
+            }
+        )
+        return
+    row["total_trabajado"] = float(row.get("total_trabajado") or 0) + float(amount)
+    row["total_pagar"] = float(row.get("total_pagar") or 0) + float(amount)
+    row["total_empresa"] = float(row.get("total_empresa") or 0) + float(amount)
+    row["jornadas"] = (row.get("jornadas") or 0) + jornadas
+
+
+def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict) -> None:
+    """Fold harvest into Trato or Al día. Piece rate joins Trato. A day whose
+    piece rate is 0 and only the floor was set joins Al día. Neither amount
+    is multiplied by the tarjas 45 % or 50 %.
+    """
+    _add_cosecha_into_tipo(
+        resumen, "trato", cosecha.get("pago_trato") or 0, cosecha.get("jornadas_trato") or 0
+    )
+    _add_cosecha_into_tipo(
+        resumen, "Al dia", cosecha.get("pago_al_dia") or 0, cosecha.get("jornadas_al_dia") or 0
+    )
+    grand = sum(float(row.get("total_trabajado") or 0) for row in resumen)
+    for row in resumen:
+        trab = float(row.get("total_trabajado") or 0)
+        row["pct"] = round(trab / grand * 100, 2) if grand else None
+    for line in cosecha["lines"]:
+        rows.append(
+            {
+                "tipo_pago": line.get("tipo_pago") or COSECHA_TIPO,
+                "labor": line["labor"],
+                "centro_costo": "",
+                "centro_costo_nombre": line["cultivo"] or line["cuartel"] or "—",
+                "jornadas": line["jornadas"],
+                "horas_trabajadas": None,
+                "total_unitario": line["total_unitario"],
+                "costo_total": line["total_labor"],
+                "total_trabajado": line["total_trabajado"],
+                "costo_hora": None,
+                "nombre_campo": "ZUÑIGA",
+                "total_empresa": line["total_empresa"],
+                "es_cosecha": True,
+            }
+        )
+    detail_grand = sum(float(row.get("total_trabajado") or 0) for row in rows)
+    for row in rows:
+        trab = float(row.get("total_trabajado") or 0)
+        row["pct_pago"] = round(trab / detail_grand * 100, 2) if detail_grand else 0.0
+
+
+def _cosecha_tipo_mode(tipo_pago):
+    """Which harvest rows a tipo filter keeps. None means the filter excludes harvest."""
+    if not tipo_pago:
+        return "all"
+    folded = tipo_pago.casefold().replace("í", "i")
+    if folded in {"al dia", "cosecha · al dia"}:
+        return "al_dia"
+    if folded in {"trato", "cosecha"}:
+        return "trato"
+    return None
+
+
+def _narrow_cosecha(cosecha, tipo_pago):
+    if not cosecha:
+        return None
+    mode = _cosecha_tipo_mode(tipo_pago)
+    if mode is None:
+        return None
+    if mode != "all":
+        keep_daily = mode == "al_dia"
+        cosecha["personas_dias"] = [
+            row for row in cosecha["personas_dias"] if bool(row.get("al_dia")) == keep_daily
+        ]
+        cosecha["lines"] = [
+            line for line in cosecha["lines"] if bool(line.get("al_dia")) == keep_daily
+        ]
+        cosecha["pago_al_dia"] = sum(
+            row["a_pagar"] for row in cosecha["personas_dias"] if row.get("al_dia")
+        )
+        cosecha["pago_trato"] = sum(
+            row["a_pagar"] for row in cosecha["personas_dias"] if not row.get("al_dia")
+        )
+        cosecha["jornadas_al_dia"] = sum(1 for row in cosecha["personas_dias"] if row.get("al_dia"))
+        cosecha["jornadas_trato"] = sum(1 for row in cosecha["personas_dias"] if not row.get("al_dia"))
+        cosecha["total"] = cosecha["pago_trato"] + cosecha["pago_al_dia"]
+        cosecha["jornadas"] = cosecha["jornadas_trato"] + cosecha["jornadas_al_dia"]
+    return cosecha if cosecha["total"] else None
+
+
+def _cosecha_if_open(cur, fecha_inicio, fecha_termino, contratista, empresa, blocked, tipo_pago=None):
+    if blocked:
+        return None
+    data = cosecha_payable(
+        cur, fecha_inicio, fecha_termino, contratista or None, empresa or None
+    )
+    if not data["total"]:
+        return None
+    return _narrow_cosecha(data, tipo_pago)
+
+
 @router.get("/api/tarjas/detalle")
 async def get_tarjas_detail(
     fecha_inicio: str = Query(...),
@@ -1097,8 +1287,20 @@ async def get_tarjas_detail(
                 _query_detalle_resumen(cur, where, params)
             )
             rows = _query_detalle_rows(cur, where, params)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(centro_costo or labor or campo or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)),
+                tipo_pago=tipo_pago,
+            )
     finally:
         conn.close()
+
+    if cosecha:
+        _append_cosecha_detalle(resumen, rows, cosecha)
 
     total_trabajado = sum(float(r["total_trabajado"] or 0) for r in resumen)
     total_empresa = sum(float(r["total_empresa"] or 0) for r in resumen)
@@ -1838,15 +2040,27 @@ async def get_tarjas_contractor_data(
             )
             cols = [d[0] for d in cur.description]
             rows = _rows_to_dicts(cur)
+            cosecha = _cosecha_if_open(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                blocked=bool(centro_costo or labor or (tipo_pago and _cosecha_tipo_mode(tipo_pago) is None)),
+                tipo_pago=tipo_pago,
+            )
     finally:
         conn.close()
 
-    return {
+    payload = {
         "columns": cols,
         "rows": rows,
         "count": len(rows),
         "umbral_diario": umbral,
     }
+    if cosecha:
+        payload["cosecha"] = cosecha
+    return payload
 
 
 # ===========================================================================
@@ -2086,13 +2300,38 @@ async def get_tarjas_resumen_persona(
                 params,
             )
             rows = _rows_to_dicts(cur)
+            cosecha = None
+            if _cosecha_tipo_mode(tipo_pago) is not None:
+                cosecha = _cosecha_if_open(
+                    cur,
+                    fecha_inicio,
+                    fecha_termino,
+                    contratista,
+                    empresa,
+                    blocked=False,
+                    tipo_pago=tipo_pago,
+                )
+                if cosecha and trabajador:
+                    wanted = trabajador.casefold()
+                    cosecha["personas_dias"] = [
+                        row
+                        for row in cosecha["personas_dias"]
+                        if (row["trabajador"] or "").casefold() == wanted
+                    ]
+                    cosecha["total"] = sum(row["a_pagar"] for row in cosecha["personas_dias"])
+                    cosecha["jornadas"] = len(cosecha["personas_dias"])
+                    if not cosecha["total"]:
+                        cosecha = None
     finally:
         conn.close()
 
-    return {
+    payload = {
         "rows": rows,
         "count": len(rows),
     }
+    if cosecha:
+        payload["cosecha"] = cosecha
+    return payload
 
 
 @router.get("/api/tarjas/resumen-persona/download-excel")
@@ -2143,8 +2382,33 @@ async def download_tarjas_resumen_persona_excel(
                 params,
             )
             rows = _rows_to_dicts(cur)
+            cosecha = None
+            if _cosecha_tipo_mode(tipo_pago) is not None:
+                cosecha = _cosecha_if_open(
+                    cur,
+                    fecha_inicio,
+                    fecha_termino,
+                    contratista,
+                    empresa,
+                    blocked=False,
+                    tipo_pago=tipo_pago,
+                )
     finally:
         conn.close()
+
+    if cosecha:
+        for person in cosecha["personas_dias"]:
+            if trabajador and (person["trabajador"] or "").casefold() != trabajador.casefold():
+                continue
+            rows.append(
+                {
+                    "trabajador": person["trabajador"],
+                    "contratista": person["contratista"],
+                    "tipo_pago": person.get("tipo_pago") or COSECHA_TIPO,
+                    "fecha": person["fecha"],
+                    "total_trabajado": person["a_pagar"],
+                }
+            )
 
     # Build pivot: worker+tipo → date → total
     dates = sorted({r["fecha"] for r in rows})

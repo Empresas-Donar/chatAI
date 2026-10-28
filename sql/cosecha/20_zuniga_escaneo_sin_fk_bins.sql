@@ -1,4 +1,6 @@
--- =============================================================================
+-- OBSOLETO. No correr: 25_zuniga_registro_crea_bin.sql vuelve a crear la FK.
+-- El escaneo hereda un bin que el registro ya creó.
+--
 -- Cosecha Zúñiga: el escaneo puede guardarse junto con el bin
 --
 -- La FK a bins obligaba a que el bin existiera antes del escaneo.

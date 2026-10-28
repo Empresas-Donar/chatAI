@@ -110,6 +110,10 @@
         </li>
         <li class="chat-source-item">
           <span class="chat-source-dot chat-source-dot--blue"></span>
+          Cosecha Zúñiga
+        </li>
+        <li class="chat-source-item">
+          <span class="chat-source-dot chat-source-dot--blue"></span>
           Sensores
         </li>
         <li class="chat-source-item chat-source-extra">
@@ -1355,6 +1359,8 @@ const ALL_EXAMPLES = [
   { label: 'Costo total tarjas este mes',    q: '¿Cuánto se pagó en tarjas este mes por campo y contratista?' },
   { label: 'Jornadas por labor',             q: '¿Cuántas jornadas se trabajaron por tipo de labor en los últimos 30 días?' },
   { label: 'Trabajadores por contratista',   q: '¿Cuántos trabajadores tiene registrados cada contratista?' },
+  { label: 'Cosecha de ayer',                q: '¿Cuántos capachos se cosecharon ayer en Zúñiga, por cuartel y contratista?' },
+  { label: 'Pago cosecha de la semana',      q: '¿Cuánto hay que pagar de cosecha en Zúñiga esta semana por contratista? Suma el precio de los capachos y el piso una vez por persona y día.' },
 ];
 
 const EXAMPLES_SHOWN = 4;
@@ -1628,7 +1634,10 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/chat/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({
+        messages: history,
+        today: new Date().toLocaleDateString('en-CA'),
+      }),
     });
     const data = await res.json();
     if (thinking._clearTimers) thinking._clearTimers();

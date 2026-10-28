@@ -1248,6 +1248,13 @@ code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .badge-ubibot  { background: #ede9fe; color: #5b21b6; }
 .badge-wiseconn{ background: var(--gold-light); color: var(--earth); }
 .badge-trato   { background: var(--gold-light); color: var(--earth); }
+.badge-cosecha, .tipo-cosecha {
+  background: #e7f2ea;
+  color: #1b5e20;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
 .badge-aldia   { background: var(--green-light); color: var(--green-dark); }
 
 /* Summary cards */

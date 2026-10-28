@@ -153,6 +153,9 @@ function _setFilterValue(el, val) {
     el.value = match.value;
     return;
   }
+  // The bar only lists contractors and campos that have rows in the dates.
+  // A stored or shared name outside that range must not come back as an option.
+  if (el.id === 'fil-contratista' || el.id === 'fil-empresa') return;
   const opt = document.createElement('option');
   opt.value = raw;
   opt.textContent = raw;

@@ -76,7 +76,30 @@ async function queryData() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    const hasData = data.labor_summary.length || data.person_ranking.length;
+    const hasData = data.labor_summary.length || data.person_ranking.length || data.cosecha?.total;
+    if (data.cosecha?.pago_trato) {
+      const jornadas = data.cosecha.jornadas_trato || 0;
+      data.labor_summary.push({
+        labor: 'COSECHA',
+        promedio_diario: jornadas ? Math.round(data.cosecha.pago_trato / jornadas) : null,
+        ganancia_hora: null,
+        total_horas: null,
+        total: data.cosecha.pago_trato,
+        es_cosecha: true,
+      });
+    }
+    if (data.cosecha?.pago_al_dia) {
+      const jornadas = data.cosecha.jornadas_al_dia || 0;
+      data.labor_summary.push({
+        labor: 'COSECHA',
+        al_dia: true,
+        promedio_diario: jornadas ? Math.round(data.cosecha.pago_al_dia / jornadas) : null,
+        ganancia_hora: null,
+        total_horas: null,
+        total: data.cosecha.pago_al_dia,
+        es_cosecha: true,
+      });
+    }
     if (!hasData) {
       hide('tables-section'); hide('chart-section');
       show('empty-state');
@@ -106,8 +129,8 @@ const fmtHoras = v => v != null ? `${Number(v).toLocaleString('es-CL', {maximumF
 // ── Labor summary table ───────────────────────────────────────────────
 function renderLaborTable(rows) {
   const tbody = document.getElementById('labor-tbody');
-  tbody.innerHTML = rows.map(r => `<tr>
-    <td class="cell-labor" title="${esc(r.labor)}">${esc(r.labor)}</td>
+  tbody.innerHTML = rows.map(r => `<tr class="${r.es_cosecha ? 'row-cosecha' : ''}">
+    <td class="cell-labor" title="${esc(r.al_dia ? 'Cosecha · Al día' : r.labor)}">${r.es_cosecha ? `<span class="tipo-cosecha">${r.al_dia ? 'Cosecha · Al día' : 'Cosecha'}</span> ` : ''}${r.al_dia ? '' : esc(r.labor)}</td>
     <td class="num">${r.promedio_diario != null ? fmtCLP.format(r.promedio_diario) : '-'}</td>
     <td class="num">${r.ganancia_hora != null ? fmtCLP.format(r.ganancia_hora) : '-'}</td>
     <td class="num">${fmtHoras(r.total_horas)}</td>

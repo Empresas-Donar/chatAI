@@ -95,7 +95,17 @@ async function queryData() {
     }
     const data = await res.json();
 
-    if (!data.rows.length) {
+    const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
+      trabajador: person.trabajador,
+      labor: person.al_dia ? 'COSECHA · al día' : 'COSECHA',
+      tipo_pago: person.tipo_pago || 'Cosecha',
+      fecha: person.fecha,
+      total_trabajado: person.a_pagar,
+      horas_trabajadas: 0,
+      es_cosecha: true,
+      cuarteles: (person.cuarteles || []).join(', '),
+    }));
+    if (!data.rows.length && !cosechaRows.length) {
       _lastData = null;
       document.getElementById('pivot-section').style.display = 'none';
       document.getElementById('empty-state').style.display = 'block';
@@ -104,7 +114,7 @@ async function queryData() {
 
     _lastData = data;
     document.getElementById('empty-state').style.display = 'none';
-    renderPivot(data.columns, data.rows, data.umbral_diario);
+    renderPivot(data.columns, data.rows.concat(cosechaRows), data.umbral_diario);
     document.getElementById('pivot-section').style.display = '';
     _hasData = true;
   } catch (e) {
@@ -164,6 +174,10 @@ function renderPivot(columns, rows, umbralDiario) {
     const g = groups.get(key);
     g.totalGanado += value;
     g.totalHoras  += horas;
+    if (r.es_cosecha) {
+      g.es_cosecha = true;
+      g.cuarteles = r.cuarteles || '';
+    }
     if (fecha) {
       g.byDate[fecha] = (g.byDate[fecha] || 0) + value;
       if (g.byDate[fecha] > globalMax) globalMax = g.byDate[fecha];
@@ -213,13 +227,14 @@ function renderPivot(columns, rows, umbralDiario) {
     grandTotal += rowTotal;
 
     const tipoCls = g.tipo.toLowerCase() === 'trato' ? 'tc-tipo-trato'
+      : g.es_cosecha ? 'tipo-cosecha'
       : (g.tipo.toLowerCase().includes('dia') || g.tipo.toLowerCase().includes('día'))
         ? 'tc-tipo-aldia' : '';
 
     html += `<tr class="${rowClass}">`;
     html += `<td class="cell-worker">${workerCell}</td>`;
     if (!mergeLabores) {
-      html += `<td class="cell-labor" title="${esc(g.labor)}">${esc(g.labor)}</td>`;
+      html += `<td class="cell-labor" title="${esc(g.cuarteles || g.labor)}">${esc(g.labor)}${g.cuarteles ? ` · ${esc(g.cuarteles)}` : ''}</td>`;
       html += `<td><span class="${tipoCls}">${esc(g.tipo)}</span></td>`;
       const costoHora = g.totalHoras > 0 ? Math.round(g.totalGanado / g.totalHoras) : null;
       html += `<td class="cell-rate">${costoHora != null ? fmtCLPDec.format(costoHora) : '-'}</td>`;

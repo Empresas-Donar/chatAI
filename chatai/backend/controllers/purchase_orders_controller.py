@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth import require_auth
 from db import get_connection
+from services.cosecha_pago import payable as cosecha_payable
 from tarjas_empresa import not_tractorista_sql, total_empresa
 
 logger = logging.getLogger("controllers.purchase_orders")
@@ -260,7 +261,19 @@ def _purchase_order_header(rows, fecha_inicio, fecha_termino):
     }
 
 
+def _cosecha_block(cur, contratista, empresa, fecha_inicio, fecha_termino):
+    """Harvest pay for this order. Lines are the same ones the xlsx exports."""
+    data = cosecha_payable(cur, fecha_inicio, fecha_termino, contratista, empresa)
+    if not data["total"]:
+        return None
+    data["lines"] = cosecha_odoo_lines(
+        cur, contratista, empresa, fecha_inicio, fecha_termino
+    )
+    return data
+
+
 def _line_key(tipo_pago, cc, labor):
+    return ((tipo_pago or "").strip(), str(cc or "").strip(), (labor or "").strip())
     return ((tipo_pago or "").strip(), str(cc or "").strip(), (labor or "").strip())
 
 
@@ -321,6 +334,149 @@ def costo_empresa_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_term
     return lines
 
 
+_COSECHA_PRODUCT = "12.2"  # tarjas_labores: COSECHA MANUAL
+
+
+def _cuartel_cc_code(cuartel: str) -> str | None:
+    """'894 IVU 115' and 'CC-860 CIRUELOS ADULTOS' both point at tarjas_cc."""
+    match = re.search(r"(\d{3})", cuartel or "")
+    return match.group(1) if match else None
+
+
+def _analytic_export_json(valor) -> str | None:
+    """Odoo distribution as text. Empty, null or not-100 distributions stay out."""
+    parsed = valor
+    if isinstance(parsed, str):
+        try:
+            parsed = _json.loads(parsed)
+        except Exception:
+            return None
+    if not isinstance(parsed, dict) or not parsed:
+        return None
+    if any(key == "" or value is None for key, value in parsed.items()):
+        return None
+    cleaned = {str(key): round(float(value), 2) for key, value in parsed.items()}
+    if round(sum(cleaned.values()), 2) != 100:
+        return None
+    body = ", ".join(f'"{key}": {value:.2f}' for key, value in cleaned.items())
+    return "{" + body + "}"
+
+
+def _zuniga_cost_centers(cur) -> dict[str, tuple]:
+    cur.execute(
+        """
+        SELECT id_cc, cultivo, valor_odoo
+        FROM appsheet.tarjas_cc
+        WHERE id_campo = 3
+        """
+    )
+    return {str(row[0]): (row[1], row[2]) for row in cur.fetchall()}
+
+
+def _shares_analytic(centers: dict, shares: dict) -> tuple[str | None, str, str]:
+    """One distribution for a floor that the scans split across cuartels.
+
+    Each cuartel's catalog distribution is scaled by its share of the pesos.
+    The last percentage absorbs the rounding so the values sum to 100.00.
+    """
+    total = sum(int(value) for value in shares.values())
+    if total <= 0:
+        return None, "", ""
+    names = sorted(shares)
+    scaled: dict[str, float] = {}
+    codes: list[str] = []
+    labels: list[str] = []
+    for name in names:
+        code = _cuartel_cc_code(name)
+        nombre, valor = centers.get(code, ("", None)) if code else ("", None)
+        parsed = valor
+        if isinstance(parsed, str):
+            try:
+                parsed = _json.loads(parsed)
+            except Exception:
+                parsed = None
+        if not isinstance(parsed, dict) or not parsed or any(v is None for v in parsed.values()):
+            return None, "", ""
+        weight = sum(float(v) for v in parsed.values())
+        if weight <= 0:
+            return None, "", ""
+        portion = int(shares[name]) / total
+        for key, value in parsed.items():
+            odoo_id = str(key)
+            scaled[odoo_id] = scaled.get(odoo_id, 0.0) + portion * (float(value) / weight) * 100
+        if code:
+            codes.append(code)
+        labels.append(nombre or name)
+    ordered = sorted(scaled)
+    cleaned: dict[str, float] = {}
+    used = 0.0
+    for index, key in enumerate(ordered):
+        if index == len(ordered) - 1:
+            cleaned[key] = round(100 - used, 2)
+        else:
+            cleaned[key] = round(scaled[key], 2)
+            used = round(used + cleaned[key], 2)
+    return (
+        _analytic_export_json(cleaned),
+        " / ".join(codes),
+        " / ".join(labels),
+    )
+
+
+def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
+    """Harvest lines in the same grain as the order screen and the PDF.
+
+    Product is COSECHA MANUAL (12.2). Price is the harvest amount, with no
+    tarjas factor. A cuartel without a Zúñiga cost center is returned without
+    analytic so the preview marks it incomplete instead of inventing one.
+    """
+    data = cosecha_payable(cur, fecha_inicio, fecha_termino, contratista, empresa)
+    if not data["total"]:
+        return []
+    centers = _zuniga_cost_centers(cur)
+    lines = []
+    for item in data["lines"]:
+        if not item["total_labor"]:
+            continue
+        shares = item.get("shares") or {}
+        if len(shares) > 1:
+            analytic, code, nombre = _shares_analytic(centers, shares)
+        else:
+            cuartel = next(iter(shares), item.get("cuartel"))
+            code = _cuartel_cc_code(cuartel)
+            nombre, valor = centers.get(code, ("", None)) if code else ("", None)
+            analytic = _analytic_export_json(valor) if valor is not None else None
+            code = code or ""
+            nombre = nombre or cuartel or ""
+        qty = float(item["jornadas"] or 0)
+        total = float(item["total_labor"])
+        price = float(item["total_unitario"] or 0)
+        lines.append(
+            {
+                "partner_id": contratista,
+                "product_id": _COSECHA_PRODUCT,
+                "analytic": analytic,
+                "qty": qty,
+                "price_unit": price,
+                "total": total,
+                "tipo_pago": item["tipo_pago"],
+                "cc": code or "",
+                "CC": code or "",
+                "Nombre CC": nombre or item.get("cuartel") or "",
+                "labor": item["labor"],
+                "Nombre Labor": item["labor"],
+                "jornadas": item["jornadas"],
+                "total_unitario": price,
+                "total_labor": total,
+                "cuartel": item.get("cuartel") or "",
+                "cultivo": nombre or item.get("cultivo") or "",
+                "es_cosecha": True,
+                "al_dia": bool(item.get("al_dia")),
+            }
+        )
+    return lines
+
+
 def _analytic_has_empty_key(analytic) -> bool:
     """True if analytic is missing, has an empty key, or a null percentage.
 
@@ -346,8 +502,9 @@ def _analytic_has_empty_key(analytic) -> bool:
 
 
 def group_odoo_export_rows(lines):
-    """Group priced lines by product_id + analytic for the Odoo xlsx."""
+    """Group identical document lines. Different prices stay on their own row."""
     grouped: dict[tuple, dict] = {}
+    order: list[tuple] = []
     excluded_amount = 0.0
     export_rows = []
     for line in lines:
@@ -357,13 +514,24 @@ def group_odoo_export_rows(lines):
         if not product_id or _analytic_has_empty_key(analytic):
             excluded_amount += amount
             continue
-        key = (line.get("partner_id"), product_id, analytic)
+        # Labor and unit price stay in the key so a piece-rate row and a
+        # floor row with the same product and cost center are not averaged
+        # into one Excel line. Order follows the document.
+        price_key = round(float(line.get("price_unit") or 0), 2)
+        key = (
+            line.get("partner_id"),
+            product_id,
+            analytic,
+            line.get("labor") or "",
+            price_key,
+        )
+        if key not in grouped:
+            order.append(key)
         g = grouped.setdefault(key, {"qty": 0.0, "amount": 0.0})
         g["qty"] += float(line.get("qty") or 0)
         g["amount"] += amount
-    for (partner_id, product_id, analytic), g in sorted(
-        grouped.items(), key=lambda item: str(item[0][1] or "")
-    ):
+    for partner_id, product_id, analytic, _labor, _price in order:
+        g = grouped[(partner_id, product_id, analytic, _labor, _price)]
         qty = g["qty"]
         price = round(g["amount"] / qty, 2) if qty else None
         export_rows.append((partner_id, product_id, qty, analytic, price))
@@ -450,16 +618,34 @@ async def get_purchase_order(
             data = _purchase_order_lines(
                 cur, contratista, empresa, fecha_inicio, fecha_termino
             )
+            cosecha = _cosecha_block(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
     finally:
         conn.close()
 
-    if not data:
+    if not data and not cosecha:
         return {"rows": [], "header": None}
 
-    return {
-        "header": _purchase_order_header(data, fecha_inicio, fecha_termino),
-        "rows": data,
-    }
+    header = (
+        _purchase_order_header(data, fecha_inicio, fecha_termino)
+        if data
+        else {
+            "contractor": contratista,
+            "company": empresa,
+            "date_from": fecha_inicio,
+            "date_to": fecha_termino,
+            "total_trato": 0,
+            "total_al_dia": 0,
+            "total": 0,
+            "pct_trato": 0,
+            "pct_al_dia": 0,
+        }
+    )
+    payload = {"header": header, "rows": data}
+    if cosecha:
+        payload["cosecha"] = cosecha
+    return payload
 
 
 @router.get("/api/purchase-orders/odoo-export")
@@ -492,6 +678,11 @@ async def export_odoo_csv(
         with conn.cursor() as cur:
             priced = costo_empresa_odoo_lines(
                 cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
+            priced.extend(
+                cosecha_odoo_lines(
+                    cur, contratista, empresa, fecha_inicio, fecha_termino
+                )
             )
             rows, excluded_amount = group_odoo_export_rows(priced)
     finally:
@@ -723,6 +914,11 @@ async def get_export_preview(
         with conn.cursor() as cur:
             priced = costo_empresa_odoo_lines(
                 cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
+            priced.extend(
+                cosecha_odoo_lines(
+                    cur, contratista, empresa, fecha_inicio, fecha_termino
+                )
             )
             try:
                 cur.execute(
@@ -1181,6 +1377,7 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .detail-table td.num { text-align: right; }
 .badge-trato { color: #1d4ed8; font-weight: 700; }
 .badge-aldia { color: #15803d; font-weight: 700; }
+.badge-cosecha { color: #8aa394; font-weight: 500; font-size: 6.5pt; }
 """
 
 
@@ -1399,6 +1596,10 @@ async def billing_order_data(
         tipo_rows, pivot_rows = _fetch_billing_order(
             conn, contratista, empresa, fecha_inicio, fecha_termino
         )
+        with conn.cursor() as cur:
+            cosecha = _cosecha_block(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
     finally:
         conn.close()
 
@@ -1416,7 +1617,7 @@ async def billing_order_data(
         }
         for r in pivot_rows
     ]
-    return {
+    payload = {
         "header": header,
         "columns": [
             "trabajador",
@@ -1429,6 +1630,9 @@ async def billing_order_data(
         "rows": rows,
         "count": len(rows),
     }
+    if cosecha:
+        payload["cosecha"] = cosecha
+    return payload
 
 
 @router.get("/api/odoo/facturacion/pdf")
@@ -1452,6 +1656,10 @@ async def billing_order_pdf(
         tipo_rows, pivot_rows = _fetch_billing_order(
             conn, contratista, empresa, fecha_inicio, fecha_termino
         )
+        with conn.cursor() as cur:
+            cosecha = _cosecha_block(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
     finally:
         conn.close()
 
@@ -1487,6 +1695,29 @@ async def billing_order_pdf(
             worker_tipos[w].update(
                 t.strip() for t in str(row[5]).split(",") if t.strip()
             )
+
+    if cosecha:
+        total_pagar += cosecha["total"]
+        total_trato += cosecha.get("pago_trato") or 0
+        total_al_dia += cosecha.get("pago_al_dia") or 0
+        for person in cosecha["personas_dias"]:
+            worker = person["trabajador"] or "(sin nombre)"
+            fecha = person["fecha"]
+            if worker not in workers:
+                workers[worker] = {}
+                worker_tipos[worker] = set()
+            prev = workers[worker].get(
+                fecha, {"total": 0.0, "trabajado": 0.0, "comision": 0.0, "cosecha": 0.0}
+            )
+            workers[worker][fecha] = {
+                "total": prev["total"] + person["a_pagar"],
+                "trabajado": prev["trabajado"] + person["a_pagar"],
+                "comision": prev["comision"],
+                "cosecha": prev.get("cosecha", 0.0) + person["a_pagar"],
+            }
+            lugares = ", ".join(person["cuarteles"])
+            worker_tipos[worker].add("Al dia" if person.get("al_dia") else "trato")
+        dates = sorted(set(dates) | {p["fecha"] for p in cosecha["personas_dias"] if p["fecha"]})
 
     sorted_workers = sorted(workers.items())
 
@@ -1524,7 +1755,9 @@ async def billing_order_pdf(
         for d in dates:
             cell = wdata.get(d)
             v = cell["trabajado"] if cell else 0
-            cells += f'<td class="num">{_fmt_clp(v) if v else "-"}</td>'
+            cosecha_v = cell.get("cosecha") or 0 if cell else 0
+            mark = ' <span class="badge-cosecha">Cosecha</span>' if cosecha_v else ""
+            cells += f'<td class="num">{(_fmt_clp(v) + mark) if v else "-"}</td>'
         even_cls = "even" if len(rows_html) % 2 == 0 else ""
         badges = _tipo_badges_html(worker_tipos.get(worker, set()))
         name_cell = f"{worker} {badges}".strip() if badges else worker
@@ -1692,26 +1925,42 @@ async def purchase_order_print_pdf(
             rows = _purchase_order_lines(
                 cur, contratista, empresa, fecha_inicio, fecha_termino
             )
+            cosecha = _cosecha_block(
+                cur, contratista, empresa, fecha_inicio, fecha_termino
+            )
     finally:
         conn.close()
 
-    if not rows:
+    if not rows and not cosecha:
         raise HTTPException(
             status_code=404, detail="Sin datos para los filtros indicados"
         )
 
-    header = _purchase_order_header(rows, fecha_inicio, fecha_termino)
-    total_trato = header["total_trato"]
-    total_al_dia = header["total_al_dia"]
-    total_pagar = header["total"]
+    if rows:
+        header = _purchase_order_header(rows, fecha_inicio, fecha_termino)
+        total_trato = header["total_trato"]
+        total_al_dia = header["total_al_dia"]
+        total_pagar = header["total"]
+    else:
+        total_trato = 0
+        total_al_dia = 0
+        total_pagar = 0
+    if cosecha:
+        total_pagar += cosecha["total"]
+        total_trato += cosecha.get("pago_trato") or 0
+        total_al_dia += cosecha.get("pago_al_dia") or 0
 
     d1 = _fmt_date_display(fecha_inicio)
     d2 = _fmt_date_display(fecha_termino)
     glosa = f"SERVICIOS DE LABORES AGRÍCOLAS {d1.upper()} AL {d2.upper()}"
     semana = f"Semana desde {d1} al {d2}"
 
+    document_rows = list(rows)
+    if cosecha:
+        document_rows.extend(cosecha["lines"])
+
     rows_html = ""
-    for i, r in enumerate(rows):
+    for i, r in enumerate(document_rows):
         tipo = r.get("tipo_pago")
         is_trato = (tipo or "").lower().strip() in ("trato", "a trato")
         tipo_label = "Trato" if is_trato else "Al día"
@@ -1722,7 +1971,7 @@ async def purchase_order_print_pdf(
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{r.get("CC") or ""}</td>
           <td>{r.get("Nombre CC") or "—"}</td>
-          <td>{r.get("Nombre Labor") or ""}</td>
+          <td>{r.get("Nombre Labor") or r.get("labor") or ""}</td>
           <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
           <td class="num">{_fmt_clp(r.get("total_unitario"))}</td>
           <td class="num">{_fmt_clp(r.get("total_labor"))}</td>

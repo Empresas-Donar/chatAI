@@ -28,12 +28,12 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 5. Hora extra: horas × valor.
 6. Chico, simple, Gilberto, extraordinaria y operario solo: el `valor` de la fila, sin carnet y sin prorrateo.
 
-Una segunda fila del mismo trabajador, misma fecha, misma labor, mismo campo y mismo centro de costo no vuelve a cobrar el día: si la otra ya tiene monto, esta queda en 0. El mismo día en otro predio o en otro cuartel es otra jornada y sí se cobra.
+Si la misma persona carga dos veces la misma labor, con las mismas horas, el mismo día, en el mismo cuartel y con el mismo tractor, solo cuenta el último registro. El anterior queda en 0. La fila nueva se guarda: no se rechaza, para que la app no falle al grabar. Si las horas son distintas, se pagan las dos: un día de 9 h y otro de 4,5 h es un día y medio. Otro cuartel, otro tractor u otra labor el mismo día también se cobra. El bono mensual no entra en esta regla.
 
 ## Qué no hace
 
 - No corre cuando solo cambia `estado`. Aprobar no recalcula.
-- Si editan el pago y no cambian fecha, trabajador, labor, horas ni tipo de pago, se guarda el monto que escribieron en las tres columnas. Si cambian las horas o la labor, el trigger vuelve a calcular.
+- Si editan el pago del último registro de esa jornada y no cambian fecha, trabajador, labor, horas ni tipo de pago, se guarda el monto que escribieron en las tres columnas. Si cambian las horas o la labor, el trigger vuelve a calcular. Una carga anterior de la misma labor y las mismas horas se queda en 0 aunque reescriban el monto. La media jornada, con otras horas, no se borra.
 - No toca filas que no son `tipo_pago = Tractorista`. El trigger tiene `WHEN (tipo_pago = tractorista)`: trato, al día y el resto ni siquiera entran a la función.
 - Si la labor es `Bono mensual` y el tipo es Tractorista (fanout de un tractorista del esquema), no recalcula tarifa: solo alinea `total_tractor`, `total_trabajado` y `total_pagar` con el monto del bono. Solo Cristian Gonzalez está en el esquema. Cristian González Dinamarca no es tractorista: su bono vuelve a tipo Bono.
 - No reescribió el historial al instalarse. Las filas ya guardadas cambian la próxima vez que se edite la fecha, la persona, la labor o las horas.

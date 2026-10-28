@@ -68,14 +68,15 @@ async function generate() {
       const body = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(body.detail || res.statusText);
     }
-    const { header, rows } = await res.json();
+    const { header, rows, cosecha } = await res.json();
+    const cosechaLines = cosecha?.lines || [];
 
-    if (!header || !rows.length) {
+    if ((!header || !rows.length) && !cosechaLines.length) {
       document.getElementById('empty-box').classList.remove('hidden');
       return;
     }
 
-    renderDocument(header, rows);
+    renderDocument(header, rows, cosecha);
     if (typeof syncFiltersToURL === 'function') syncFiltersToURL(FILTER_IDS);
   } catch (err) {
     showError('Error al generar: ' + err.message);
@@ -91,25 +92,29 @@ document.getElementById('btn-generate').addEventListener('click', () => {
 });
 
 // ── Render document ──────────────────────────────────────────────────────
-function renderDocument(h, rows) {
+function renderDocument(h, rows, cosecha) {
+  const cosechaTotal = Number(cosecha?.total) || 0;
+  const pagar = (Number(h.total) || 0) + cosechaTotal;
   document.getElementById('doc-company').textContent    = h.company;
   document.getElementById('doc-contractor').textContent = h.contractor;
   document.getElementById('doc-week').textContent =
     `Semana desde ${fmtDate(h.date_from)} al ${fmtDate(h.date_to)}`;
   document.getElementById('doc-date-from').textContent = fmtDate(h.date_from);
   document.getElementById('doc-date-to').textContent   = fmtDate(h.date_to);
-  document.getElementById('doc-grand-total').textContent = fmtCLP.format(h.total);
+  document.getElementById('doc-grand-total').textContent = fmtCLP.format(pagar);
 
   document.getElementById('doc-glosa').textContent =
     `SERVICIOS DE LABORES AGRÍCOLAS SEMANA DEL ${fmtDate(h.date_from)} AL ${fmtDate(h.date_to)}`;
 
-  document.getElementById('doc-total-trato').textContent = fmtCLP.format(h.total_trato);
-  document.getElementById('doc-total-aldia').textContent = fmtCLP.format(h.total_al_dia);
-  document.getElementById('doc-total').textContent       = fmtCLP.format(h.total);
+  const trato = (Number(h.total_trato) || 0) + (Number(cosecha?.pago_trato) || 0);
+  const alDia = (Number(h.total_al_dia) || 0) + (Number(cosecha?.pago_al_dia) || 0);
+  document.getElementById('doc-total-trato').textContent = fmtCLP.format(trato);
+  document.getElementById('doc-total-aldia').textContent = fmtCLP.format(alDia);
+  document.getElementById('doc-total').textContent       = fmtCLP.format(pagar);
 
-  renderChart(h.pct_trato, h.pct_al_dia);
+  renderChart(pagar ? trato / pagar * 100 : 0, pagar ? alDia / pagar * 100 : 0);
 
-  const grand = rows.reduce((s, r) => s + (Number(r.total_labor) || 0), 0);
+  const grand = rows.reduce((s, r) => s + (Number(r.total_labor) || 0), 0) + cosechaTotal;
   const tbody = document.getElementById('doc-tbody');
   tbody.innerHTML = '';
   for (const row of rows) {
@@ -129,6 +134,25 @@ function renderDocument(h, rows) {
       <td>${esc(row['Nombre Labor'] ?? '')}</td>
       <td class="num">${row.jornadas ?? ''}</td>
       <td class="num">${fmtCLP.format(row.total_unitario ?? 0)}</td>
+      <td class="num">${fmtCLP.format(amount)}</td>
+      <td class="num">${fmtPct(pctVal)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  for (const line of cosecha?.lines || []) {
+    const amount = Number(line.total_labor) || 0;
+    const pctVal = grand > 0 ? amount / grand * 100 : null;
+    const tipo = line.tipo_pago || (line.al_dia ? 'Al dia' : 'trato');
+    const label = PAYMENT_TYPE_LABELS[tipo] || tipo;
+    const badgeCls = PAYMENT_TYPE_BADGE[tipo] || 'badge-aldia';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span class="badge ${badgeCls}">${esc(label)}</span></td>
+      <td>${esc(line.CC || line.cc || '')}</td>
+      <td>${esc(line['Nombre CC'] || line.cultivo || line.cuartel || '—')}</td>
+      <td>${esc(line['Nombre Labor'] || line.labor || '')}</td>
+      <td class="num">${line.jornadas ?? ''}</td>
+      <td class="num">${fmtCLP.format(line.total_unitario ?? 0)}</td>
       <td class="num">${fmtCLP.format(amount)}</td>
       <td class="num">${fmtPct(pctVal)}</td>
     `;
@@ -217,7 +241,11 @@ async function loadExportPreview() {
   ccModal.error().classList.add('hidden');
 
   try {
-    const res = await fetch('/api/tarjas/export-preview?' + _lastParams);
+    const res = await fetch('/api/tarjas/export-preview?' + _lastParams, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) throw new Error('La sesión expiró. Recarga la página.');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 

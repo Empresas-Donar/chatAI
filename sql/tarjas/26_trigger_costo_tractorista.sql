@@ -22,9 +22,27 @@
 -- Al insertar o cambiar fecha, trabajador, labor, horas o tipo_pago, el
 -- trigger llena total_tractor, total_trabajado y total_pagar. Aprobar no
 -- recalcula.
+--
+-- Misma labor y las mismas horas, el mismo día, cuartel y tractor: cuenta
+-- el último registro y el anterior queda en 0. Horas distintas (un día y
+-- medio) se pagan las dos. La fila nueva sí se guarda.
 -- =============================================================================
 
 BEGIN;
+
+CREATE TABLE IF NOT EXISTS appsheet.tarjas_tractorista_registro (
+    id_resumen TEXT PRIMARY KEY,
+    registrado_en TIMESTAMPTZ NOT NULL
+);
+
+COMMENT ON TABLE appsheet.tarjas_tractorista_registro IS
+    'Momento en que se guardó cada tarja de tractorista. Sirve para quedarse con el último registro del mismo día, cuartel y tractor.';
+
+INSERT INTO appsheet.tarjas_tractorista_registro (id_resumen, registrado_en)
+SELECT p."id_Resumen", TIMESTAMPTZ '2020-01-01'
+  FROM appsheet.tarjas_pagos p
+ WHERE lower(trim(COALESCE(p.tipo_pago, ''))) = 'tractorista'
+ON CONFLICT (id_resumen) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS appsheet.tarjas_esquema_tractorista (
     id              TEXT PRIMARY KEY,
@@ -207,8 +225,13 @@ DECLARE
     v_fecha DATE;
     v_costo NUMERIC;
     v_manual NUMERIC;
-    v_duplicada BOOLEAN;
+    v_cuando TIMESTAMPTZ;
 BEGIN
+    -- El UPDATE que deja en 0 al registro anterior vuelve a entrar acá.
+    IF pg_trigger_depth() > 1 THEN
+        RETURN NEW;
+    END IF;
+
     IF lower(trim(COALESCE(NEW.tipo_pago, ''))) IS DISTINCT FROM 'tractorista' THEN
         RETURN NEW;
     END IF;
@@ -227,6 +250,67 @@ BEGIN
         NEW.total_pagar := v_manual;
         RETURN NEW;
     END IF;
+
+    -- Misma labor y las mismas horas, el mismo día, cuartel y tractor: es
+    -- la misma jornada cargada dos veces. Cuenta el último registro.
+    -- Horas distintas (un día y medio: 9 h y 4,5 h) se pagan las dos.
+    -- No se rechaza la fila: la app tiene que poder guardarla.
+    INSERT INTO appsheet.tarjas_tractorista_registro (id_resumen, registrado_en)
+    VALUES (NEW."id_Resumen", clock_timestamp())
+    ON CONFLICT (id_resumen) DO NOTHING;
+
+    SELECT r.registrado_en
+      INTO v_cuando
+      FROM appsheet.tarjas_tractorista_registro r
+     WHERE r.id_resumen = NEW."id_Resumen";
+
+    IF EXISTS (
+        SELECT 1
+          FROM appsheet.tarjas_pagos p
+          JOIN appsheet.tarjas_tractorista_registro r
+            ON r.id_resumen = p."id_Resumen"
+         WHERE p.trabajador IS NOT DISTINCT FROM NEW.trabajador
+           AND split_part(COALESCE(p.fecha, ''), ' ', 1)
+               IS NOT DISTINCT FROM split_part(COALESCE(NEW.fecha, ''), ' ', 1)
+           AND p.nombre_campo IS NOT DISTINCT FROM NEW.nombre_campo
+           AND COALESCE(trim(p.cuartel_cc), '') = COALESCE(trim(NEW.cuartel_cc), '')
+           AND COALESCE(NULLIF(lower(trim(p.maquina)), ''), '')
+               = COALESCE(NULLIF(lower(trim(NEW.maquina)), ''), '')
+           AND p."id_Resumen" IS DISTINCT FROM NEW."id_Resumen"
+           AND lower(trim(COALESCE(p.tipo_pago, ''))) = 'tractorista'
+           AND lower(trim(COALESCE(p.labor, ''))) IS DISTINCT FROM 'bono mensual'
+           AND p.labor IS NOT DISTINCT FROM NEW.labor
+           AND p.horas_trabajadas IS NOT DISTINCT FROM NEW.horas_trabajadas
+           AND r.registrado_en > v_cuando
+    ) THEN
+        NEW.total_tractor := 0;
+        NEW.total_trabajado := 0;
+        NEW.total_pagar := 0;
+        RETURN NEW;
+    END IF;
+
+    UPDATE appsheet.tarjas_pagos p
+       SET total_tractor = 0,
+           total_trabajado = 0,
+           total_pagar = 0
+      FROM appsheet.tarjas_tractorista_registro r
+     WHERE r.id_resumen = p."id_Resumen"
+       AND p.trabajador IS NOT DISTINCT FROM NEW.trabajador
+       AND split_part(COALESCE(p.fecha, ''), ' ', 1)
+           IS NOT DISTINCT FROM split_part(COALESCE(NEW.fecha, ''), ' ', 1)
+       AND p.nombre_campo IS NOT DISTINCT FROM NEW.nombre_campo
+       AND COALESCE(trim(p.cuartel_cc), '') = COALESCE(trim(NEW.cuartel_cc), '')
+       AND COALESCE(NULLIF(lower(trim(p.maquina)), ''), '')
+           = COALESCE(NULLIF(lower(trim(NEW.maquina)), ''), '')
+       AND p."id_Resumen" IS DISTINCT FROM NEW."id_Resumen"
+       AND lower(trim(COALESCE(p.tipo_pago, ''))) = 'tractorista'
+       AND lower(trim(COALESCE(p.labor, ''))) IS DISTINCT FROM 'bono mensual'
+       AND p.labor IS NOT DISTINCT FROM NEW.labor
+       AND p.horas_trabajadas IS NOT DISTINCT FROM NEW.horas_trabajadas
+       AND r.registrado_en <= v_cuando
+       AND (COALESCE(p.total_tractor, 0) <> 0
+            OR COALESCE(p.total_trabajado, 0) <> 0
+            OR COALESCE(p.total_pagar, 0) <> 0);
 
     -- AppSheet rewrites the whole row when the user edits the payment.
     -- If the day itself did not change, keep the amount they typed.
@@ -259,27 +343,6 @@ BEGIN
         RETURN NEW;
     END;
 
-    -- Misma persona, fecha, labor, campo y CC: la segunda fila no se paga.
-    -- Otro predio u otro cuartel el mismo día es otra jornada.
-    SELECT EXISTS (
-        SELECT 1
-          FROM appsheet.tarjas_pagos p
-         WHERE p.trabajador = NEW.trabajador
-           AND p.fecha = NEW.fecha
-           AND p.labor IS NOT DISTINCT FROM NEW.labor
-           AND p.nombre_campo IS NOT DISTINCT FROM NEW.nombre_campo
-           AND p.cuartel_cc IS NOT DISTINCT FROM NEW.cuartel_cc
-           AND p."id_Resumen" IS DISTINCT FROM NEW."id_Resumen"
-           AND lower(trim(COALESCE(p.tipo_pago, ''))) = 'tractorista'
-           AND COALESCE(p.total_tractor, 0) > 0
-    ) INTO v_duplicada;
-
-    IF v_duplicada AND COALESCE(NEW.total_tractor, 0) = 0 THEN
-        NEW.total_trabajado := 0;
-        NEW.total_pagar := 0;
-        RETURN NEW;
-    END IF;
-
     v_costo := appsheet.costo_tractorista(
         NEW.trabajador, NEW.labor, NEW.horas_trabajadas, v_fecha
     );
@@ -295,7 +358,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION appsheet.aplicar_costo_tractorista() IS
-    'Trigger de tractorista: escribe total_tractor, total_trabajado y total_pagar. Activo como trg_costo_tractorista.';
+    'Trigger de tractorista: escribe el monto. La misma jornada repetida paga el último registro. Un día y una media jornada se pagan los dos.';
 
 DROP TRIGGER IF EXISTS trg_costo_tractorista ON appsheet.tarjas_pagos;
 

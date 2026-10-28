@@ -99,25 +99,45 @@ async function generate() {
 
     const data = await res.json();
 
-    if (!data.rows?.length) {
+    if (!data.rows?.length && !data.cosecha?.total) {
       document.getElementById('empty-box').classList.remove('hidden');
       return;
     }
 
+    const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
+      trabajador: person.trabajador,
+      fecha: person.fecha,
+      total_pagar: person.a_pagar,
+      total_trabajado: person.a_pagar,
+      total_contratista: 0,
+      tipo_pago: person.al_dia ? 'Al día' : 'trato',
+      es_cosecha: true,
+      cuarteles: (person.cuarteles || []).join(', '),
+    }));
+    const rows = (data.rows || []).concat(cosechaRows);
+    const cosechaTotal = Number(data.cosecha?.total) || 0;
+
     let header = data.header;
     if (!header) {
-      const total = data.rows.reduce((s, r) => s + (Number(r.total_pagar) || 0), 0);
+      const total = rows.reduce((s, r) => s + (Number(r.total_pagar) || 0), 0);
       header = {
         total,
         total_trato: 0,
         total_al_dia: total,
-        total_trabajado: data.rows.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0),
-        total_contratista: data.rows.reduce((s, r) => s + (Number(r.total_contratista) || 0), 0),
+        total_trabajado: rows.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0),
+        total_contratista: rows.reduce((s, r) => s + (Number(r.total_contratista) || 0), 0),
+      };
+    } else {
+      header = {
+        ...header,
+        total: (Number(header.total) || 0) + cosechaTotal,
+        total_trato: (Number(header.total_trato) || 0) + (Number(data.cosecha.pago_trato) || 0),
+        total_al_dia: (Number(header.total_al_dia) || 0) + (Number(data.cosecha.pago_al_dia) || 0),
       };
     }
 
     renderHeader(header, contratista, empresa, fecha_inicio, fecha_termino);
-    renderPivot(data.columns, data.rows, header);
+    renderPivot(data.columns, rows, header);
     document.getElementById('bo-document').style.display = 'block';
     document.getElementById('btn-pdf').disabled = false;
     if (typeof syncFiltersToURL === 'function') syncFiltersToURL(FILTER_IDS);
@@ -195,11 +215,15 @@ function renderPivot(columns, rows, header) {
     const tipos = String(r.tipo_pago || '').split(',').map(s => s.trim()).filter(Boolean);
     tipos.forEach(t => g.tipos.add(t));
     if (fecha) {
-      const prev = g.byDate[fecha] || { total: 0, trabajado: 0, comision: 0 };
+      const prev = g.byDate[fecha] || { total: 0, trabajado: 0, comision: 0, cosecha: 0, cuarteles: '' };
+      const cuarteles = r.es_cosecha ? (r.cuarteles || '') : (prev.cuarteles || '');
+      const joined = [prev.cuarteles, cuarteles].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ');
       g.byDate[fecha] = {
         total: prev.total + value,
         trabajado: prev.trabajado + trabajado,
         comision: prev.comision + comision,
+        cosecha: (prev.cosecha || 0) + (r.es_cosecha ? trabajado : 0),
+        cuarteles: joined,
       };
     }
   });
@@ -212,6 +236,12 @@ function renderPivot(columns, rows, header) {
     const seen = new Set();
     const parts = [];
     for (const t of tipos) {
+      if (t.toLowerCase().startsWith('cosecha')) {
+        if (seen.has('cosecha')) continue;
+        seen.add('cosecha');
+        parts.push(`<span class="badge badge-cosecha">${esc(t)}</span>`);
+        continue;
+      }
       const isTrato = t.toLowerCase() === 'trato';
       const key = isTrato ? 'trato' : 'aldia';
       if (seen.has(key)) continue;
@@ -227,7 +257,12 @@ function renderPivot(columns, rows, header) {
   function dateCellHtml(cell) {
     const val = cell?.trabajado || 0;
     if (!val) return `<td class="cell-dash">-</td>`;
-    return `<td class="cell-date">${fmtCLP.format(val)}</td>`;
+    if (!cell.cosecha) return `<td class="cell-date">${fmtCLP.format(val)}</td>`;
+    const note = cell.cosecha === val
+      ? 'Cosecha'
+      : `Cosecha ${fmtCLP.format(cell.cosecha)}`;
+    const where = cell.cuarteles ? ` · ${cell.cuarteles}` : '';
+    return `<td class="cell-date cell-cosecha" title="${esc(note + where)}">${fmtCLP.format(val)}<span class="cosecha-mark">cosecha</span></td>`;
   }
 
   const thead = document.getElementById('bo-pivot-thead');

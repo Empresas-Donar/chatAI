@@ -1,4 +1,6 @@
--- =============================================================================
+-- OBSOLETO. No correr: 25_zuniga_registro_crea_bin.sql vuelve a crear la FK.
+-- El trigger del registro inserta el bin antes de guardar la fila.
+--
 -- Cosecha Zúñiga: registro puede guardarse junto con el bin
 --
 -- La FK a bins obligaba a que el bin existiera antes del registro.

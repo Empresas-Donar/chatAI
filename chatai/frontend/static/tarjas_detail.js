@@ -176,8 +176,8 @@ async function queryData() {
 
 // ── Render summary table ─────────────────────────────────────────────
 function renderSummary(resumen, totalEmpresa, totalTrabajado, jornadas) {
-  const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono' };
-  const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono' };
+  const TIPO_LABELS = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono', 'Cosecha': 'Cosecha', 'Cosecha · Al día': 'Cosecha · Al día' };
+  const TIPO_CLASS  = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono', 'Cosecha': 'tipo-cosecha', 'Cosecha · Al día': 'tipo-cosecha' };
 
   const tbody = document.getElementById('summary-tbody');
   tbody.innerHTML = resumen.map(r => {
@@ -208,12 +208,16 @@ function renderChart(resumen, total) {
     if (r.tipo_pago === 'trato') return 'Trato';
     if (r.tipo_pago === 'Al dia' || r.tipo_pago === 'Al día') return 'Al Día';
     if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return 'Bono';
+    if (r.tipo_pago === 'Cosecha') return 'Cosecha';
+    if (r.tipo_pago === 'Cosecha · Al día') return 'Cosecha · Al día';
     return r.tipo_pago;
   });
   const values = resumen.map(r => r.total_trabajado);
   const colors = resumen.map(r => {
     if (r.tipo_pago === 'trato') return '#3b82f6';
     if (r.tipo_pago === 'Bono' || r.tipo_pago === 'bono') return '#10b981';
+    if (r.tipo_pago === 'Cosecha') return '#2e7d32';
+    if (r.tipo_pago === 'Cosecha · Al día') return '#66bb6a';
     return '#f97316';
   });
 
@@ -249,8 +253,8 @@ function renderChart(resumen, total) {
 function renderDetail(rows, count) {
   document.getElementById('detail-count').textContent = `${count} registro${count !== 1 ? 's' : ''}`;
 
-  const TIPO_CLASS = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono' };
-  const TIPO_LABEL = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono' };
+  const TIPO_CLASS = { 'trato': 'tipo-trato', 'Al dia': 'tipo-aldia', 'Al día': 'tipo-aldia', 'Bono': 'tipo-bono', 'bono': 'tipo-bono', 'Cosecha': 'tipo-cosecha', 'Cosecha · Al día': 'tipo-cosecha' };
+  const TIPO_LABEL = { 'trato': 'Trato', 'Al dia': 'Al Día', 'Al día': 'Al Día', 'Bono': 'Bono', 'bono': 'Bono', 'Cosecha': 'Cosecha', 'Cosecha · Al día': 'Cosecha · Al día' };
 
   const tbody = document.getElementById('detail-tbody');
   tbody.innerHTML = rows.map(r => {
