@@ -40,4 +40,5 @@ jobs:
         env:
           IMAGE_TAG: ${{ github.sha }}
           HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: bash automations/harvest_quality/deploy_job.sh
