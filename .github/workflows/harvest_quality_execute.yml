@@ -1,0 +1,29 @@
+name: Execute harvest quality job
+
+on:
+  schedule:
+    # 00:00 and 01:00 UTC cover 21:00 Chile in summer and winter.
+    # 11:00–23:00 UTC covers 08:00–20:00. schedule.py keeps 08:00–21:00.
+    - cron: "0 0,1,11-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/1072789134265/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions-deploy@integraciones-484915.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run job
+        run: |
+          gcloud run jobs execute harvest-quality \
+            --project=integraciones-484915 \
+            --region=southamerica-west1 \
+            --wait
