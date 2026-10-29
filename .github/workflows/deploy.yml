@@ -6,6 +6,8 @@ on:
       - main
     paths-ignore:
       - "automations/**"
+      - ".github/workflows/harvest_quality.yml"
+      - ".github/workflows/harvest_quality_job.yml"
 
 jobs:
   deploy:

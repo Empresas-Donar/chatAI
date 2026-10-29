@@ -1,0 +1,43 @@
+name: Deploy harvest quality job
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "automations/harvest_quality/**"
+      - ".github/workflows/harvest_quality_job.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/1072789134265/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions-deploy@integraciones-484915.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker southamerica-west1-docker.pkg.dev --quiet
+
+      - name: Build and push
+        run: |
+          docker build \
+            -f automations/harvest_quality/Dockerfile \
+            -t southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/harvest-quality:${{ github.sha }} \
+            automations/harvest_quality
+          docker push southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/harvest-quality:${{ github.sha }}
+
+      - name: Deploy job and scheduler
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}
+        run: bash automations/harvest_quality/deploy_job.sh
