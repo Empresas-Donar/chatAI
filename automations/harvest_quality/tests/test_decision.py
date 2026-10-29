@@ -11,7 +11,7 @@ from harvest_quality.pages import split_pages
 from harvest_quality.schedule import is_due, needs_n8n_force
 
 SANTIAGO = ZoneInfo("America/Santiago")
-HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
 
 def test_same_fingerprint_does_not_send():
@@ -41,20 +41,20 @@ def test_empty_text_has_no_fingerprint():
     assert fingerprint_text("Fecha de la última actualización: 29/10/2026 16:12:24") is None
 
 
-def test_window_includes_eight_and_twenty():
+def test_window_includes_eight_and_twenty_one():
     assert is_due(datetime(2026, 10, 29, 8, 0, tzinfo=SANTIAGO), HOURS, 25)
-    assert is_due(datetime(2026, 10, 29, 20, 12, tzinfo=SANTIAGO), HOURS, 25)
+    assert is_due(datetime(2026, 10, 29, 21, 12, tzinfo=SANTIAGO), HOURS, 25)
 
 
 def test_evening_hours_need_forzar_for_n8n():
     assert not needs_n8n_force(16)
     assert needs_n8n_force(17)
-    assert needs_n8n_force(20)
+    assert needs_n8n_force(21)
 
 
 def test_outside_hours_and_late_grace_are_skipped():
     assert not is_due(datetime(2026, 10, 29, 7, 0, tzinfo=SANTIAGO), HOURS, 25)
-    assert not is_due(datetime(2026, 10, 29, 21, 0, tzinfo=SANTIAGO), HOURS, 25)
+    assert not is_due(datetime(2026, 10, 29, 22, 0, tzinfo=SANTIAGO), HOURS, 25)
     assert not is_due(datetime(2026, 10, 29, 8, 40, tzinfo=SANTIAGO), HOURS, 25)
 
 
