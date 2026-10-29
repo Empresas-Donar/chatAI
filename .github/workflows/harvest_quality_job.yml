@@ -36,7 +36,7 @@ jobs:
             automations/harvest_quality
           docker push southamerica-west1-docker.pkg.dev/integraciones-484915/integraciones/harvest-quality:${{ github.sha }}
 
-      - name: Deploy job and scheduler
+      - name: Deploy job
         env:
           IMAGE_TAG: ${{ github.sha }}
           HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}

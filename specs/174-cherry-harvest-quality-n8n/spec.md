@@ -20,7 +20,7 @@ dentro de una sesión de Google.
 - [x] `config/n8n.yaml` (`production_url`, `test_url`, `file_field` data, `force_field` forzar, `force_value` 1) y `config/job.yaml` (timezone `America/Santiago`, hours 8 a 20, `proceso` `calidad-cosecha`, `report_url` del informe, `empty_marker` "No hay datos").
 - [x] Comando `run`: cron, URL de producción. Sin `forzar` de 08:00 a 16:00. Con `forzar=1` de 17:00 a 21:00. Si la hora de Chile no está entre 08:00 y 21:00, termina sin fila.
 - [x] Comando `now`: prueba en producción, URL de producción, con `forzar=1`, sin mirar el reloj. Envía aunque la huella ya se haya mandado. También vía `workflow_dispatch`.
-- [x] Cloud Scheduler `0 8-21 * * *` en `America/Santiago` llama al Cloud Run Job `harvest-quality`. `schedule.py` deja pasar solo 08:00–21:00.
+- [x] Cloud Scheduler `harvest-quality-hourly` (`0 8-21 * * *`, `America/Santiago`, `southamerica-east1`) llama al Cloud Run Job `harvest-quality`. Lo administra la configuración gcloud `donar`. `schedule.py` deja pasar solo 08:00–21:00.
 - [x] Abre `https://datastudio.google.com/s/imKk2KuwenU` con sesión de Google guardada (secreto, no va al git). Fecha = hoy en Santiago. Descarga el PDF de todas las páginas.
 - [x] Quita hojas cuyo texto contiene "No hay datos". Si no queda ninguna, no hay POST y la fila queda `sin_datos`.
 - [x] La huella es el hash del texto de las hojas que quedan, sin la línea de última actualización. Si coincide con el último `enviado`, la fila queda `sin_cambios` y no hay POST.
@@ -29,7 +29,7 @@ dentro de una sesión de Google.
 - [x] Si la sesión no entra o n8n rechaza el archivo, termina sin marcar `enviado`.
 - [x] No importa `chatai`, `core` ni `tarjas_empresa`. Postgres solo para `intranet.proceso_estado`. No abre BigQuery. Dependencias solo en `automations/harvest_quality/requirements.txt`. No se copia en `chatai/Dockerfile`.
 - [x] `.github/workflows/deploy.yml` ignora `automations/**`.
-- [x] `harvest_quality.yml` queda solo para `workflow_dispatch` (comando `now`). El horario lo corre Cloud Scheduler con el comando `run`.
+- [x] `harvest_quality.yml` queda solo para `workflow_dispatch` (comando `now`). El horario lo corre Cloud Scheduler con el comando `run`. El workflow de deploy no crea ni actualiza el Scheduler.
 
 ## Context
 
@@ -43,13 +43,13 @@ dentro de una sesión de Google.
 - El secreto de la sesión de Google se llama `HARVEST_QUALITY_SESSION`. No se commitea. Se renueva a mano cuando vence.
 - Regla de hoja vacía verificada el 2026-10-29: las páginas que dicen «No hay datos» están vacías. Ese día las útiles fueron Resumen y las cuadrillas 1, 2, 5, 6, 7, 8, 9 y 10. La regla es el marcador, no esa lista fija.
 - Este informe no es tarjas. No se aplica 1,45 ni 1,50.
-- Cloud Scheduler usa `0 8-21 * * *` con zona `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. El Scheduler está en `southamerica-east1`. `schedule.py` deja pasar solo las 08:00–21:00, con 25 minutos de gracia. Desde las 17:00 el POST lleva `forzar=1`. GitHub Actions ya no tiene cron.
+- Cloud Scheduler `harvest-quality-hourly` usa `0 8-21 * * *` con zona `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. El Scheduler está en `southamerica-east1`, proyecto `integraciones-484915`, y se creó con la configuración gcloud `donar` (`gestion@empresasdonar.cl`). GitHub no lo crea ni lo actualiza: la cuenta de deploy no tiene ese permiso. `schedule.py` deja pasar solo las 08:00–21:00, con 25 minutos de gracia. Desde las 17:00 el POST lleva `forzar=1`. GitHub Actions ya no tiene cron.
 - La tabla es `intranet.proceso_estado` (`sql/intranet/03_proceso_estado.sql`). Sirve a más de un proceso. Este job usa `proceso = calidad-cosecha`. Cada hora inserta. La comparación es la última fila de ese proceso con `enviado` verdadero. Un martes a las 08:00 con la misma huella del lunes a las 16:00 no envía. Un domingo sin monitoreos inserta `sin_datos` y no envía.
 - Postgres de este job es solo esa tabla. El secreto es `DATABASE_URL`, el mismo del cron de centros de costo.
 
 ## Decisions
 
-- Horario final: 08:00 a 21:00 inclusive, todos los días, vía Cloud Scheduler. Desde las 17:00 se manda `forzar=1`.
+- Horario final: 08:00 a 21:00 inclusive, todos los días, vía Cloud Scheduler `harvest-quality-hourly` en la cuenta Donar. Desde las 17:00 se manda `forzar=1`. El deploy de GitHub solo actualiza el Cloud Run Job.
 - Estado en Postgres, no en un txt del runner ni en un commit por hora.
 - La huella ignora la línea de última actualización de Looker.
 
