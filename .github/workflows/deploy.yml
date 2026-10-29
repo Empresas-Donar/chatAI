@@ -8,7 +8,6 @@ on:
       - "automations/**"
       - ".github/workflows/harvest_quality.yml"
       - ".github/workflows/harvest_quality_job.yml"
-      - ".github/workflows/harvest_quality_execute.yml"
 
 jobs:
   deploy:
