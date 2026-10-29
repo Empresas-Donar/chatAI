@@ -59,7 +59,7 @@ gcloud run jobs add-iam-policy-binding "${JOB}" \
 scheduler_args=(
   --project="${PROJECT}"
   --location="${SCHEDULER_REGION}"
-  --schedule="0 8-20 * * *"
+  --schedule="0 8-21 * * *"
   --time-zone="America/Santiago"
   --uri="${RUN_URI}"
   --http-method=POST

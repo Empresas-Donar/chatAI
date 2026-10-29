@@ -4,7 +4,7 @@ Este trabajo no es parte de ChatAI. Vive solo en `automations/harvest_quality/`.
 
 ## Qué hace
 
-Cada hora, de 08:00 a 20:00 hora de Chile, todos los días, abre el informe Looker «Control de Calidad Cosecha-Cerezas», deja solo las hojas con datos y llama a n8n si el contenido cambió respecto del último envío. Si no hay datos, no llama. Si los números son los mismos que el último envío —aunque sea de otro día—, no llama.
+Cada hora, de 08:00 a 21:00 hora de Chile, todos los días, abre el informe Looker «Control de Calidad Cosecha-Cerezas», deja solo las hojas con datos y llama a n8n si el contenido cambió respecto del último envío. Si no hay datos, no llama. Si los números son los mismos que el último envío —aunque sea de otro día—, no llama.
 
 ## Frontera
 
@@ -27,7 +27,7 @@ python -m harvest_quality now
 ```
 
 - `session` abre Chrome normal (no incógnito) en el login de Google y guarda `.session/state.json`. Ese archivo es el secreto `HARVEST_QUALITY_SESSION`. No se commitea. El informe se ve sin cuenta; la descarga no.
-- `run` es el cron. URL de producción. De 08:00 a 16:00 no manda `forzar`. De 17:00 a 20:00 sí, porque n8n solo acepta hasta las 16:59. Si la hora de Chile no está entre 08:00 y 20:00 (con 25 minutos de gracia), termina sin descargar y sin fila.
+- `run` es el cron. URL de producción. De 08:00 a 16:00 no manda `forzar`. De 17:00 a 21:00 sí, porque n8n solo acepta hasta las 16:59. Si la hora de Chile no está entre 08:00 y 21:00 (con 25 minutos de gracia), termina sin descargar y sin fila.
 - `now` es la prueba en producción. Ignora el reloj, usa la URL de producción y manda `forzar=1`. Envía aunque la huella ya se haya mandado. Si no hay hojas con datos, no hay POST. Si n8n acepta, esa huella queda como último envío y la hora siguiente no la repite.
 
 ## Trazabilidad
@@ -48,7 +48,7 @@ La comparación usa la última fila de ese proceso con `enviado` verdadero. La h
 
 ## Horario
 
-Cloud Scheduler dispara el Cloud Run Job `harvest-quality` con `0 8-20 * * *` en `America/Santiago`. El job está en `southamerica-west1` y no es el servicio `chatai`. El Scheduler vive en `southamerica-east1` porque esa API no está en Santiago; la hora igual es de Chile. `schedule.py` deja pasar solo las 08:00–20:00. Desde las 17:00 manda `forzar=1` para saltar la ventana 08:00–16:59 de n8n. GitHub ya no tiene cron: **Run workflow** sigue sirviendo para `now`.
+Cloud Scheduler dispara el Cloud Run Job `harvest-quality` con `0 8-21 * * *` en `America/Santiago`. El job está en `southamerica-west1` y no es el servicio `chatai`. El Scheduler vive en `southamerica-east1` porque esa API no está en Santiago; la hora igual es de Chile. `schedule.py` deja pasar solo las 08:00–21:00. Desde las 17:00 manda `forzar=1` para saltar la ventana 08:00–16:59 de n8n. GitHub ya no tiene cron: **Run workflow** sigue sirviendo para `now`.
 
 ## Hoja vacía
 

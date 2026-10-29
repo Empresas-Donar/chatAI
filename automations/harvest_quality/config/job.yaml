@@ -1,6 +1,6 @@
 timezone: America/Santiago
-# Inclusive. 08:00 is the first check and 20:00 is the last.
-hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+# Inclusive. 08:00 is the first check and 21:00 is the last.
+hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 # GitHub cron can start late. A start up to this many minutes past the hour still counts.
 grace_minutes: 25
 proceso: calidad-cosecha
