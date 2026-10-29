@@ -48,7 +48,7 @@ La comparación usa la última fila de ese proceso con `enviado` verdadero. La h
 
 ## Horario
 
-Cloud Scheduler dispara el Cloud Run Job `harvest-quality` con `0 8-21 * * *` en `America/Santiago`. El job está en `southamerica-west1` y no es el servicio `chatai`. El Scheduler vive en `southamerica-east1` porque esa API no está en Santiago; la hora igual es de Chile. `schedule.py` deja pasar solo las 08:00–21:00. Desde las 17:00 manda `forzar=1` para saltar la ventana 08:00–16:59 de n8n. GitHub ya no tiene cron: **Run workflow** sigue sirviendo para `now`.
+El horario es el Cloud Scheduler `harvest-quality-hourly` en `southamerica-east1`, proyecto `integraciones-484915`, creado con la configuración gcloud `donar` (`gestion@empresasdonar.cl`). Corre `0 8-21 * * *` en `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. No es el servicio `chatai`. GitHub solo despliega la imagen; no crea ni actualiza ese horario. `schedule.py` deja pasar solo las 08:00–21:00. Desde las 17:00 manda `forzar=1` para saltar la ventana 08:00–16:59 de n8n. **Run workflow** sigue sirviendo para `now`.
 
 ## Hoja vacía
 
