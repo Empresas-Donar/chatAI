@@ -1,0 +1,97 @@
+from datetime import datetime
+from io import BytesIO
+from zoneinfo import ZoneInfo
+
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pypdf import PdfWriter
+
+from harvest_quality.decision import ENVIADO, SIN_CAMBIOS, SIN_DATOS, decide
+from harvest_quality.fingerprint import fingerprint_text
+from harvest_quality.pages import split_pages
+from harvest_quality.schedule import is_due, needs_n8n_force
+
+SANTIAGO = ZoneInfo("America/Santiago")
+HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+
+def test_same_fingerprint_does_not_send():
+    assert decide("abc", "abc") == SIN_CAMBIOS
+
+
+def test_first_data_sends():
+    assert decide("abc", None) == ENVIADO
+
+
+def test_changed_fingerprint_sends():
+    assert decide("nuevo", "viejo") == ENVIADO
+
+
+def test_no_pages_does_not_send():
+    assert decide(None, "viejo") == SIN_DATOS
+    assert decide("", "viejo") == SIN_DATOS
+
+
+def test_stamp_line_is_not_a_change():
+    base = "Cuadrilla 1\n10 monitoreos"
+    later = base + "\nFecha de la última actualización: 29/10/2026 16:12:24"
+    assert fingerprint_text(base) == fingerprint_text(later)
+
+
+def test_empty_text_has_no_fingerprint():
+    assert fingerprint_text("Fecha de la última actualización: 29/10/2026 16:12:24") is None
+
+
+def test_window_includes_eight_and_twenty():
+    assert is_due(datetime(2026, 10, 29, 8, 0, tzinfo=SANTIAGO), HOURS, 25)
+    assert is_due(datetime(2026, 10, 29, 20, 12, tzinfo=SANTIAGO), HOURS, 25)
+
+
+def test_evening_hours_need_forzar_for_n8n():
+    assert not needs_n8n_force(16)
+    assert needs_n8n_force(17)
+    assert needs_n8n_force(20)
+
+
+def test_outside_hours_and_late_grace_are_skipped():
+    assert not is_due(datetime(2026, 10, 29, 7, 0, tzinfo=SANTIAGO), HOURS, 25)
+    assert not is_due(datetime(2026, 10, 29, 21, 0, tzinfo=SANTIAGO), HOURS, 25)
+    assert not is_due(datetime(2026, 10, 29, 8, 40, tzinfo=SANTIAGO), HOURS, 25)
+
+
+def test_sunday_inside_the_hour_is_due():
+    sunday = datetime(2026, 11, 1, 10, 0, tzinfo=SANTIAGO)
+    assert sunday.weekday() == 6
+    assert is_due(sunday, HOURS, 25)
+
+
+def _pdf(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=200)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    font_ref = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref}),
+    })
+    content = DecodedStreamObject()
+    content.set_data(f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(content)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def test_empty_marker_drops_the_page():
+    kept, huella = split_pages(_pdf("No hay datos"), "No hay datos")
+    assert kept == b""
+    assert huella is None
+
+
+def test_page_with_data_keeps_a_fingerprint():
+    kept, huella = split_pages(_pdf("Cuadrilla 1"), "No hay datos")
+    assert kept
+    assert huella
+

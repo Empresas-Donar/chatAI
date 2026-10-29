@@ -1,0 +1,6 @@
+.session/
+.venv/
+*.pdf
+__pycache__/
+.pytest_cache/
+*.pyc

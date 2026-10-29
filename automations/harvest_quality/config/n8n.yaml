@@ -1,0 +1,5 @@
+production_url: https://gestionempresasdonar.app.n8n.cloud/webhook/calidad-cosecha-7f3a9c2e41b8
+test_url: https://gestionempresasdonar.app.n8n.cloud/webhook-test/calidad-cosecha-7f3a9c2e41b8
+file_field: data
+force_field: forzar
+force_value: "1"

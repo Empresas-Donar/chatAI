@@ -1,0 +1,7 @@
+playwright
+pypdf
+pyyaml
+httpx
+psycopg2-binary
+python-dotenv
+pytest
