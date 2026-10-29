@@ -1,0 +1,43 @@
+name: Harvest quality PDF
+
+on:
+  schedule:
+    # 11:00–23:00 and 00:00 UTC. schedule.py keeps 08:00–20:00 America/Santiago.
+    # 23:00 UTC is 20:00 in summer. 00:00 UTC is 20:00 in winter.
+    - cron: "0 0,11-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automations/harvest_quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Unit tests
+        run: python -m pytest tests -q
+
+      - name: Scheduled check
+        if: github.event_name == 'schedule'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}
+        run: python -m harvest_quality run
+
+      - name: Manual check
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}
+        run: python -m harvest_quality now
