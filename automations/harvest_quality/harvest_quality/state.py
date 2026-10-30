@@ -32,10 +32,17 @@ def connect():
     )
 
 
+def dotenv_paths(root) -> list:
+    """Local repo dotenv files. The Cloud Run image lives at /app and has none."""
+    if len(root.parents) < 2:
+        return []
+    repo = root.parents[1]
+    return [repo / ".env", repo / "chatai" / ".env"]
+
+
 def _load_env() -> None:
-    repo = ROOT.parents[1]
-    load_dotenv(repo / ".env")
-    load_dotenv(repo / "chatai" / ".env")
+    for path in dotenv_paths(ROOT):
+        load_dotenv(path)
 
 
 def last_sent_huella(conn, proceso: str) -> str | None:
