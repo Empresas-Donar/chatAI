@@ -88,10 +88,28 @@ def _pdf(text: str) -> bytes:
     return out.getvalue()
 
 
-def test_empty_marker_drops_the_page():
+def test_empty_marker_drops_a_page_without_a_table():
     kept, huella = split_pages(_pdf("No hay datos"), "No hay datos")
     assert kept == b""
     assert huella is None
+
+
+def test_column_title_without_rows_is_dropped():
+    kept, huella = split_pages(
+        _pdf("Cosechero Muestras No hay datos"),
+        "No hay datos",
+    )
+    assert kept == b""
+    assert huella is None
+
+
+def test_page_with_table_stays_even_if_one_chart_is_empty():
+    kept, huella = split_pages(
+        _pdf("No hay datos 1 2 5 6 3 4 2 3"),
+        "No hay datos",
+    )
+    assert kept
+    assert huella
 
 
 def test_page_with_data_keeps_a_fingerprint():

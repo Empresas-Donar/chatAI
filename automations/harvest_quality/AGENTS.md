@@ -52,7 +52,7 @@ El horario es el Cloud Scheduler `harvest-quality-hourly` en `southamerica-east1
 
 ## Hoja vacía
 
-Se quita la página cuyo texto contiene «No hay datos». Si no queda ninguna, motivo `sin_datos` y no hay POST. La regla es ese texto, no una lista fija de cuadrillas.
+Se quita la hoja que dice «No hay datos» o «No data» y no tiene filas de cosechero. El título de la columna no cuenta. Si hay filas y además un recuadro vacío, la hoja se queda. Si no queda ninguna, motivo `sin_datos` y no hay POST.
 
 ## Si falla
 

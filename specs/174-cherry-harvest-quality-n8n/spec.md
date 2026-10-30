@@ -22,7 +22,7 @@ dentro de una sesión de Google.
 - [x] Comando `now`: prueba en producción, URL de producción, con `forzar=1`, sin mirar el reloj. Envía aunque la huella ya se haya mandado. También vía `workflow_dispatch`.
 - [x] Cloud Scheduler `harvest-quality-hourly` (`0 8-16 * * *`, `America/Santiago`, `southamerica-east1`) llama al Cloud Run Job `harvest-quality`. Lo administra la configuración gcloud `donar`. `schedule.py` deja pasar solo 08:00–16:00.
 - [x] Abre `https://datastudio.google.com/s/imKk2KuwenU` con sesión de Google guardada (secreto, no va al git). Fecha = hoy en Santiago. El contenedor y Chromium usan `America/Santiago`. Descarga el PDF de todas las páginas.
-- [x] Quita hojas cuyo texto contiene "No hay datos". Si no queda ninguna, no hay POST y la fila queda `sin_datos`.
+- [x] Se quita la hoja que dice «No hay datos» o «No data» y no tiene filas de cosechero. El título de la columna no cuenta. Si hay filas y además un recuadro vacío, la hoja se queda. Si no queda ninguna, no hay POST y la fila queda `sin_datos`.
 - [x] La huella es el hash del texto de las hojas que quedan, sin la línea de última actualización. Si coincide con el último `enviado`, la fila queda `sin_cambios` y no hay POST.
 - [x] Cada revisión inserta una fila en `intranet.proceso_estado` (`id`, `proceso`, `huella`, `enviado`, `motivo`, `revisado_en`, `enviado_en`). No se pisa el historial.
 - [x] POST multipart, archivo en el campo `data`. `now` agrega `forzar=1`.
@@ -41,7 +41,7 @@ dentro de una sesión de Google.
   - prueba: `https://gestionempresasdonar.app.n8n.cloud/webhook-test/calidad-cosecha-7f3a9c2e41b8`
 - Las corridas con horario no envían `forzar` y usan la URL de producción. `now` también usa la URL de producción y envía `forzar=1`, aunque la huella ya se haya mandado. La URL de prueba queda en `config/n8n.yaml` y no la usa ningún comando.
 - El secreto de la sesión de Google se llama `HARVEST_QUALITY_SESSION`. No se commitea. Se renueva a mano cuando vence.
-- Regla de hoja vacía verificada el 2026-10-29: las páginas que dicen «No hay datos» están vacías. Ese día las útiles fueron Resumen y las cuadrillas 1, 2, 5, 6, 7, 8, 9 y 10. La regla es el marcador, no esa lista fija.
+- Desde el 2026-10-30 una hoja se quita cuando dice «No hay datos» o «No data» y la tabla no tiene filas. El título «Cosechero» no la salva. Si hay filas y un recuadro vacío, la hoja se envía.
 - Este informe no es tarjas. No se aplica 1,45 ni 1,50.
 - Cloud Scheduler `harvest-quality-hourly` usa `0 8-16 * * *` con zona `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. El Scheduler está en `southamerica-east1`, proyecto `integraciones-484915`, y se creó con la configuración gcloud `donar` (`gestion@empresasdonar.cl`). GitHub no lo crea ni lo actualiza: la cuenta de deploy no tiene ese permiso. `schedule.py` deja pasar solo las 08:00–16:00, con 25 minutos de gracia. Esas horas no llevan `forzar`. GitHub Actions ya no tiene cron.
 - La tabla es `intranet.proceso_estado` (`sql/intranet/03_proceso_estado.sql`). Sirve a más de un proceso. Este job usa `proceso = calidad-cosecha`. Cada hora inserta. La comparación es la última fila de ese proceso con `enviado` verdadero. Un martes a las 08:00 con la misma huella del lunes a las 16:00 no envía. Un domingo sin monitoreos inserta `sin_datos` y no envía.
@@ -64,7 +64,7 @@ dentro de una sesión de Google.
 
 ## Tests
 
-- `automations/harvest_quality/tests/test_decision.py` cubre la decisión, la huella, el reloj y el descarte de la hoja que dice «No hay datos». No toca la base ni n8n.
+- `automations/harvest_quality/tests/test_decision.py` cubre la decisión, la huella, el reloj, el descarte de la hoja que dice «No hay datos» sin filas (aunque el título diga Cosechero) y que una hoja con filas se conserva aunque un recuadro esté vacío. No toca la base ni n8n.
 
 ## Manual QA
 
