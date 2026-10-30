@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS intranet.proceso_estado (
     huella TEXT,
     enviado BOOLEAN NOT NULL,
     motivo TEXT NOT NULL,
-    revisado_en TIMESTAMPTZ NOT NULL,
-    enviado_en TIMESTAMPTZ,
+    -- Hora de pared de America/Santiago, sin zona. No es UTC.
+    revisado_en TIMESTAMP NOT NULL,
+    enviado_en TIMESTAMP,
     CONSTRAINT intranet_proceso_estado_proceso_chk
         CHECK (btrim(proceso) <> ''),
     CONSTRAINT intranet_proceso_estado_motivo_chk

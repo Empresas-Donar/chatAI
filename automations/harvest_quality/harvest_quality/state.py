@@ -77,7 +77,11 @@ def insert_check(
             """
             INSERT INTO intranet.proceso_estado
                 ("id", "proceso", "huella", "enviado", "motivo", "revisado_en", "enviado_en")
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s AT TIME ZONE 'America/Santiago',
+                %s AT TIME ZONE 'America/Santiago'
+            )
             """,
             (row_id, proceso, huella, enviado, motivo, revisado_en, enviado_en),
         )
