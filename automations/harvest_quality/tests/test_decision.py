@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -9,6 +10,7 @@ from harvest_quality.decision import ENVIADO, SIN_CAMBIOS, SIN_DATOS, decide
 from harvest_quality.fingerprint import fingerprint_text
 from harvest_quality.pages import split_pages
 from harvest_quality.schedule import is_due, needs_n8n_force
+from harvest_quality.state import dotenv_paths
 
 SANTIAGO = ZoneInfo("America/Santiago")
 HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
@@ -94,4 +96,8 @@ def test_page_with_data_keeps_a_fingerprint():
     kept, huella = split_pages(_pdf("Cuadrilla 1"), "No hay datos")
     assert kept
     assert huella
+
+
+def test_cloud_run_image_has_no_dotenv_parent():
+    assert dotenv_paths(Path("/app")) == []
 
