@@ -14,7 +14,7 @@ Cada hora, de 08:00 a 21:00 hora de Chile, todos los días, abre el informe Look
 - Dependencias solo en `requirements.txt` de esta carpeta. No van a `chatai/requirements.txt`.
 - No se copia en `chatai/Dockerfile`. `deploy.yml` ignora `automations/**` para no redesplegar Cloud Run.
 - La sesión de Google es el secreto `HARVEST_QUALITY_SESSION` (JSON de Playwright). No va al git. Se renueva a mano cuando el login vence.
-- El control de fecha del informe tiene que ser hoy en Santiago. El job no elige otra fecha.
+- El control de fecha del informe tiene que ser hoy en Santiago. El job no elige otra fecha. El contenedor y Chromium usan `America/Santiago`, porque «Hoy» en Looker sigue el reloj del navegador. En UTC, después de las 21:00 de Chile ya es el día siguiente.
 
 ## Comandos
 

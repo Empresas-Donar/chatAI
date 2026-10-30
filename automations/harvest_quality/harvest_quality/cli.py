@@ -56,7 +56,7 @@ def execute(mode: str) -> int:
         log.info("outside Chile window %s", now.isoformat())
         return 0
 
-    pdf = download_report(job["report_url"])
+    pdf = download_report(job["report_url"], timezone=job["timezone"])
     kept, huella = split_pages(pdf, job["empty_marker"])
     proceso = job["proceso"]
     conn = connect()

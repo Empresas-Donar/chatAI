@@ -27,6 +27,7 @@ path = Path("/tmp/harvest-quality-env.yaml")
 values = {
     "DATABASE_URL": os.environ["DATABASE_URL"],
     "HARVEST_QUALITY_SESSION": os.environ["HARVEST_QUALITY_SESSION"],
+    "TZ": "America/Santiago",
 }
 path.write_text("".join(f"{key}: {json.dumps(value)}\n" for key, value in values.items()))
 PY

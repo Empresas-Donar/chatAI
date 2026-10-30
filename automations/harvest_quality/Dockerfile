@@ -9,5 +9,6 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY harvest_quality ./harvest_quality
 COPY config ./config
 
+ENV TZ=America/Santiago
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "harvest_quality", "run"]

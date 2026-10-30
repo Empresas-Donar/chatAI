@@ -38,7 +38,7 @@ def save_session(report_url: str, dest: Path) -> None:
         context.close()
 
 
-def download_report(report_url: str, timeout_ms: int = 180_000) -> bytes:
+def download_report(report_url: str, timeout_ms: int = 180_000, timezone: str = "America/Santiago") -> bytes:
     raw = os.environ.get("HARVEST_QUALITY_SESSION", "").strip()
     if not raw:
         raise SessionMissing("HARVEST_QUALITY_SESSION is empty")
@@ -50,7 +50,11 @@ def download_report(report_url: str, timeout_ms: int = 180_000) -> bytes:
         dest = Path(folder) / "report.pdf"
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(storage_state=str(state), accept_downloads=True)
+            context = browser.new_context(
+                storage_state=str(state),
+                accept_downloads=True,
+                timezone_id=timezone,
+            )
             page = context.new_page()
             page.goto(report_url, wait_until="domcontentloaded", timeout=timeout_ms)
             try:

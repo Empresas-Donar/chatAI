@@ -21,7 +21,7 @@ dentro de una sesión de Google.
 - [x] Comando `run`: cron, URL de producción. Sin `forzar` de 08:00 a 16:00. Con `forzar=1` de 17:00 a 21:00. Si la hora de Chile no está entre 08:00 y 21:00, termina sin fila.
 - [x] Comando `now`: prueba en producción, URL de producción, con `forzar=1`, sin mirar el reloj. Envía aunque la huella ya se haya mandado. También vía `workflow_dispatch`.
 - [x] Cloud Scheduler `harvest-quality-hourly` (`0 8-21 * * *`, `America/Santiago`, `southamerica-east1`) llama al Cloud Run Job `harvest-quality`. Lo administra la configuración gcloud `donar`. `schedule.py` deja pasar solo 08:00–21:00.
-- [x] Abre `https://datastudio.google.com/s/imKk2KuwenU` con sesión de Google guardada (secreto, no va al git). Fecha = hoy en Santiago. Descarga el PDF de todas las páginas.
+- [x] Abre `https://datastudio.google.com/s/imKk2KuwenU` con sesión de Google guardada (secreto, no va al git). Fecha = hoy en Santiago. El contenedor y Chromium usan `America/Santiago`. Descarga el PDF de todas las páginas.
 - [x] Quita hojas cuyo texto contiene "No hay datos". Si no queda ninguna, no hay POST y la fila queda `sin_datos`.
 - [x] La huella es el hash del texto de las hojas que quedan, sin la línea de última actualización. Si coincide con el último `enviado`, la fila queda `sin_cambios` y no hay POST.
 - [x] Cada revisión inserta una fila en `intranet.proceso_estado` (`id`, `proceso`, `huella`, `enviado`, `motivo`, `revisado_en`, `enviado_en`). No se pisa el historial.
