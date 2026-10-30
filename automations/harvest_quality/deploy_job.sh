@@ -40,7 +40,7 @@ gcloud run jobs deploy "${JOB}" \
   --env-vars-file="${ENV_FILE}" \
   --memory=2Gi \
   --cpu=2 \
-  --task-timeout=900 \
+  --task-timeout=1800 \
   --max-retries=0 \
   --quiet
 

@@ -56,4 +56,4 @@ Se quita la página cuyo texto contiene «No hay datos». Si no queda ninguna, m
 
 ## Si falla
 
-Sin sesión, sin PDF o si n8n no acepta el archivo, el proceso termina con error y no escribe `enviado`. No inventa un envío.
+Si Looker no entrega el PDF, lo intenta de nuevo hasta 5 veces. Sin sesión no reintenta. Si n8n no acepta el archivo, el proceso termina con error y no escribe `enviado`. No inventa un envío.

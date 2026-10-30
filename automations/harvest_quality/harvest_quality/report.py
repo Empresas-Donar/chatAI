@@ -1,12 +1,31 @@
 """Download every page of the Looker report with a saved Google session."""
 
+import logging
 import os
 import tempfile
 from pathlib import Path
 
+log = logging.getLogger("harvest_quality")
+
+# First try plus five retries when Looker does not hand over the PDF.
+DOWNLOAD_ATTEMPTS = 6
+
 
 class SessionMissing(RuntimeError):
     pass
+
+
+def run_attempts(action, attempts: int = DOWNLOAD_ATTEMPTS):
+    """Call action until it returns. A missing session is not retried."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return action()
+        except SessionMissing:
+            raise
+        except Exception:
+            log.warning("Looker PDF attempt %s/%s failed", attempt, attempts)
+            if attempt == attempts:
+                raise
 
 
 def save_session(report_url: str, dest: Path) -> None:
@@ -42,6 +61,10 @@ def download_report(report_url: str, timeout_ms: int = 180_000, timezone: str = 
     raw = os.environ.get("HARVEST_QUALITY_SESSION", "").strip()
     if not raw:
         raise SessionMissing("HARVEST_QUALITY_SESSION is empty")
+    return run_attempts(lambda: _download_once(raw, report_url, timeout_ms, timezone))
+
+
+def _download_once(raw: str, report_url: str, timeout_ms: int, timezone: str) -> bytes:
     from playwright.sync_api import sync_playwright
 
     with tempfile.TemporaryDirectory() as folder:

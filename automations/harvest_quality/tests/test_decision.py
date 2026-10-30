@@ -9,6 +9,7 @@ from pypdf import PdfWriter
 from harvest_quality.decision import ENVIADO, SIN_CAMBIOS, SIN_DATOS, decide
 from harvest_quality.fingerprint import fingerprint_text
 from harvest_quality.pages import split_pages
+from harvest_quality.report import SessionMissing, run_attempts
 from harvest_quality.schedule import is_due, needs_n8n_force
 from harvest_quality.state import dotenv_paths
 
@@ -101,4 +102,49 @@ def test_page_with_data_keeps_a_fingerprint():
 
 def test_cloud_run_image_has_no_dotenv_parent():
     assert dotenv_paths(Path("/app")) == []
+
+
+def test_looker_download_retries_five_times():
+    calls = {"n": 0}
+
+    def fail():
+        calls["n"] += 1
+        raise TimeoutError("download")
+
+    try:
+        run_attempts(fail, attempts=6)
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("expected the last attempt to raise")
+    assert calls["n"] == 6
+
+
+def test_looker_download_returns_when_a_later_attempt_works():
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("download")
+        return b"pdf"
+
+    assert run_attempts(flaky, attempts=6) == b"pdf"
+    assert calls["n"] == 3
+
+
+def test_missing_session_is_not_retried():
+    calls = {"n": 0}
+
+    def fail():
+        calls["n"] += 1
+        raise SessionMissing("empty")
+
+    try:
+        run_attempts(fail, attempts=6)
+    except SessionMissing:
+        pass
+    else:
+        raise AssertionError("expected SessionMissing")
+    assert calls["n"] == 1
 
