@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Trazabilidad — Cosecha{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/cosecha_trazabilidad.css?v={{ static_v }}" />
+{% endblock %}
+
+{% block body %}
+<div class="container cosecha-traza">
+
+  <div class="page-header">
+    <div>
+      <h1>Trazabilidad</h1>
+      <p>Elige un trabajador o búscalo por nombre o RUT. La lista y los capachos respetan la empresa, el contratista y las fechas de la barra.</p>
+    </div>
+  </div>
+
+  <form class="filter-bar" id="traza-form">
+    <div class="traza-combo">
+      <label for="traza-q">Trabajador</label>
+      <input id="traza-q" name="q" type="search" role="combobox" aria-expanded="false" aria-controls="traza-list" aria-autocomplete="list" autocomplete="off" placeholder="Elegir o buscar un trabajador" />
+      <ul id="traza-list" class="traza-list" role="listbox" hidden></ul>
+    </div>
+  </form>
+  <p class="err-text" id="traza-error" hidden></p>
+  <p class="cosecha-empty" id="traza-empty" hidden>Nadie con ese nombre en este filtro.</p>
+
+  <div id="traza-matches" class="traza-matches" hidden></div>
+  <div id="traza-detail" hidden></div>
+
+</div>
+<script src="/static/cosecha_trazabilidad.js?v={{ static_v }}"></script>
+{% endblock %}

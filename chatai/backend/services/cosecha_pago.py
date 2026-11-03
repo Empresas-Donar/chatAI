@@ -2,7 +2,10 @@
 
 Read-only. One capacho is one scan: the piece rate is the sum of
 precio_trato_aplicado, and the daily floor is added once per person and
-day. Nothing here is multiplied by the tarjas company factors.
+day. A row in cosecha_zuniga_salidas_trabajador replaces the floor of
+that person and date with accion_piso, on every bin. The day pays that
+amount once. 0 pays no floor and the capachos stay.
+Nothing here is multiplied by the tarjas company factors.
 """
 
 from __future__ import annotations
@@ -225,8 +228,11 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
           ) AS cuartel,
           NULLIF(btrim(cu."cultivo"), '') AS cultivo,
           e."precio_trato_aplicado" AS precio,
-          e."piso_aplicado" AS piso
+          COALESCE(s.accion_piso, e."piso_aplicado") AS piso
         FROM appsheet.cosecha_zuniga_escaneo e
+        LEFT JOIN appsheet.cosecha_zuniga_salidas_trabajador s
+          ON s.fecha = COALESCE(e."fecha", e."fecha_y_hora"::date)
+         AND s.id_qr = e.id_qr
         LEFT JOIN appsheet.cosecha_zuniga_contratistas c
           ON c."id_contratista" = e."id_contratista"
         LEFT JOIN intranet.contratistas m

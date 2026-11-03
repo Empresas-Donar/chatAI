@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 from db import get_connection  # noqa: E402
 from controllers.purchase_orders_controller import cosecha_odoo_lines  # noqa: E402
 from services.cosecha_pago import payable  # noqa: E402
-from services.cosecha_rendimiento import amount_due  # noqa: E402
+from services.cosecha_rendimiento import amount_due, fold, query_detalle  # noqa: E402
 
 
 def test_talagante_has_no_harvest_pay():
@@ -259,3 +259,251 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
     ]
     assert cosecha_persona
     assert sum(row[-1] or 0 for row in cosecha_persona) == pay["total"]
+
+
+# Cuadrilla 8 of Gutiérrez II stopped at 10:13 on 2026-10-29.
+# Alex Guevara is on the same roster but scanned in cuadrilla 1.
+_ABANDONO_29 = {
+    "JUANA MUNOZ": 3,
+    "DIANA MEDINA": 3,
+    "MARGARITA MUNOZ": 4,
+    "PAUL CHEBERRIA": 4,
+    "JAVIER DURAN": 4,
+    "ADOLFO GARCIA": 4,
+    "JOSE SANCHEZ": 5,
+    "ELISABET ARCE": 5,
+    "DADDY MENDEZ": 6,
+    "VICTORIA TAPIA": 6,
+    "RAUL MONTANO": 6,
+    "YOHN MERIDA": 8,
+}
+
+
+def test_abandono_drops_the_floor_and_keeps_the_capachos():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            gutierrez = payable(
+                cur,
+                "2026-10-29",
+                "2026-10-29",
+                "SERVICIOS AGRICOLAS GUTIERREZ II SPA",
+                "ZUÑIGA",
+            )
+            left = {
+                fold(row["trabajador"]): row
+                for row in gutierrez["personas_dias"]
+                if fold(row["trabajador"]) in _ABANDONO_29
+            }
+            assert set(left) == set(_ABANDONO_29)
+            for name, row in left.items():
+                assert row["capachos"] == _ABANDONO_29[name]
+                assert row["piso"] == 0
+                assert row["trato"] == row["capachos"] * 800
+                assert row["a_pagar"] == row["trato"]
+            stayed = [
+                row
+                for row in gutierrez["personas_dias"]
+                if fold(row["trabajador"]) not in _ABANDONO_29
+            ]
+            assert stayed
+            assert all(row["piso"] > 0 for row in stayed)
+            assert sum(row["capachos"] for row in left.values()) == 58
+            assert sum(row["trato"] for row in left.values()) == 58 * 800
+            cur.execute(
+                """
+                SELECT DISTINCT trabajador, rut, codigo_qr
+                FROM appsheet.cosecha_zuniga_salidas_trabajador
+                WHERE fecha = DATE '2026-10-29'
+                  AND accion_piso = 0
+                """
+            )
+            fichas = cur.fetchall()
+            assert len(fichas) == 13
+            assert all(nombre and rut and qr for nombre, rut, qr in fichas)
+            assert any(qr == "cos;AAAL7405" for _, _, qr in fichas)
+            cur.execute(
+                """
+                SELECT count(*), count(DISTINCT id_qr)
+                FROM appsheet.cosecha_zuniga_salidas_trabajador
+                WHERE fecha = DATE '2026-10-29'
+                  AND accion_piso = 0
+                """
+            )
+            rows, people = cur.fetchone()
+            assert rows == 13
+            assert people == 13
+
+            plp = payable(
+                cur,
+                "2026-10-29",
+                "2026-10-29",
+                "SERVICIOS AGRICOLAS PLP SPA",
+                "ZUÑIGA",
+            )
+            alex = next(
+                row for row in plp["personas_dias"] if fold(row["trabajador"]) == "ALEX GUEVARA"
+            )
+            assert alex["capachos"] == 6
+            assert alex["piso"] == 0
+            assert alex["a_pagar"] == 6 * 800
+            others = [
+                row for row in plp["personas_dias"] if fold(row["trabajador"]) != "ALEX GUEVARA"
+            ]
+            assert others
+            assert all(row["piso"] > 0 for row in others)
+
+            detail = query_detalle(
+                cur,
+                "2026-10-29",
+                "2026-10-29",
+                empresa="ZUÑIGA",
+                cuadrilla=8,
+            )
+    finally:
+        conn.close()
+
+    crew = [row for row in detail["rows"] if fold(row["trabajador"]) in _ABANDONO_29]
+    assert sum(row["capachos"] for row in crew) == 58
+    assert sum(row["piso"] for row in crew) == 0
+    assert sum(row["a_pagar"] for row in crew) == 58 * 800
+
+
+def test_salida_covers_every_bin_of_the_day():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*)
+                FROM appsheet.cosecha_zuniga_salidas_trabajador
+                WHERE id_qr = '2a7f38a3'
+                  AND fecha = DATE '2026-10-29'
+                  AND accion_piso = 0
+                """
+            )
+            assert cur.fetchone()[0] == 1
+            cur.execute(
+                """
+                SELECT DISTINCT id_bins
+                FROM appsheet.cosecha_zuniga_escaneo
+                WHERE id_qr = '2a7f38a3'
+                  AND COALESCE(fecha, fecha_y_hora::date) = DATE '2026-10-29'
+                """
+            )
+            bins = [row[0] for row in cur.fetchall()]
+            assert len(bins) >= 2
+            data = payable(cur, "2026-10-29", "2026-10-29", None, "ZUÑIGA")
+            juana = next(
+                row
+                for row in data["personas_dias"]
+                if fold(row["trabajador"]) == "JUANA MUNOZ"
+            )
+            assert juana["piso"] == 0
+            assert juana["a_pagar"] == juana["trato"]
+            cur.execute(
+                """
+                SELECT r.id_bins, v.piso
+                FROM appsheet.cosecha_zuniga_resumen_bin_trabajador v
+                JOIN appsheet.cosecha_zuniga_registro r
+                  ON r.id_registro = v.id_registro
+                WHERE v.id_qr = '2a7f38a3'
+                  AND r.id_bins = ANY(%s)
+                """,
+                (bins,),
+            )
+            shown = {row[0]: int(row[1]) for row in cur.fetchall()}
+            assert set(shown) == set(bins)
+            assert all(piso == 0 for piso in shown.values())
+    finally:
+        conn.close()
+
+
+# Cuadrilla 7 of Gutiérrez II arrived late on Thursday 2026-10-29.
+# The floor that remains is 10000, not the 15000 copied on the scan.
+_TARDE_29 = {
+    "ABIGAIL HERNANDEZ": 11,
+    "DAMIAN DONOSO": 8,
+    "JONATHAN LEIVA": 10,
+    "RANDY ANEZ": 10,
+    "LIMBER ROSADO": 6,
+    "MARINA COTRINA": 16,
+    "GROVER REYES": 5,
+}
+
+
+def test_late_arrival_replaces_the_floor_with_10000():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            gutierrez = payable(
+                cur,
+                "2026-10-29",
+                "2026-10-29",
+                "SERVICIOS AGRICOLAS GUTIERREZ II SPA",
+                "ZUÑIGA",
+            )
+            late = {
+                fold(row["trabajador"]): row
+                for row in gutierrez["personas_dias"]
+                if fold(row["trabajador"]) in _TARDE_29
+            }
+            assert set(late) == set(_TARDE_29)
+            for name, row in late.items():
+                assert row["capachos"] == _TARDE_29[name]
+                assert row["piso"] == 10_000
+                assert row["trato"] == row["capachos"] * 800
+                assert row["a_pagar"] == row["trato"] + 10_000
+            on_time = [
+                row
+                for row in gutierrez["personas_dias"]
+                if fold(row["trabajador"]) in {"EDDY HERBAS", "FERNANDO LARA"}
+            ]
+            assert len(on_time) == 2
+            assert all(row["piso"] == 15_000 for row in on_time)
+    finally:
+        conn.close()
+
+
+def _assert_surfaces_square(cur, inicio, termino, contratista):
+    data = payable(cur, inicio, termino, contratista, "ZUÑIGA")
+    detail = query_detalle(
+        cur, inicio, termino, empresa="ZUÑIGA", contratista=contratista
+    )
+    odoo = cosecha_odoo_lines(cur, contratista, "ZUÑIGA", inicio, termino)
+    assert data["total"] == sum(row["a_pagar"] for row in data["personas_dias"])
+    assert data["total"] == sum(line["total_labor"] for line in data["lines"])
+    assert data["total"] == sum(item["total"] for item in data["cuarteles_pago"])
+    assert data["total"] == sum(line["total"] for line in odoo)
+    assert detail["totales"]["a_pagar"] == data["total"]
+    assert detail["totales"]["capachos"] == data["capachos"]
+    by_person: dict[tuple, int] = {}
+    for row in detail["rows"]:
+        key = (str(row["fecha"]), fold(row["trabajador"]))
+        by_person[key] = by_person.get(key, 0) + row["piso"]
+    pay: dict[tuple, int] = {}
+    for row in data["personas_dias"]:
+        key = (str(row["fecha"]), fold(row["trabajador"]))
+        pay[key] = pay.get(key, 0) + row["piso"]
+    assert by_person == pay
+
+
+def test_modified_floor_squares_detail_purchase_order_and_billing():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            _assert_surfaces_square(
+                cur,
+                "2026-10-29",
+                "2026-10-29",
+                "SERVICIOS AGRICOLAS GUTIERREZ II SPA",
+            )
+            _assert_surfaces_square(
+                cur,
+                "2026-10-28",
+                "2026-10-31",
+                "SERVICIOS AGRICOLAS GUTIERREZ II SPA",
+            )
+            _assert_surfaces_square(cur, "2026-10-29", "2026-10-29", None)
+    finally:
+        conn.close()

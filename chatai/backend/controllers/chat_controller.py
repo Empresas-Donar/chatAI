@@ -667,9 +667,10 @@ Grano: 1 fila de cosecha_zuniga_escaneo = 1 capacho. El trabajador escanea su QR
 Pago, por persona y día:
   SUM(precio_trato_aplicado) + MAX(piso_aplicado) una sola vez.
 El piso no reemplaza los capachos: se suman. Si el precio del día es 0 y el piso es mayor que 0, ese día sigue siendo cosecha a trato y se paga solo el piso. No es el jornal Al día de tarjas.
+Si hay fila en cosecha_zuniga_salidas_trabajador para esa fecha e id_qr, el piso de ese día es accion_piso en todos los bins. 0 no paga piso. Los capachos se pagan igual. Sin fila, se usa piso_aplicado.
 No multiplicar por 1.45 ni por 1.50. Esos factores son solo el costo empresa de tarjas.
 
-No usar appsheet.cosecha_zuniga_resumen_bin_trabajador.total_a_recibir para pagar: esa vista se queda con el mayor entre capachos y piso. El pago los suma.
+cosecha_zuniga_resumen_bin_trabajador suma capachos × trato + piso por bin. La salida se une por fecha e id_qr: si hay fila, el piso de todos los bins de ese día es accion_piso y el monto entra una vez. El pago de los reportes no sale de esa vista: sale de la suma del precio más el piso una vez por persona y día.
 No hacer SUM(bins): bins es el número del bin, no una cantidad.
 No seleccionar cosecha_zuniga_usuarios."contraseña".
 
@@ -682,6 +683,7 @@ Tablas y columnas:
 - intranet.contratistas: id_intranet, nombre (razón social, la de tarjas), nombre_corto
 - cosecha_zuniga_cuadrillas: id_cuadrilla, cuadrilla, id_contratista
 - cosecha_zuniga_qr: id_qr, qr_trabajador, trabajador, rut
+- cosecha_zuniga_salidas_trabajador: id_salida, fecha, id_qr, trabajador, rut, codigo_qr, accion_piso (NUMERIC, piso que reemplaza al del día en todos los bins; 0 no paga), hora_salida, comentario, id_bins. Una fila por fecha e id_qr.
 
 Joins:
 - escaneo.id_registro = registro.id_registro
@@ -697,9 +699,11 @@ EJEMPLO — cuánto pagar de cosecha entre dos fechas:
   WITH dias AS (
     SELECT e.fecha, btrim(e.trabajador) AS trabajador,
            SUM(COALESCE(e.precio_trato_aplicado, 0)) AS trato,
-           MAX(COALESCE(e.piso_aplicado, 0)) AS piso,
+           MAX(COALESCE(s.accion_piso, e.piso_aplicado, 0)) AS piso,
            COUNT(*) FILTER (WHERE COALESCE(e.precio_trato_aplicado, 0) > 0) AS capachos
     FROM appsheet.cosecha_zuniga_escaneo e
+    LEFT JOIN appsheet.cosecha_zuniga_salidas_trabajador s
+      ON s.fecha = e.fecha AND s.id_qr = e.id_qr
     WHERE e.fecha BETWEEN DATE '2026-10-21' AND DATE '2026-10-27'
     GROUP BY 1, 2
   )
@@ -881,7 +885,8 @@ PREGUNTAS FRECUENTES Y CÓMO RESPONDERLAS:
 
 6. "¿Cómo va la cosecha?" o "¿Cuánto hay que pagar de cosecha?"
    → Consultar appsheet.cosecha_zuniga_escaneo. Una fila es un capacho
-   → Pago = SUM(precio_trato_aplicado) + MAX(piso_aplicado) una vez por trabajador y fecha
+   → Pago = SUM(precio_trato_aplicado) + el piso una vez por trabajador y fecha
+   → Si hay fila en cosecha_zuniga_salidas_trabajador para esa fecha, el piso del día es accion_piso en todos los bins. 0 no paga piso
    → No usar el factor 1.45 ni 1.50, y no usar total_a_recibir de la vista resumen
 
 GLOSARIO AGRONÓMICO:

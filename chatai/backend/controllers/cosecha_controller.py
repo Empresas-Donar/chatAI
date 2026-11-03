@@ -8,6 +8,8 @@ Routes:
   GET /api/cosecha/detalle/filters          → cuartel, cuadrilla, cultivo
   GET /api/cosecha/detalle                  → summary + worker rows
   GET /api/cosecha/detalle/download-excel   → xlsx
+  GET /cosecha/trazabilidad                 → worker trace page
+  GET /api/cosecha/trazabilidad             → scans plus current credential
 """
 
 import io
@@ -22,7 +24,8 @@ from openpyxl.styles import Font
 
 from auth import require_auth
 from db import get_connection
-from services.cosecha_rendimiento import filter_options, query_detalle
+from services.cosecha_rendimiento import filter_options, fold, query_detalle
+from services.cosecha_trazabilidad import SearchTooShort, list_workers, search_workers
 
 logger = logging.getLogger("controllers.cosecha")
 
@@ -256,3 +259,76 @@ async def cosecha_detalle_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/cosecha/trazabilidad", response_class=HTMLResponse)
+async def cosecha_trazabilidad_page(request: Request):
+    return _templates.TemplateResponse(request, "cosecha_trazabilidad.html")
+
+
+def _optional_date(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    if not _DATE_RE.match(value):
+        raise HTTPException(status_code=400, detail="Fecha inválida")
+    return value
+
+
+def _trace_filters(fecha_inicio, fecha_termino, empresa, contratista):
+    desde = _optional_date(fecha_inicio)
+    hasta = _optional_date(fecha_termino)
+    if desde and hasta and desde > hasta:
+        raise HTTPException(status_code=400, detail="fecha_inicio is after fecha_termino")
+    return {
+        "empresa": (empresa or "").strip() or None,
+        "contratista": (contratista or "").strip() or None,
+        "desde": desde,
+        "hasta": hasta,
+    }
+
+
+@router.get("/api/cosecha/trazabilidad/trabajadores")
+async def cosecha_trazabilidad_workers(
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
+    empresa: str = Query(None),
+    contratista: str = Query(None),
+):
+    filters = _trace_filters(fecha_inicio, fecha_termino, empresa, contratista)
+    try:
+        conn = get_connection()
+    except Exception:
+        logger.exception("cosecha trazabilidad workers connection failed")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    try:
+        with conn.cursor() as cur:
+            return list_workers(cur, **filters)
+    finally:
+        conn.close()
+
+
+@router.get("/api/cosecha/trazabilidad")
+async def cosecha_trazabilidad_data(
+    q: str = Query(""),
+    fecha_inicio: str = Query(None),
+    fecha_termino: str = Query(None),
+    empresa: str = Query(None),
+    contratista: str = Query(None),
+):
+    if len(fold(q)) < 3:
+        raise HTTPException(status_code=400, detail="Escribe al menos 3 letras o el RUT")
+    filters = _trace_filters(fecha_inicio, fecha_termino, empresa, contratista)
+    try:
+        conn = get_connection()
+    except Exception:
+        logger.exception("cosecha trazabilidad connection failed")
+        raise HTTPException(status_code=503, detail="Error de conexión a la base de datos")
+    try:
+        with conn.cursor() as cur:
+            try:
+                return search_workers(cur, q, **filters)
+            except SearchTooShort:
+                raise HTTPException(status_code=400, detail="Escribe al menos 3 letras o el RUT")
+    finally:
+        conn.close()

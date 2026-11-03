@@ -1,0 +1,141 @@
+.cosecha-traza .summary-grid {
+  margin-bottom: 16px;
+}
+
+.cosecha-traza .filter-bar input {
+  min-width: 320px;
+  width: 100%;
+}
+
+.traza-combo {
+  position: relative;
+  flex: 1;
+  min-width: 280px;
+}
+
+.traza-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.traza-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.traza-option.is-active,
+.traza-option:hover {
+  background: var(--gold-light);
+}
+
+.traza-option strong {
+  display: block;
+}
+
+.traza-option small {
+  color: var(--text-muted);
+}
+
+.traza-option--empty {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.traza-matches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.traza-match {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.traza-match.is-active {
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(196, 80, 58, 0.12);
+}
+
+.traza-match small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.traza-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.traza-head h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.traza-head p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.traza-badge {
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.traza-badge--ok {
+  background: #e7f6ee;
+  color: var(--green);
+}
+
+.traza-badge--warn {
+  background: #fdece8;
+  color: var(--terra);
+}
+
+.traza-alerts {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.traza-alerts li {
+  background: #fdece8;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.cosecha-traza .table-card + .table-card {
+  margin-top: 18px;
+}
+
+.cosecha-traza .tbl td.num,
+.cosecha-traza .tbl th.num {
+  text-align: right;
+}

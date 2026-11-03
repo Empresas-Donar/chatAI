@@ -43,6 +43,44 @@ def amount_due(trato, piso) -> int:
     return _money(trato) + _money(piso)
 
 
+def _split_floor(total: int, weights: list[int]) -> list[int]:
+    """Split one daily floor across a person's cuartel rows, by capachos."""
+    if not weights:
+        return []
+    total = int(total)
+    whole = sum(int(weight) for weight in weights)
+    if whole <= 0:
+        shares = [0] * len(weights)
+        shares[-1] = total
+        return shares
+    shares = [total * int(weight) // whole for weight in weights]
+    shares[-1] += total - sum(shares)
+    return shares
+
+
+def _floor_once_per_person_day(rows: list[dict]) -> None:
+    """A person keeps one floor per day. Extra cuarteles share that amount."""
+    groups: dict[tuple, list[dict]] = {}
+    for row in rows:
+        key = (
+            row["fecha"],
+            row["predio"],
+            row["contratista"],
+            row["cuadrilla"],
+            row["trabajador"],
+        )
+        groups.setdefault(key, []).append(row)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        piso = max(_money(row["piso"]) for row in group)
+        group.sort(key=lambda row: (row["cuartel"] or "", row["variedad"] or ""))
+        shares = _split_floor(piso, [_money(row["capachos"]) for row in group])
+        for row, share in zip(group, shares):
+            row["piso"] = share
+            row["a_pagar"] = amount_due(row["trato"], share)
+
+
 def _money(value) -> int:
     if value is None:
         return 0
@@ -73,9 +111,12 @@ def _scan_sql(source: str) -> str:
               COALESCE(e."variedad", cu."variedad") AS variedad,
               e."trabajador" AS trabajador,
               e."precio_trato_aplicado" AS precio,
-              e."piso_aplicado" AS piso,
+              COALESCE(s.accion_piso, e."piso_aplicado") AS piso,
               COALESCE(e."id_bins", e."bins") AS bin_key
             FROM appsheet.cosecha_zuniga_escaneo e
+            LEFT JOIN appsheet.cosecha_zuniga_salidas_trabajador s
+              ON s.fecha = COALESCE(e."fecha", e."fecha_y_hora"::date)
+             AND s.id_qr = e.id_qr
             LEFT JOIN appsheet.cosecha_zuniga_contratistas c
               ON c."id_contratista" = e."id_contratista"
             LEFT JOIN appsheet.cosecha_zuniga_cuarteles cu
@@ -226,6 +267,7 @@ def query_detalle(
     )
     cols = [d[0] for d in cur.description]
     rows = [_row_out(dict(zip(cols, rec))) for rec in cur.fetchall()]
+    _floor_once_per_person_day(rows)
 
     cur.execute(
         cte
