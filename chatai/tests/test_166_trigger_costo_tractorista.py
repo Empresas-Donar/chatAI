@@ -45,6 +45,10 @@ def test_166_costo_matches_tariff(conn):
         ("Cristian Gonzalez", "Jornada Tractor normal", 9, "2026-09-01", 66000),
         ("Cristian Gonzalez", "Jornada Tractor normal", 7.5, "2026-08-03", 55000),
         ("Cristian Gonzalez", "Jornada Tractor normal", 4.5, "2026-08-06", 33000),
+        ("Cristian Gonzalez", "Jornada Tractor normal", 7.5, "2026-10-26", 55000),
+        ("Cristian Gonzalez", "Jornada Tractor normal", 7.5, "2026-10-27", 60000),
+        ("Cristian Gonzalez", "Jornada Tractor normal", 9, "2026-10-27", 72000),
+        ("Cristian Gonzalez", "Jornada Tractor normal", 4.5, "2026-10-27", 36000),
         ("Felipe Cordova", "Jornada Tractor normal", 7.5, "2026-09-07", 60000),
         ("Felipe Cordova", "Jornada Tractor normal", 4.5, "2026-09-25", 36000),
         ("Cristian Gonzalez", "Hora Extra", 2, "2026-09-03", 6800),
@@ -211,4 +215,57 @@ def test_166_day_and_a_half_both_are_paid(conn):
         ("t166-other-campo", 27600),
         ("t166-other-cc", 27600),
         ("t166-other-tractor", 27600),
+    ]
+
+
+def test_166_different_load_hour_is_not_a_duplicate(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO appsheet.tarjas_pagos (
+            "id_Resumen", fecha, trabajador, labor, horas_trabajadas,
+            tipo_pago, nombre_campo, cuartel_cc, maquina, total_tractor
+        ) VALUES (
+            't166-hour-a', '12/30/2099 00:00:00', 'Operario Fundo',
+            'Jornada Tractor normal', 9, 'Tractorista', 'ZUÑIGA', '890',
+            'Tractor-A', 0
+        )
+        RETURNING total_tractor
+        """
+    )
+    assert int(cur.fetchone()[0]) == 27600
+
+    cur.execute(
+        """
+        UPDATE appsheet.tarjas_tractorista_registro
+        SET registrado_en = registrado_en - interval '2 hours'
+        WHERE id_resumen = 't166-hour-a'
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO appsheet.tarjas_pagos (
+            "id_Resumen", fecha, trabajador, labor, horas_trabajadas,
+            tipo_pago, nombre_campo, cuartel_cc, maquina, total_tractor
+        ) VALUES (
+            't166-hour-b', '12/30/2099 00:00:00', 'Operario Fundo',
+            'Jornada Tractor normal', 9, 'Tractorista', 'ZUÑIGA', '890',
+            'Tractor-A', 0
+        )
+        RETURNING total_tractor
+        """
+    )
+    assert int(cur.fetchone()[0]) == 27600
+
+    cur.execute(
+        """
+        SELECT "id_Resumen", total_tractor
+        FROM appsheet.tarjas_pagos
+        WHERE "id_Resumen" IN ('t166-hour-a', 't166-hour-b')
+        ORDER BY "id_Resumen"
+        """
+    )
+    assert [(r[0], int(r[1])) for r in cur.fetchall()] == [
+        ("t166-hour-a", 27600),
+        ("t166-hour-b", 27600),
     ]

@@ -11,7 +11,7 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 | Labor | Precio |
 |---|---|
 | Jornada Tractor normal, lunes a viernes, con operador y carnet | $66.000 + $6.000 carnet, en 9 h |
-| Jornada Tractor normal, con operador, sin carnet | $66.000 en 9 h. Cristian González no tiene carnet |
+| Jornada Tractor normal, con operador, sin carnet | $66.000 en 9 h. Cristian González no tiene carnet hasta el 26/10/2026. Desde el 27/10/2026 el PTFK72 cumple los requerimientos y su jornada lleva carnet: 7,5 h = $60.000, 9 h = $72.000 |
 | Jornada Tractor normal, lunes a sábado, con operador | $55.000 + $6.000 carnet, en 7,5 h |
 | Jornada Tractor normal sin operador (antes Angel Celis) | $27.600 en 9 h, $23.000 en 7,5 h, sin carnet |
 | Jornada Tractor chico, simple o Gilberto | $25.000 |
@@ -28,12 +28,12 @@ El precio está en `appsheet.tarjas_labor`, la tabla que ya usa AppSheet. `appsh
 5. Hora extra: horas × valor.
 6. Chico, simple, Gilberto, extraordinaria y operario solo: el `valor` de la fila, sin carnet y sin prorrateo.
 
-Si la misma persona carga dos veces la misma labor, con las mismas horas, el mismo día, en el mismo cuartel y con el mismo tractor, solo cuenta el último registro. El anterior queda en 0. La fila nueva se guarda: no se rechaza, para que la app no falle al grabar. Si las horas son distintas, se pagan las dos: un día de 9 h y otro de 4,5 h es un día y medio. Otro cuartel, otro tractor u otra labor el mismo día también se cobra. El bono mensual no entra en esta regla.
+Si la misma persona carga dos veces la misma labor, con las mismas horas, el mismo día, en el mismo cuartel y con el mismo tractor, y las dos cargas caen en la misma hora de Chile, solo cuenta el último registro de esa hora. El anterior queda en 0. La fila nueva se guarda: no se rechaza, para que la app no falle al grabar. Una carga en otra hora es otra jornada y se pagan las dos. Si las horas trabajadas son distintas, también se pagan las dos: un día de 9 h y otro de 4,5 h es un día y medio. Otro cuartel, otro tractor u otra labor el mismo día también se cobra. El bono mensual no entra en esta regla.
 
 ## Qué no hace
 
 - No corre cuando solo cambia `estado`. Aprobar no recalcula.
-- Si editan el pago del último registro de esa jornada y no cambian fecha, trabajador, labor, horas ni tipo de pago, se guarda el monto que escribieron en las tres columnas. Si cambian las horas o la labor, el trigger vuelve a calcular. Una carga anterior de la misma labor y las mismas horas se queda en 0 aunque reescriban el monto. La media jornada, con otras horas, no se borra.
+- Si editan el pago del último registro de esa jornada y no cambian fecha, trabajador, labor, horas ni tipo de pago, se guarda el monto que escribieron en las tres columnas. Si cambian las horas o la labor, el trigger vuelve a calcular. Una carga anterior de la misma hora se queda en 0 aunque reescriban el monto. Una carga de otra hora, o una media jornada con otras horas, no se borra.
 - No toca filas que no son `tipo_pago = Tractorista`. El trigger tiene `WHEN (tipo_pago = tractorista)`: trato, al día y el resto ni siquiera entran a la función.
 - Si la labor es `Bono mensual` y el tipo es Tractorista (fanout de un tractorista del esquema), no recalcula tarifa: solo alinea `total_tractor`, `total_trabajado` y `total_pagar` con el monto del bono. Solo Cristian Gonzalez está en el esquema. Cristian González Dinamarca no es tractorista: su bono vuelve a tipo Bono.
 - No reescribió el historial al instalarse. Las filas ya guardadas cambian la próxima vez que se edite la fecha, la persona, la labor o las horas.
@@ -65,4 +65,6 @@ Para pasar a una persona de lunes a viernes a lunes a sábado, se cierra la fila
 ## Implementado
 
 - `sql/tarjas/26_trigger_costo_tractorista.sql`
+- `sql/tarjas/35_tractorista_hora_de_carga.sql`
+- `sql/tarjas/36_cristian_carnet_ptfk72.sql`
 - `chatai/tests/test_166_trigger_costo_tractorista.py`
