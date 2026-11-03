@@ -2,11 +2,13 @@
 -- TARJAS: Vista reporte para importación a Odoo — solo Tractoristas
 -- Análoga a tarjas_reporte_odoo pero para tipo_pago = 'Tractorista'.
 --
--- Modelo de pago tractorista: tarifa diaria fija (total_tractor), no por hora.
--- horas_extras = 0 siempre → se usa jornadas (COUNT) como qty, igual que cuadrilla.
+-- Jornada normal: tarifa del día. La cantidad es una jornada (COUNT).
+-- Hora extra: la app guarda las horas en horas_trabajadas y deja horas_extras
+-- en 0. La cantidad es la suma de esas horas y el precio es la tarifa por hora,
+-- para que 3 horas no salgan como 1 jornada.
 --
---   qty        → COUNT(*)        (número de jornadas/días por grupo)
---   price_unit → AVG(total_tractor)  (tarifa por jornada)
+--   jornada    qty = COUNT(*),              price = SUM(total) / COUNT(*)
+--   hora extra qty = SUM(horas_trabajadas), price = SUM(total) / horas
 --
 -- Estrategias de join para product_id (idénticas a tarjas_reporte_odoo):
 --   l0 → id_labor numérico en tarjas_pagos (robusto, post-backfill issue #27)
@@ -44,8 +46,17 @@ FROM (
         p.cuartel_cc,
         p.labor,
         MIN(p.id_labor)                         AS id_labor,
-        COUNT(*)                                AS jornadas,
-        ROUND(AVG(p.total_tractor)::NUMERIC, 2) AS total_unitario
+        CASE
+            WHEN lower(trim(COALESCE(p.labor, ''))) LIKE '%hora extra%'
+            THEN COALESCE(SUM(p.horas_trabajadas), 0)
+            ELSE COUNT(*)::numeric
+        END                                     AS jornadas,
+        CASE
+            WHEN lower(trim(COALESCE(p.labor, ''))) LIKE '%hora extra%'
+                 AND COALESCE(SUM(p.horas_trabajadas), 0) <> 0
+            THEN ROUND(SUM(p.total_tractor) / SUM(p.horas_trabajadas), 2)
+            ELSE ROUND(SUM(p.total_tractor) / NULLIF(COUNT(*), 0), 2)
+        END                                     AS total_unitario
     FROM appsheet.tarjas_pagos p
     WHERE LOWER(TRIM(p.tipo_pago)) = 'tractorista'
     GROUP BY

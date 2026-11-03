@@ -75,18 +75,19 @@ def test_50_sql_view_name_correct():
 
 def test_50_sql_view_uses_horas_extras_as_qty():
     """
-    Regression (#50): order_line/product_qty must come from horas_extras,
-    NOT from a COUNT(*) or jornadas column.
+    Hora extra quantity is the hours entered in horas_trabajadas.
+    The app leaves horas_extras at 0, so a row count would show 3 hours as 1.
+    A normal jornada stays one unit per row.
     """
     src = _sql_source()
-    # The view must map horas_extras to order_line/product_qty
-    assert "horas_extras" in src, "horas_extras must appear in the SQL view"
-    assert '"order_line/product_qty"' in src, (
-        'order_line/product_qty must be defined in the view'
+    assert "horas_trabajadas" in src, (
+        "Hora extra qty must come from horas_trabajadas"
     )
-    # COUNT(*) would indicate jornadas logic — must NOT be used
-    assert "COUNT(*)" not in src, (
-        "COUNT(*) must not appear — qty should be SUM(horas_extras), not row count"
+    assert '"order_line/product_qty"' in src, (
+        "order_line/product_qty must be defined in the view"
+    )
+    assert "LIKE '%hora extra%'" in src, (
+        "Only Hora Extra uses the entered hours as quantity"
     )
 
 

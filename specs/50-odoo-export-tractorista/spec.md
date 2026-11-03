@@ -8,8 +8,8 @@ Implementar exportación Excel en formato de importación Odoo para registros de
 
 - [ ] Vista `appsheet.tarjas_reporte_odoo_tractorista` existe en PostgreSQL y devuelve filas correctas para tractoristas (`horas_extras > 0`)
 - [ ] Endpoint `GET /api/tarjas/tractorista/odoo-export` retorna Excel con formato de importación Odoo
-- [ ] `order_line/product_qty` = suma de `horas_extras` (no conteo de filas)
-- [ ] `order_line/price_unit` = `total_tractor / horas_extras` (tarifa por hora), ponderado si hay múltiples labores
+- [x] `order_line/product_qty` de Hora Extra = suma de `horas_trabajadas` (la app deja `horas_extras` en 0). Una jornada normal sigue siendo una unidad por fila.
+- [x] `order_line/price_unit` de Hora Extra = `SUM(total_tractor) / SUM(horas_trabajadas)`. La jornada normal sigue en tarifa del día.
 - [ ] Filas sin `product_id` o con CC no mapeado son excluidas y reportadas en header `X-Excluded-Amount`
 - [ ] Los 4 niveles de fallback para `product_id` funcionan igual que en reporte de cuadrilla
 - [ ] Botón "Exportar Odoo" en `tarjas_detalle_tractorista.html`

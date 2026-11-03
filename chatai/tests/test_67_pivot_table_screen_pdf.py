@@ -124,6 +124,60 @@ class TestPivotExcelStillWorksRegression:
         assert body[:2] == b"PK"  # xlsx is a zip archive
 
 
+class TestOperatorPivotPdfColumnsStayReadable:
+    """The operator pivot used the date-column width (3.5%). A name then
+    stacked one letter per line. Columns must stay wide enough to read."""
+
+    def test_67_six_operators_share_one_full_width_table(self):
+        columns = [
+            "Cristian Gonzalez — Bono",
+            "Cristian Gonzalez — Hora Extra",
+            "Felipe Carvajal — Hora Extra",
+            "Gabriel Necupil — Hora Extra",
+            "Gabriel Necupil — Jornada Tractor normal",
+            "Operador Fundo — Jornada Tractor normal",
+        ]
+        groups = tc._operator_pivot_column_groups(columns)
+        assert groups == [columns]
+        widths = tc._operator_pivot_widths(len(columns))
+        assert widths["table"] == "width:100%"
+        op = float(widths["op"].removeprefix("width:").removesuffix("%"))
+        assert op >= tc._OPERATOR_PIVOT_MIN_COL_PCT
+
+    def test_67_extra_operators_continue_on_the_next_table(self):
+        columns = [f"Trabajador {i} — Jornada Tractor normal" for i in range(10)]
+        groups = tc._operator_pivot_column_groups(columns)
+        assert len(groups) == 2
+        assert [len(g) for g in groups] == [6, 4]
+        for group in groups:
+            op = float(
+                tc._operator_pivot_widths(len(group))["op"]
+                .removeprefix("width:")
+                .removesuffix("%")
+            )
+            assert op >= tc._OPERATOR_PIVOT_MIN_COL_PCT
+
+    def test_67_header_breaks_name_and_labor(self):
+        html = tc._operator_pivot_header("Cristian Gonzalez — Hora Extra")
+        assert html == "Cristian<br>Gonzalez<br>Hora<br>Extra"
+        pivot = tc._build_tractorista_pivot(
+            [
+                {
+                    "fecha": "2026-10-01",
+                    "trabajador": "Cristian Gonzalez",
+                    "labor": "Hora Extra",
+                    "monto": 10200,
+                }
+            ]
+        )
+        rendered = tc._tractorista_operator_pivot_html(
+            pivot, lambda v: f"${int(v):,}".replace(",", ".")
+        )
+        assert "Cristian<br>Gonzalez<br>Hora<br>Extra" in rendered
+        assert "width:3.5" not in rendered
+        assert "width:100%" in rendered
+
+
 class TestDownloadPdfIncludesPivotSection:
     def test_67_download_pdf_renders_with_pivot_section(self):
         """The main tractorista PDF must still render (now with a second,

@@ -1535,11 +1535,22 @@ def _fetch_resumen_persona_tractorista_rows(cur, where: str, params: list) -> li
     )
     cur.execute(
         f"""
-        SELECT trabajador, contratista{maq_select}, horas_extras,
+        SELECT trabajador, contratista{maq_select},
+               CASE
+                   WHEN lower(trim(COALESCE(labor, ''))) LIKE '%%hora extra%%'
+                   THEN horas_trabajadas
+                   ELSE horas_extras
+               END AS horas_extras,
                fecha::date::text AS fecha,
                COALESCE(SUM(total_tractor), 0) AS total_tractor
         FROM appsheet.tarjas_pagos {where}
-        GROUP BY trabajador, contratista, maquina, horas_extras, fecha::date
+        GROUP BY trabajador, contratista, maquina,
+                 CASE
+                     WHEN lower(trim(COALESCE(labor, ''))) LIKE '%%hora extra%%'
+                     THEN horas_trabajadas
+                     ELSE horas_extras
+                 END,
+                 fecha::date
         ORDER BY trabajador, contratista, maquina, fecha::date
         """,
         params,
@@ -6757,6 +6768,95 @@ async def pivot_tarjas_tractorista_excel(
     )
 
 
+# Operator names are the pivot columns. The date-column helper gives each
+# one 3.5% of the page, which is narrower than a single word, so xhtml2pdf
+# stacks the header one or two letters per line. A column has to stay wide
+# enough for a name; extra operators go on another table.
+_OPERATOR_PIVOT_FECHA_PCT = 12.0
+_OPERATOR_PIVOT_TOTAL_PCT = 12.0
+_OPERATOR_PIVOT_MIN_COL_PCT = 12.0
+
+
+def _operator_pivot_header(column: str) -> str:
+    """One word per line, so a surname stays whole inside the column."""
+    name, sep, labor = column.partition(" — ")
+    lines = name.split()
+    if sep:
+        lines.extend(labor.split())
+    return "<br>".join(_escape_html(part) for part in lines)
+
+
+def _operator_pivot_column_groups(columns: list[str]) -> list[list[str]]:
+    remaining = 100.0 - _OPERATOR_PIVOT_FECHA_PCT - _OPERATOR_PIVOT_TOTAL_PCT
+    per_table = max(1, int(remaining // _OPERATOR_PIVOT_MIN_COL_PCT))
+    if not columns:
+        return []
+    return [columns[i:i + per_table] for i in range(0, len(columns), per_table)]
+
+
+def _operator_pivot_widths(n_columns: int) -> dict[str, str]:
+    op = (100.0 - _OPERATOR_PIVOT_FECHA_PCT - _OPERATOR_PIVOT_TOTAL_PCT) / n_columns
+    return {
+        "fecha": f"width:{_OPERATOR_PIVOT_FECHA_PCT}%",
+        "op": f"width:{op:.2f}%",
+        "total": f"width:{_OPERATOR_PIVOT_TOTAL_PCT}%",
+        "table": "width:100%",
+    }
+
+
+def _tractorista_operator_pivot_html(pivot: dict, fmt) -> str:
+    """Fecha × operador tables for the purchase-order PDF. Each operator
+    column keeps a readable width; surplus columns continue in the next table.
+    The Total column is always the full day, repeated on every continuation."""
+    if not pivot["dates"] or not pivot["columns"]:
+        return ""
+    groups = _operator_pivot_column_groups(pivot["columns"])
+    parts: list[str] = []
+    many = len(groups) > 1
+    for idx, columns in enumerate(groups, start=1):
+        widths = _operator_pivot_widths(len(columns))
+        caption = (
+            f'<div class="section-title">Tabla por operador ({idx} de {len(groups)})</div>'
+            if many
+            else ""
+        )
+        heads = "".join(
+            f'<th class="op-h" style="{widths["op"]}">{_operator_pivot_header(c)}</th>'
+            for c in columns
+        )
+        body = ""
+        for d in pivot["dates"]:
+            d_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
+            cells = "".join(
+                f'<td class="num" style="{widths["op"]}">{fmt(pivot["matrix"][d][c])}</td>'
+                for c in columns
+            )
+            body += (
+                f'<tr><td style="{widths["fecha"]}">{d_fmt}</td>{cells}'
+                f'<td class="num" style="{widths["total"]}">{fmt(pivot["date_totals"][d])}</td></tr>'
+            )
+        totals = "".join(
+            f'<td class="num" style="{widths["op"]};font-weight:bold">{fmt(pivot["col_totals"][c])}</td>'
+            for c in columns
+        )
+        parts.append(
+            f"""{caption}
+        <table class="data op-pivot" style="{widths["table"]};border-collapse:collapse;font-size:8pt;table-layout:fixed;margin-top:10px">
+          <thead><tr>
+            <th style="{widths["fecha"]}">Fecha</th>{heads}
+            <th class="num" style="{widths["total"]}">Total</th>
+          </tr></thead>
+          <tbody>{body}
+            <tr style="background:#1e293b;color:#fff">
+              <td style="{widths["fecha"]};font-weight:bold">TOTAL</td>{totals}
+              <td class="num" style="{widths["total"]};font-weight:bold">{fmt(pivot["grand_total"])}</td>
+            </tr>
+          </tbody>
+        </table>"""
+        )
+    return "".join(parts)
+
+
 @router.get("/api/tarjas/tractorista/download-pdf")
 async def download_tarjas_tractorista_pdf(
     contratista: str = Query(...),
@@ -6783,19 +6883,20 @@ async def download_tarjas_tractorista_pdf(
             cur.execute(
                 f"""
                 SELECT
-                    fecha::date::text   AS fecha,
+                    fecha::date::text        AS fecha,
                     trabajador,
                     labor,
                     maquina,
-                    SUM(total_tractor)  AS monto
+                    SUM(horas_trabajadas)    AS horas,
+                    SUM(total_tractor)       AS monto
                 FROM appsheet.tarjas_pagos
                 WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
                   AND contratista   = %s
                   AND nombre_campo  = %s
                   AND fecha::date BETWEEN %s AND %s
                   {cc_filter}
-                GROUP BY fecha::date, trabajador, labor, maquina
-                ORDER BY fecha::date, trabajador, labor
+                GROUP BY fecha::date, trabajador, labor, maquina, horas_trabajadas
+                ORDER BY fecha::date, trabajador, labor, horas_trabajadas DESC
                 """,
                 params,
             )
@@ -6808,6 +6909,12 @@ async def download_tarjas_tractorista_pdf(
         conn.close()
 
     fmt = lambda v: f"${int(v):,}".replace(",", ".")
+
+    def fmt_horas(v) -> str:
+        n = float(v or 0)
+        if n == int(n):
+            return str(int(n))
+        return f"{n:.1f}".rstrip("0").replace(".", ",")
 
     # Group by date for subtotals
     from collections import defaultdict
@@ -6826,60 +6933,27 @@ async def download_tarjas_tractorista_pdf(
             rows_html += (
                 f'<tr>'
                 f'<td style="width:10%">{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
-                f'<td style="width:24%">{r["trabajador"] or ""}</td>'
-                f'<td style="width:26%">{r["labor"] or ""}</td>'
+                f'<td style="width:22%">{r["trabajador"] or ""}</td>'
+                f'<td style="width:20%">{r["labor"] or ""}</td>'
+                f'<td class="num" style="width:10%">{fmt_horas(r["horas"])}</td>'
                 f'<td style="width:20%">{r["maquina"] or "–"}</td>'
-                f'<td class="num" style="width:20%">{fmt(monto)}</td>'
+                f'<td class="num" style="width:18%">{fmt(monto)}</td>'
                 f'</tr>'
             )
 
     rows_html += (
         f'<tr style="background:#1e293b;color:#fff">'
-        f'<td colspan="4" style="text-align:right;font-weight:bold">TOTAL</td>'
-        f'<td class="num" style="width:20%;font-weight:bold">{fmt(grand_total)}</td>'
+        f'<td colspan="5" style="text-align:right;font-weight:bold">TOTAL</td>'
+        f'<td class="num" style="width:18%;font-weight:bold">{fmt(grand_total)}</td>'
         f'</tr>'
     )
 
     # Segunda tabla: pivote por operador (fecha x trabajador — labor), misma
     # fuente que el Excel "Tabla por operador" y el preview en pantalla.
     pivot = _build_tractorista_pivot(pivot_rows)
-    pivot_html = ""
     if pivot["dates"]:
         _check_pivot_date_range(pivot["columns"], "Por operador")
-        widths = _pivot_col_widths({"fecha": 12, "total": 10}, len(pivot["columns"]))
-        pivot_ths = "".join(
-            f'<th class="num" style="{widths["date"]}">{_escape_html(c)}</th>'
-            for c in pivot["columns"]
-        )
-        pivot_body = ""
-        for d in pivot["dates"]:
-            d_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
-            cells = "".join(
-                f'<td class="num" style="{widths["date"]}">{fmt(pivot["matrix"][d][c])}</td>'
-                for c in pivot["columns"]
-            )
-            pivot_body += (
-                f'<tr><td style="{widths["fecha"]}">{d_fmt}</td>{cells}'
-                f'<td class="num" style="{widths["total"]}">{fmt(pivot["date_totals"][d])}</td></tr>'
-            )
-        pivot_totals = "".join(
-            f'<td class="num" style="{widths["date"]};font-weight:bold">{fmt(pivot["col_totals"][c])}</td>'
-            for c in pivot["columns"]
-        )
-        pivot_html = f"""
-        <table class="data" style="{widths['table']};border-collapse:collapse;font-size:8pt;table-layout:fixed;margin-top:16px">
-          <thead><tr>
-            <th style="{widths["fecha"]}">Fecha</th>{pivot_ths}
-            <th class="num" style="{widths["total"]}">Total</th>
-          </tr></thead>
-          <tbody>{pivot_body}
-            <tr style="background:#1e293b;color:#fff">
-              <td style="{widths["fecha"]};font-weight:bold">TOTAL</td>{pivot_totals}
-              <td class="num" style="{widths["total"]};font-weight:bold">{fmt(pivot["grand_total"])}</td>
-            </tr>
-          </tbody>
-        </table>
-        """
+    pivot_html = _tractorista_operator_pivot_html(pivot, fmt)
 
     logo = _logo_b64()
     logo_html = f'<img src="data:image/png;base64,{logo}" style="width:80px;height:auto" />' if logo else ""
@@ -6894,7 +6968,7 @@ async def download_tarjas_tractorista_pdf(
 
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
     <style>
-      @page {{ size: A4; margin: 12mm 14mm; }}
+      @page {{ size: A4 landscape; margin: 12mm 10mm; }}
       body {{ font-family: Helvetica, Arial, sans-serif; font-size: 8.5pt; color: #111; margin: 0; }}
       .hdr {{ width: 100%; border-collapse: collapse; background: #1e293b; margin-bottom: 12px; }}
       .hdr td {{ padding: 10px 14px; color: #fff; vertical-align: middle; }}
@@ -6906,6 +6980,8 @@ async def download_tarjas_tractorista_pdf(
       table.data tr:nth-child(even) {{ background: #f8fafc; }}
       .num {{ text-align: right; }}
       .section-title {{ font-size: 10pt; font-weight: 800; margin: 4px 0 6px; }}
+      table.op-pivot th {{ font-size: 7.5pt; padding: 4px 3px; text-align: center; vertical-align: bottom; }}
+      table.op-pivot td {{ font-size: 8pt; padding: 3px 3px; }}
     </style>
     </head><body>
     <table class="hdr">
@@ -6922,10 +6998,11 @@ async def download_tarjas_tractorista_pdf(
     <table class="data">
       <thead><tr>
         <th style="width:10%">Fecha</th>
-        <th style="width:24%">Trabajador</th>
-        <th style="width:26%">Labor</th>
+        <th style="width:22%">Trabajador</th>
+        <th style="width:20%">Labor</th>
+        <th class="num" style="width:10%">Horas</th>
         <th style="width:20%">Máquina</th>
-        <th class="num" style="width:20%">Total a pagar</th>
+        <th class="num" style="width:18%">Total a pagar</th>
       </tr></thead>
       <tbody>{rows_html}</tbody>
     </table>

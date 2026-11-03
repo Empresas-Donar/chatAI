@@ -235,7 +235,7 @@ function renderDocument(data) {
             <th>Fecha</th>
             <th>Labor</th>
             <th class="num">Valor unitario</th>
-            <th class="num">Jornadas</th>
+            <th class="num">Cantidad</th>
             <th class="num">Total a pagar</th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
