@@ -207,6 +207,7 @@ function renderDetail(rows, totales) {
     ${cell(esc(r.cuartel || '—'))}
     ${cell(esc(r.variedad || '—'))}
     ${cell(fmtNum.format(r.capachos || 0), true)}
+    ${cell(fmtNum.format(r.bins || 0), true)}
     ${cell(fmtMoney(r.precio), true)}
     ${cell(fmtMoney(r.trato), true)}
     ${cell(fmtMoney(r.piso), true)}
@@ -214,12 +215,14 @@ function renderDetail(rows, totales) {
   </tr>`).join('');
   document.getElementById('detail-count').textContent =
     `${fmtNum.format(rows.length)} registro${rows.length === 1 ? '' : 's'}`;
+  const piso = rows.reduce((sum, r) => sum + (Number(r.piso) || 0), 0);
   document.getElementById('detail-tfoot').innerHTML = `<tr>
     <td colspan="5">Total</td>
     <td class="num">${fmtNum.format(totales.capachos || 0)}</td>
     <td></td>
-    <td class="num">${fmtMoney(totales.trato)}</td>
     <td></td>
+    <td class="num">${fmtMoney(totales.trato)}</td>
+    <td class="num">${fmtMoney(piso)}</td>
     <td class="num">${fmtMoney(totales.a_pagar)}</td>
   </tr>`;
 }

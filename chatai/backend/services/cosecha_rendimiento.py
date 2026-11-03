@@ -62,13 +62,7 @@ def _floor_once_per_person_day(rows: list[dict]) -> None:
     """A person keeps one floor per day. Extra cuarteles share that amount."""
     groups: dict[tuple, list[dict]] = {}
     for row in rows:
-        key = (
-            row["fecha"],
-            row["predio"],
-            row["contratista"],
-            row["cuadrilla"],
-            row["trabajador"],
-        )
+        key = _person_key(row)
         groups.setdefault(key, []).append(row)
     for group in groups.values():
         if len(group) < 2:
@@ -79,6 +73,75 @@ def _floor_once_per_person_day(rows: list[dict]) -> None:
         for row, share in zip(group, shares):
             row["piso"] = share
             row["a_pagar"] = amount_due(row["trato"], share)
+
+
+def _person_key(row: dict) -> tuple:
+    fecha = row["fecha"]
+    if not isinstance(fecha, str):
+        fecha = _iso(fecha)
+    return (
+        fecha,
+        row["predio"],
+        row["contratista"],
+        row["cuadrilla"],
+        row["trabajador"],
+    )
+
+
+def _labels(rows: list[dict], field: str) -> str | None:
+    seen: list[str] = []
+    for row in rows:
+        text = (row.get(field) or "").strip()
+        if text and text not in seen:
+            seen.append(text)
+    return ", ".join(seen) if seen else None
+
+
+def _group_person_days(rows: list[dict], bins_by_person: dict[tuple, int]) -> list[dict]:
+    """One row per person and day, with the day's floor and every bin they worked."""
+    groups: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for row in rows:
+        key = _person_key(row)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(row)
+    grouped = []
+    for key in order:
+        group = groups[key]
+        capachos = sum(row["capachos"] for row in group)
+        trato = sum(row["trato"] for row in group)
+        piso = sum(row["piso"] for row in group)
+        prices = {row["precio"] for row in group if row["precio"] is not None}
+        head = group[0]
+        grouped.append(
+            {
+                "fecha": head["fecha"],
+                "predio": head["predio"],
+                "contratista": head["contratista"],
+                "cuadrilla": head["cuadrilla"],
+                "cuartel": _labels(group, "cuartel"),
+                "cultivo": _labels(group, "cultivo"),
+                "variedad": _labels(group, "variedad"),
+                "trabajador": head["trabajador"],
+                "capachos": capachos,
+                "bins": bins_by_person.get(key, 0),
+                "precio": next(iter(prices)) if len(prices) == 1 else None,
+                "trato": trato,
+                "piso": piso,
+                "a_pagar": amount_due(trato, piso),
+            }
+        )
+    grouped.sort(
+        key=lambda row: (
+            row["fecha"] or "",
+            row["cuadrilla"] if row["cuadrilla"] is not None else 10**9,
+            -row["capachos"],
+            row["trabajador"] or "",
+        )
+    )
+    return grouped
 
 
 def _money(value) -> int:
@@ -266,8 +329,28 @@ def query_detalle(
         params,
     )
     cols = [d[0] for d in cur.description]
-    rows = [_row_out(dict(zip(cols, rec))) for rec in cur.fetchall()]
-    _floor_once_per_person_day(rows)
+    cuartel_rows = [_row_out(dict(zip(cols, rec))) for rec in cur.fetchall()]
+    _floor_once_per_person_day(cuartel_rows)
+
+    cur.execute(
+        cte
+        + """
+        SELECT
+          fecha, predio, contratista, cuadrilla, trabajador,
+          count(DISTINCT bin_key) FILTER (
+            WHERE bin_key IS NOT NULL AND btrim(bin_key::text) <> ''
+          )::int AS bins
+        FROM scans
+        GROUP BY 1, 2, 3, 4, 5
+        """,
+        params,
+    )
+    person_bin_cols = [d[0] for d in cur.description]
+    bins_by_person = {}
+    for rec in cur.fetchall():
+        item = dict(zip(person_bin_cols, rec))
+        bins_by_person[_person_key(item)] = int(item["bins"] or 0)
+    rows = _group_person_days(cuartel_rows, bins_by_person)
 
     cur.execute(
         cte
@@ -275,7 +358,7 @@ def query_detalle(
         SELECT
           fecha, predio, contratista, cuadrilla, cuartel, cultivo, variedad,
           count(DISTINCT bin_key) FILTER (
-            WHERE bin_key IS NOT NULL AND btrim(bin_key) <> ''
+            WHERE bin_key IS NOT NULL AND btrim(bin_key::text) <> ''
           )::int AS bins
         FROM scans
         GROUP BY 1, 2, 3, 4, 5, 6, 7
@@ -292,7 +375,7 @@ def query_detalle(
         return _empty(_hint(cur, predios, params))
 
     resumen_map: dict[tuple, dict] = {}
-    for row in rows:
+    for row in cuartel_rows:
         key = _group_key(row)
         bucket = resumen_map.get(key)
         if bucket is None:

@@ -172,6 +172,7 @@ def _xlsx(data: dict) -> bytes:
         "Variedad",
         "Trabajador",
         "Capachos",
+        "Bins",
         "Precio",
         "Trato",
         "Piso",
@@ -217,6 +218,7 @@ def _xlsx(data: dict) -> bytes:
             row["variedad"],
             row["trabajador"],
             row["capachos"],
+            row["bins"],
             row["precio"],
             row["trato"],
             row["piso"],
@@ -224,7 +226,7 @@ def _xlsx(data: dict) -> bytes:
         ]
         for col, value in enumerate(values, 1):
             cell = detalle.cell(i, col, value)
-            if col in (10, 11, 12, 13):
+            if col in (11, 12, 13, 14):
                 cell.number_format = money
 
     buf = io.BytesIO()
