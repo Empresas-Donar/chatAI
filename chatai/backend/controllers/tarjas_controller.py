@@ -71,7 +71,8 @@ from psycopg2 import sql as psql
 from auth import require_auth
 from db import get_connection
 from services.cosecha_pago import TIPO as COSECHA_TIPO
-from services.cosecha_pago import payable as cosecha_payable
+from services.cosecha_pago import contratistas_en_periodo, payable as cosecha_payable
+from services.cosecha_rendimiento import fold as fold_name
 from tarjas_empresa import (
     annotate_detalle_resumen,
     annotate_detalle_rows,
@@ -547,12 +548,23 @@ async def tarjas_general_page(request: Request):
     return _templates.TemplateResponse(request, "tarjas_general.html")
 
 
-def bar_options_for_period(cur, fecha_inicio, fecha_termino, empresa=None):
-    """Contractors and campos that have tarjas_pagos rows in the date range.
+def _merge_contratistas(tarjas_names, cosecha_names) -> list[str]:
+    """One option per name. A tarjas spelling wins over the harvest label."""
+    chosen = {}
+    for name in list(tarjas_names) + list(cosecha_names):
+        key = fold_name(name)
+        if key and key not in chosen:
+            chosen[key] = name
+    return [chosen[key] for key in sorted(chosen)]
 
-    Empresas are every campo with rows in the range. Contratistas are whoever
-    worked in the chosen campo during that range. Tractorista rows stay
-    included: the purchase order must still find them.
+
+def bar_options_for_period(cur, fecha_inicio, fecha_termino, empresa=None):
+    """Contractors and campos with tarjas or Zúñiga harvest in the date range.
+
+    Empresas are every campo with tarjas rows in the range. Contratistas are
+    whoever worked in the chosen campo, including a crew that only scanned
+    capachos. Tractorista rows stay included: the purchase order must still
+    find them.
     """
     filters = [
         "contratista IS NOT NULL",
@@ -568,7 +580,10 @@ def bar_options_for_period(cur, fecha_inicio, fecha_termino, empresa=None):
         "ORDER BY unaccent(contratista), contratista",
         params,
     )
-    contratistas = [row[0] for row in cur.fetchall()]
+    contratistas = _merge_contratistas(
+        [row[0] for row in cur.fetchall()],
+        contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa),
+    )
 
     cur.execute(
         """
@@ -589,10 +604,10 @@ async def get_tarjas_general_filters(
     fecha_termino: str = Query(None),
     empresa: str = Query(None),
 ):
-    """Distinct values for filter dropdowns (from tarjas_pagos).
+    """Distinct values for the shared filter bar.
 
-    With both dates, contratistas and empresas are limited to rows in that
-    range. An empresa further limits contratistas to who worked in that campo.
+    With both dates, contratistas are whoever has tarjas or Zúñiga harvest
+    in that range. An empresa further limits contratistas to that campo.
     """
     scoped = bool(fecha_inicio or fecha_termino or empresa)
     if scoped and (

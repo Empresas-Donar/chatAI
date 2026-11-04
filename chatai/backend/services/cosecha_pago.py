@@ -201,6 +201,39 @@ def _pay_by_cuartel(days: dict) -> list[dict]:
     return [buckets[name] for name in sorted(buckets)]
 
 
+def contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa=None) -> list[str]:
+    """Names the tarjas bar can select. Same label payable() filters on.
+
+    A crew that only scanned capachos has no tarjas_pagos row, so the bar
+    would hide them. The intranet legal name wins. Without that link, the
+    name stored on the harvest contractor is the one the filter matches.
+    """
+    if not predios_for_empresa(empresa):
+        return []
+    cur.execute(
+        """
+        SELECT DISTINCT nombre
+        FROM (
+          SELECT COALESCE(
+            NULLIF(btrim(m.nombre), ''),
+            NULLIF(btrim(c."contratistas"), ''),
+            NULLIF(btrim(e."contratista"), '')
+          ) AS nombre
+          FROM appsheet.cosecha_zuniga_escaneo e
+          LEFT JOIN appsheet.cosecha_zuniga_contratistas c
+            ON c."id_contratista" = e."id_contratista"
+          LEFT JOIN intranet.contratistas m
+            ON m.id_intranet = c."id_intranet_contratistas"
+          WHERE COALESCE(e."fecha", e."fecha_y_hora"::date) BETWEEN %s AND %s
+        ) names
+        WHERE nombre IS NOT NULL AND length(btrim(nombre)) >= 3
+        ORDER BY nombre
+        """,
+        (fecha_inicio, fecha_termino),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) -> dict:
     """Harvest amount for a tarjas filter.
 

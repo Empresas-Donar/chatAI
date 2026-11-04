@@ -47,9 +47,27 @@ def test_empresa_limits_contractors_to_who_worked_there():
 
             scoped, still_all = bar_options_for_period(cur, *WEEK, sample)
             assert still_all == all_campos
-            assert set(scoped) <= worked
-            others = [name for name in names if name not in worked]
-            if others:
-                assert others[0] not in scoped
+            assert worked <= set(scoped)
+            # A tarjas crew from another campo stays out. Harvest-only names
+            # are not in this tarjas set, so they may be added for Zúñiga.
+            foreign = {name for name, campo in pairs if campo != sample} - worked
+            assert not (set(scoped) & foreign)
+    finally:
+        conn.close()
+
+
+def test_harvest_only_contractor_shows_for_zuniga_week():
+    """M y G has scans from 28/10 and no tarja after 23/10, so the bar must
+    still list the intranet name the detail filter matches."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            names, _ = bar_options_for_period(cur, "2026-10-28", "2026-11-03", "ZUÑIGA")
+            other, _ = bar_options_for_period(
+                cur, "2026-10-28", "2026-11-03", "ISLA DE MAIPO"
+            )
+        assert "AGROSERVICIOS M Y G SPA" in names
+        assert "Myd betzabe" in names
+        assert "AGROSERVICIOS M Y G SPA" not in other
     finally:
         conn.close()

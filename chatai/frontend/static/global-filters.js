@@ -1,6 +1,7 @@
 // global-filters.js — Persist dates / empresa / contratista across report pages.
-// Dates lead. Empresa lists campos with tarjas in that range, then contratista
-// lists whoever worked in the chosen campo.
+// Dates lead. Empresa lists campos with tarjas in that range. Contratista
+// lists whoever worked in the chosen campo, including a Zúñiga crew that
+// only has cosecha in those dates.
 // Empresa/contratista: localStorage. Dates: sessionStorage (custom range lasts the tab).
 // URL query params win per-key on load (shareable links).
 // Nav links to report pages are rewritten with the current globals so they survive navigation.
