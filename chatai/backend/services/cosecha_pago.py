@@ -20,6 +20,9 @@ TIPO = "Cosecha"
 # that only paid the floor. It is not the tarjas "Al día" wage.
 TIPO_TRATO = "trato"
 LABOR = "COSECHA"
+# The harvest app does not record hours. The 9h report treats each
+# person-day as one standard jornada so the projection can be computed.
+JORNADA_HORAS = 9
 
 
 def _empty() -> dict:
@@ -35,6 +38,7 @@ def _empty() -> dict:
         "lines": [],
         "personas_dias": [],
         "cuarteles_pago": [],
+        "celdas": [],
     }
 
 
@@ -182,6 +186,54 @@ def _document_lines(days: dict) -> list[dict]:
             )
         )
     return _collapse_lines_by_cc(lines)
+
+
+def jornada_cells(days: dict) -> list[dict]:
+    """One row per date and cost center for the 9-hour projection.
+
+    Each person-day is JORNADA_HORAS. Those hours follow the pesos: the
+    capacho pay stays on its cuartel and the floor is split by capachos,
+    the same way as the payable lines. A day on two cuarteles is not two
+    jornadas. With hours proportional to the pay, the 9h cell is that
+    day's pay (the average, when several people share the cell).
+    """
+    buckets: dict[tuple, dict] = {}
+    for day in days.values():
+        pago = amount_due(day["trato"], day["piso"])
+        parts = day.get("por_cuartel") or {}
+        if pago <= 0 or not parts:
+            continue
+        names = sorted(parts)
+        piso_shares = _split_int(day["piso"], [parts[name]["capachos"] for name in names])
+        weighted = []
+        for name, piso_share in zip(names, piso_shares):
+            pesos = parts[name]["trato"] + piso_share
+            if pesos > 0:
+                weighted.append((name, pesos))
+        if not weighted:
+            continue
+        assigned = 0.0
+        for index, (name, pesos) in enumerate(weighted):
+            if index == len(weighted) - 1:
+                horas = JORNADA_HORAS - assigned
+            else:
+                horas = JORNADA_HORAS * pesos / pago
+                assigned += horas
+            code = _cc_code(name) or name
+            key = (day["fecha"], code)
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "fecha": day["fecha"],
+                    "labor": LABOR,
+                    "centro_costo": code,
+                    "total_trabajado": 0,
+                    "horas_trabajadas": 0.0,
+                },
+            )
+            bucket["total_trabajado"] += pesos
+            bucket["horas_trabajadas"] += horas
+    return [buckets[key] for key in sorted(buckets)]
 
 
 def _pay_by_cuartel(days: dict) -> list[dict]:
@@ -348,7 +400,9 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
     personas_dias.sort(key=lambda row: (row["trabajador"], row["fecha"]))
 
     lines = _document_lines(days)
+    celdas = jornada_cells(days)
     codes = [line["cc"] for line in lines if line.get("cc")]
+    codes.extend(cell["centro_costo"] for cell in celdas if cell.get("centro_costo"))
     if codes:
         cur.execute(
             """
@@ -363,6 +417,10 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
             cultivo, valor = names.get(line.get("cc"), ("", None))
             line["cultivo"] = cultivo or ""
             line["valor_odoo"] = valor
+        for cell in celdas:
+            cultivo, valor = names.get(cell.get("centro_costo"), ("", None))
+            cell["cultivo"] = cultivo or ""
+            cell["valor_odoo"] = valor
     cuarteles_pago = _pay_by_cuartel(days)
     total = sum(row["a_pagar"] for row in personas_dias)
     jornadas = len(personas_dias)
@@ -382,4 +440,5 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
         "lines": lines,
         "personas_dias": personas_dias,
         "cuarteles_pago": cuarteles_pago,
+        "celdas": celdas,
     }

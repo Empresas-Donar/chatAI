@@ -70,6 +70,7 @@ from psycopg2 import sql as psql
 
 from auth import require_auth
 from db import get_connection
+from services.cosecha_pago import LABOR as COSECHA_LABOR
 from services.cosecha_pago import TIPO as COSECHA_TIPO
 from services.cosecha_pago import contratistas_en_periodo, payable as cosecha_payable
 from services.cosecha_rendimiento import fold as fold_name
@@ -5642,6 +5643,85 @@ def _build_hora_ponderada_filters(
     return "WHERE " + " AND ".join(filters), params
 
 
+def _cosecha_labor_selected(labor) -> bool:
+    """Empty labor keeps harvest. Any other labor is a tarjas labor."""
+    return not labor or fold_name(labor) == fold_name(COSECHA_LABOR)
+
+
+def _cosecha_hora_ponderada_rows(
+    cur, fecha_inicio, fecha_termino, contratista, empresa, centro_costo
+):
+    """Harvest cells for the 9h pivot. Hours are the 9h jornada, not a clock."""
+    data = cosecha_payable(
+        cur, fecha_inicio, fecha_termino, contratista or None, empresa or None
+    )
+    wanted = str(centro_costo).strip() if centro_costo else ""
+    rows = []
+    for cell in data.get("celdas") or []:
+        code = str(cell.get("centro_costo") or "")
+        if wanted and code != wanted:
+            continue
+        rows.append(
+            {
+                "labor": cell.get("labor") or COSECHA_LABOR,
+                "centro_costo": code,
+                "centro_costo_nombre": cell.get("cultivo") or "",
+                "valor_odoo": cell.get("valor_odoo"),
+                "fecha": cell.get("fecha"),
+                "total_trabajado": cell.get("total_trabajado") or 0,
+                "horas_trabajadas": cell.get("horas_trabajadas") or 0,
+            }
+        )
+    return _apply_nombre_cc(rows, "centro_costo", "centro_costo_nombre")
+
+
+def _collapse_hora_ponderada_rows(rows):
+    """One row per Labor+CC+Fecha. Harvest and a tarja of the same name add up."""
+    merged = {}
+    order = []
+    for row in rows:
+        key = (
+            row.get("labor") or "",
+            str(row.get("centro_costo") or ""),
+            row.get("fecha") or "",
+        )
+        if key not in merged:
+            merged[key] = row
+            order.append(key)
+            continue
+        dest = merged[key]
+        dest["total_trabajado"] = float(dest.get("total_trabajado") or 0) + float(
+            row.get("total_trabajado") or 0
+        )
+        dest["horas_trabajadas"] = float(dest.get("horas_trabajadas") or 0) + float(
+            row.get("horas_trabajadas") or 0
+        )
+    return [merged[key] for key in order]
+
+
+def _load_hora_ponderada_rows(
+    cur, fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+):
+    where, params = _build_hora_ponderada_filters(
+        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+    )
+    rows = list(_query_hora_ponderada_rows(cur, where, params))
+    if _cosecha_labor_selected(labor):
+        rows.extend(
+            _cosecha_hora_ponderada_rows(
+                cur, fecha_inicio, fecha_termino, contratista, empresa, centro_costo
+            )
+        )
+    rows.sort(
+        key=lambda row: (
+            (row.get("labor") or "").casefold(),
+            str(row.get("centro_costo") or ""),
+            row.get("fecha") or "",
+        )
+    )
+    return _collapse_hora_ponderada_rows(rows)
+
+
 def _query_hora_ponderada_rows(cur, where, params):
     """One row per Labor+CC+Fecha cell — same costo_hora formula as Detalle
     Operacional (_query_detalle_rows: SUM(total_labor)/SUM(horas_trabajadas)),
@@ -5713,6 +5793,29 @@ async def get_tarjas_hora_ponderada_filters():
                 f"ORDER BY labor"
             )
             labores = [r[0] for r in cur.fetchall()]
+            if not any(fold_name(item) == fold_name(COSECHA_LABOR) for item in labores):
+                labores.append(COSECHA_LABOR)
+                labores.sort(key=str.casefold)
+            cosecha_names = contratistas_en_periodo(cur, "2000-01-01", "2100-12-31")
+            contratistas = _merge_contratistas(contratistas, cosecha_names)
+            cur.execute(
+                """
+                SELECT DISTINCT cc.id_cc::text, cc.cultivo, cc.valor_odoo
+                FROM appsheet.cosecha_zuniga_cuarteles cu
+                JOIN appsheet.tarjas_cc cc
+                  ON cc.id_campo = 3
+                 AND cc.id_cc::text = (regexp_match(cu."nombre_cuartel", '(\\d{3})'))[1]
+                WHERE cu."nombre_cuartel" IS NOT NULL
+                """
+            )
+            known_cc = {item["id"] for item in centros_costo}
+            for code, cultivo, valor in cur.fetchall():
+                if str(code) in known_cc:
+                    continue
+                centros_costo.append(
+                    {"id": str(code), "label": _cc_filter_label(code, cultivo, valor)}
+                )
+            centros_costo.sort(key=lambda item: item["id"])
             empresas = _get_empresas(
                 cur, "appsheet.tarjas_pagos", extra_where=f"NOT {_TRACTORISTA_PAGOS_SQL}"
             )
@@ -5746,12 +5849,17 @@ async def get_tarjas_hora_ponderada_data(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    where, params = _build_hora_ponderada_filters(
-        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
-    )
     try:
         with conn.cursor() as cur:
-            rows = _query_hora_ponderada_rows(cur, where, params)
+            rows = _load_hora_ponderada_rows(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                centro_costo,
+                labor,
+            )
     finally:
         conn.close()
 
@@ -5775,12 +5883,17 @@ async def download_tarjas_hora_ponderada_excel(
         raise HTTPException(
             status_code=503, detail="Error de conexión a la base de datos"
         )
-    where, params = _build_hora_ponderada_filters(
-        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
-    )
     try:
         with conn.cursor() as cur:
-            rows = _query_hora_ponderada_rows(cur, where, params)
+            rows = _load_hora_ponderada_rows(
+                cur,
+                fecha_inicio,
+                fecha_termino,
+                contratista,
+                empresa,
+                centro_costo,
+                labor,
+            )
     finally:
         conn.close()
 
@@ -5886,10 +5999,9 @@ def _build_hora_ponderada_html(
 ) -> str:
     """Shared by the standalone PDF endpoint and the bulk /reportes PDF
     (issue #116) — a single source of truth so both stay identical."""
-    where, params = _build_hora_ponderada_filters(
-        fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
+    rows = _load_hora_ponderada_rows(
+        cur, fecha_inicio, fecha_termino, contratista, empresa, centro_costo, labor
     )
-    rows = _query_hora_ponderada_rows(cur, where, params)
 
     # Same per-date pivot as download_tarjas_hora_ponderada_excel — one
     # column per date, matching what the on-screen pivot table shows.
@@ -5998,6 +6110,7 @@ def _build_hora_ponderada_html(
     )
     return f"""
     {header}
+    <p class="pdf-note">Cosecha no registra horas: cada persona y día cuenta como jornada de 9 horas, y la celda es el pago promedio de esa jornada.</p>
     <table class="pivot-wide" style="{w['table']}"><thead>
       <tr>
         <th style="{w['labor']}">Labor</th>
