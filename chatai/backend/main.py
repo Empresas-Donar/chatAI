@@ -44,6 +44,7 @@ import controllers.chat_controller as chat
 import controllers.looker_controller as looker
 import controllers.roles_controller as roles
 import controllers.contratistas_controller as contratistas
+import controllers.centros_costo_controller as centros_costo
 import controllers.reports_controller as reports
 
 logging.basicConfig(
@@ -147,6 +148,7 @@ chat.init(templates=templates)
 looker.init(templates=templates)
 roles.init(templates=templates)
 contratistas.init(templates=templates)
+centros_costo.init(templates=templates)
 reports.init(templates=templates)
 
 _auth = [Depends(require_auth)]
@@ -164,6 +166,7 @@ app.include_router(chat.router,            dependencies=_auth)
 app.include_router(looker.router,          dependencies=_auth)
 app.include_router(roles.router,           dependencies=_auth)
 app.include_router(contratistas.router,    dependencies=_auth)
+app.include_router(centros_costo.router,   dependencies=_auth)
 app.include_router(reports.router,         dependencies=_auth)
 
 

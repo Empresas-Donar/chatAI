@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Centros de costo — Donar{% endblock %}
+{% block gf_attrs %}data-skip-auto-report{% endblock %}
+
+{% block body %}
+<div class="container">
+  <div class="page-header cc-head">
+    <div>
+      <h1>Centros de costo</h1>
+      <p>Listado de la app de tarjas. Cada código tiene nombre, campo y la distribución analítica del export a Odoo. La sincronización agrega códigos que falten y no reemplaza un nombre que ya sea distinto del código.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="cc-add" disabled>Agregar</button>
+  </div>
+
+  <form id="cc-filters" class="filter-bar" onsubmit="return false">
+    <div>
+      <label for="cc-q">Buscar</label>
+      <input id="cc-q" placeholder="Código o nombre" autocomplete="off" />
+    </div>
+    <div>
+      <label for="cc-fil-campo">Campo</label>
+      <select id="cc-fil-campo">
+        <option value="">Todos</option>
+      </select>
+    </div>
+  </form>
+
+  <p class="err-text" id="cc-page-error" hidden></p>
+  <p id="cc-empty" style="padding:16px;margin:0">Cargando…</p>
+
+  <div class="table-card" id="cc-card" hidden>
+    <div class="table-header">
+      <span>Catálogo</span>
+      <span class="count" id="cc-count"></span>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Nombre</th>
+          <th>Campo</th>
+          <th class="num">Distribución</th>
+          <th class="num">Registros</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="cc-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="cc-overlay" class="cc-overlay" hidden></div>
+<aside id="cc-panel" class="cc-panel" hidden role="dialog" aria-modal="true" aria-labelledby="cc-panel-title">
+  <div class="cc-panel-head">
+    <div>
+      <h2 id="cc-panel-title">Nuevo centro de costo</h2>
+      <p id="cc-panel-sub" class="cc-panel-sub">El código es el que se elige al registrar una tarja.</p>
+    </div>
+    <button type="button" class="cc-panel-close" id="cc-panel-close" aria-label="Cerrar">✕</button>
+  </div>
+  <form id="cc-form" class="cc-panel-form">
+    <div class="cc-panel-scroll">
+      <div class="cc-field">
+        <label for="cc-codigo">Código</label>
+        <input id="cc-codigo" maxlength="40" required autocomplete="off" />
+      </div>
+      <div class="cc-field">
+        <label for="cc-nombre">Nombre</label>
+        <input id="cc-nombre" maxlength="120" required autocomplete="off" />
+      </div>
+      <div class="cc-field">
+        <label for="cc-campo">Campo</label>
+        <select id="cc-campo" required>
+          <option value="">Seleccione</option>
+        </select>
+      </div>
+      <div class="cc-dist">
+        <div class="cc-dist-head">
+          <span>Distribución</span>
+          <span id="cc-dist-total">Sin líneas</span>
+        </div>
+        <p class="cc-dist-hint">Cuenta de Odoo y porcentaje. Con líneas, tienen que sumar 100. Sin líneas, el export la deja fuera.</p>
+        <div id="cc-lines"></div>
+        <button type="button" class="btn btn-secondary btn-sm" id="cc-add-line">Agregar línea</button>
+      </div>
+      <p class="err-text" id="cc-error" hidden></p>
+    </div>
+    <div class="cc-panel-actions">
+      <button type="submit" class="btn btn-primary" id="cc-save">Agregar</button>
+      <button type="button" class="btn btn-secondary" id="cc-cancel">Cancelar</button>
+    </div>
+  </form>
+  <datalist id="cc-cuentas"></datalist>
+</aside>
+<style>
+.cc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.cc-head .btn { flex-shrink: 0; margin-top: 4px; }
+.cc-actions { white-space: nowrap; }
+#cc-card { margin-top: 4px; }
+#cc-body tr.is-open { background: var(--gold-light); }
+.cc-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 20, 9, 0.35);
+  z-index: 500;
+}
+.cc-overlay[hidden],
+.cc-panel[hidden] { display: none; }
+.cc-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(560px, 100vw);
+  height: 100vh;
+  background: var(--surface);
+  z-index: 510;
+  box-shadow: -8px 0 32px rgba(42, 32, 24, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.cc-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.cc-panel-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+.cc-panel-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.cc-panel-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.cc-panel-close:hover { background: var(--bg-warm, #f6f1ea); color: var(--text); }
+.cc-panel-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.cc-panel-scroll {
+  overflow: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cc-field label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 4px;
+}
+.cc-field input,
+.cc-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  color: var(--text);
+}
+.cc-field input:focus,
+.cc-field select:focus {
+  outline: none;
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(196, 80, 58, 0.12);
+}
+.cc-field input:disabled {
+  background: var(--bg-warm, #f6f1ea);
+  color: var(--text-muted);
+}
+.cc-panel-actions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 18px 18px;
+  border-top: 1px solid var(--border);
+}
+.cc-dist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.cc-dist-head span:last-child { text-transform: none; letter-spacing: 0; font-size: 13px; }
+.cc-dist-total--ok { color: var(--green-dark, #1b5e20); }
+.cc-dist-total--bad { color: var(--danger); }
+.cc-dist-hint { margin: 4px 0 8px; font-size: 13px; color: var(--text-muted); }
+.cc-line {
+  display: grid;
+  grid-template-columns: 1fr 88px 32px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cc-line input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  color: var(--text);
+}
+.cc-line input:focus {
+  outline: none;
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(196, 80, 58, 0.12);
+}
+.cc-line-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.cc-line-remove:hover { background: var(--bg-warm, #f6f1ea); color: var(--danger); }
+</style>
+<script src="/static/centros_costo.js?v={{ static_v }}"></script>
+{% endblock %}
