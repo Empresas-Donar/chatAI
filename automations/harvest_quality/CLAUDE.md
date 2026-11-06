@@ -24,6 +24,8 @@ Desde esta carpeta:
 python -m harvest_quality session
 python -m harvest_quality run
 python -m harvest_quality now
+python -m harvest_quality run isla
+python -m harvest_quality now isla
 ```
 
 - `session` abre Chrome normal (no incógnito) en el login de Google y guarda `.session/state.json`. Ese archivo es el secreto `HARVEST_QUALITY_SESSION`. No se commitea. El informe se ve sin cuenta; la descarga no.
@@ -37,7 +39,7 @@ Tabla `intranet.proceso_estado` (`sql/intranet/03_proceso_estado.sql`). Cada rev
 | Columna | Rol |
 |---|---|
 | `id` | TEXT, un id por revisión |
-| `proceso` | `calidad-cosecha` |
+| `proceso` | `calidad-cosecha` en el informe original. `calidad-cosecha-isla` en Isla de Maipo. Cada uno compara solo contra su último envío |
 | `huella` | hash del texto de las hojas que quedan. Vacío si no hay datos |
 | `enviado` | si el POST salió |
 | `motivo` | `sin_datos`, `sin_cambios` o `enviado` |
@@ -49,6 +51,12 @@ La comparación usa la última fila de ese proceso con `enviado` verdadero. La h
 ## Horario
 
 El horario es el Cloud Scheduler `harvest-quality-hourly` en `southamerica-east1`, proyecto `integraciones-484915`, creado con la configuración gcloud `donar` (`gestion@empresasdonar.cl`). Corre `0 8-16 * * *` en `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. No es el servicio `chatai`. GitHub solo despliega la imagen; no crea ni actualiza ese horario. `schedule.py` deja pasar solo las 08:00–16:00. Esas horas no mandan `forzar`. **Run workflow** sigue sirviendo para `now`.
+
+## Isla de Maipo
+
+El mismo proceso, otro informe: «Control de Calidad Cosecha-Cerezas Isla de Maipo». Perfil `isla` (`config/reports/isla.yaml`). Misma sesión de Google, mismo reloj y la misma regla de hojas vacías. La huella no se mezcla con el informe original.
+
+El POST va a `https://gestionempresasdonar.app.n8n.cloud/webhook/a36c5908-03f6-4d86-bf9f-e79b3ba15ccd`. El enlace `/workflow/Demvw9lpEtE5Vvn1` es solo el editor. El deploy crea el Cloud Run Job `harvest-quality-isla` con el comando `python -m harvest_quality run isla`. El horario es otro Cloud Scheduler en la cuenta Donar. GitHub no lo crea.
 
 ## Hoja vacía
 

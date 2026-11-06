@@ -2,6 +2,12 @@ name: Harvest quality PDF
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "Vacío = informe actual. isla = Isla de Maipo."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   send:
@@ -29,4 +35,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           HARVEST_QUALITY_SESSION: ${{ secrets.HARVEST_QUALITY_SESSION }}
-        run: python -m harvest_quality now
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          if [ -n "$PROFILE" ]; then
+            python -m harvest_quality now "$PROFILE"
+          else
+            python -m harvest_quality now
+          fi

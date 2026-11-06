@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from pypdf import PdfWriter
 
+from harvest_quality.config import load_profile, webhook_url
 from harvest_quality.decision import ENVIADO, SIN_CAMBIOS, SIN_DATOS, decide
 from harvest_quality.fingerprint import fingerprint_text
 from harvest_quality.pages import split_pages
@@ -149,6 +150,46 @@ def test_looker_download_returns_when_a_later_attempt_works():
 
     assert run_attempts(flaky, attempts=6) == b"pdf"
     assert calls["n"] == 3
+
+
+def test_default_profile_stays_the_original_report():
+    job, n8n = load_profile(None)
+    assert job["proceso"] == "calidad-cosecha"
+    assert job["pdf_name"] == "calidad-cosecha.pdf"
+    assert webhook_url(n8n["production_url"]).endswith("/webhook/calidad-cosecha-7f3a9c2e41b8")
+
+
+def test_isla_profile_is_a_separate_report():
+    job, n8n = load_profile("isla")
+    assert job["proceso"] == "calidad-cosecha-isla"
+    assert "90e3af30-e527-41a9-96c8-8b1157dacffb" in job["report_url"]
+    assert job["pdf_name"] == "calidad-cosecha-isla.pdf"
+    assert n8n["file_field"] == "data"
+    url = (n8n["production_url"] or "").strip()
+    assert "/workflow/" not in url
+    if not url:
+        try:
+            webhook_url(url)
+        except ValueError:
+            return
+        raise AssertionError("an empty webhook must be rejected")
+    assert "/webhook/" in webhook_url(url)
+
+
+def test_workflow_editor_is_not_a_webhook():
+    try:
+        webhook_url("https://gestionempresasdonar.app.n8n.cloud/workflow/Demvw9lpEtE5Vvn1")
+    except ValueError:
+        return
+    raise AssertionError("expected the editor URL to be rejected")
+
+
+def test_unknown_profile_is_rejected():
+    try:
+        load_profile("no-existe")
+    except ValueError:
+        return
+    raise AssertionError("expected an unknown profile to fail")
 
 
 def test_missing_session_is_not_retried():

@@ -8,7 +8,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from harvest_quality.config import ROOT
-from harvest_quality.config import load_yaml
+from harvest_quality.config import load_profile
+from harvest_quality.config import webhook_url
 from harvest_quality.decision import ENVIADO
 from harvest_quality.decision import SIN_DATOS
 from harvest_quality.decision import decide
@@ -28,29 +29,30 @@ log = logging.getLogger("harvest_quality")
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 1 or args[0] not in {"run", "now", "session"}:
-        print("usage: python -m harvest_quality run|now|session", file=sys.stderr)
+    if not args or args[0] not in {"run", "now", "session"} or len(args) > 2:
+        print("usage: python -m harvest_quality run|now|session [profile]", file=sys.stderr)
         return 2
+    profile = args[1] if len(args) == 2 else None
     try:
         if args[0] == "session":
-            return capture_session()
-        return execute(args[0])
+            return capture_session(profile)
+        return execute(args[0], profile)
     except Exception:
         log.exception("harvest quality check failed")
         return 1
 
 
-def capture_session() -> int:
-    job = load_yaml("job.yaml")
+def capture_session(profile: str | None = None) -> int:
+    job, _n8n = load_profile(profile)
     dest = ROOT / ".session" / "state.json"
     save_session(job["report_url"], dest)
     log.info("session saved at %s", dest)
     return 0
 
 
-def execute(mode: str) -> int:
-    job = load_yaml("job.yaml")
-    n8n = load_yaml("n8n.yaml")
+def execute(mode: str, profile: str | None = None) -> int:
+    job, n8n = load_profile(profile)
+    production_url = webhook_url(n8n["production_url"])
     now = datetime.now(ZoneInfo(job["timezone"]))
     if mode == "run" and not is_due(now, list(job["hours"]), int(job["grace_minutes"])):
         log.info("outside Chile window %s", now.isoformat())
@@ -68,12 +70,13 @@ def execute(mode: str) -> int:
         enviado_en = now if enviado else None
         if enviado:
             status = post_pdf(
-                n8n["production_url"],
+                production_url,
                 kept,
                 file_field=n8n["file_field"],
                 force_field=n8n["force_field"],
                 force_value=str(n8n["force_value"]),
                 force=mode == "now" or needs_n8n_force(now.hour),
+                pdf_name=job["pdf_name"],
             )
             log.info("posted %s status=%s", mode, status)
         row_id = insert_check(

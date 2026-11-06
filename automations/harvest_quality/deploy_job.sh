@@ -44,6 +44,43 @@ gcloud run jobs deploy "${JOB}" \
   --max-retries=0 \
   --quiet
 
+# Isla de Maipo uses the same image and session. It stays out until
+# config/reports/isla.yaml has a webhook URL, not the workflow editor.
+ISLA_JOB=harvest-quality-isla
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ISLA_URL="$(
+  python3 - "$ROOT_DIR" << 'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1], "config", "reports", "isla.yaml").read_text(encoding="utf-8")
+url = ""
+for line in text.splitlines():
+    if line.startswith("production_url:"):
+        url = line.split(":", 1)[1].strip().strip("\"'")
+        break
+print(url)
+PY
+)"
+
+if [[ "${ISLA_URL}" == https://*"/webhook/"* && "${ISLA_URL}" != *"/workflow/"* ]]; then
+  gcloud run jobs deploy "${ISLA_JOB}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --image="${IMAGE}" \
+    --command=python \
+    --args=-m,harvest_quality,run,isla \
+    --service-account="${RUNTIME_SA}" \
+    --env-vars-file="${ENV_FILE}" \
+    --memory=2Gi \
+    --cpu=2 \
+    --task-timeout=1800 \
+    --max-retries=0 \
+    --quiet
+else
+  echo "Isla webhook is not set; harvest-quality-isla was not deployed"
+fi
+
 rm -f "${ENV_FILE}"
 
 gcloud run jobs add-iam-policy-binding "${JOB}" \
@@ -52,3 +89,12 @@ gcloud run jobs add-iam-policy-binding "${JOB}" \
   --member="serviceAccount:${RUNTIME_SA}" \
   --role=roles/run.invoker \
   --quiet >/dev/null
+
+if [[ "${ISLA_URL}" == https://*"/webhook/"* && "${ISLA_URL}" != *"/workflow/"* ]]; then
+  gcloud run jobs add-iam-policy-binding "${ISLA_JOB}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role=roles/run.invoker \
+    --quiet >/dev/null
+fi
