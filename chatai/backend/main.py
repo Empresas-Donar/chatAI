@@ -45,6 +45,7 @@ import controllers.looker_controller as looker
 import controllers.roles_controller as roles
 import controllers.contratistas_controller as contratistas
 import controllers.centros_costo_controller as centros_costo
+import controllers.tractores_controller as tractores
 import controllers.reports_controller as reports
 
 logging.basicConfig(
@@ -149,6 +150,7 @@ looker.init(templates=templates)
 roles.init(templates=templates)
 contratistas.init(templates=templates)
 centros_costo.init(templates=templates)
+tractores.init(templates=templates)
 reports.init(templates=templates)
 
 _auth = [Depends(require_auth)]
@@ -167,6 +169,7 @@ app.include_router(looker.router,          dependencies=_auth)
 app.include_router(roles.router,           dependencies=_auth)
 app.include_router(contratistas.router,    dependencies=_auth)
 app.include_router(centros_costo.router,   dependencies=_auth)
+app.include_router(tractores.router,       dependencies=_auth)
 app.include_router(reports.router,         dependencies=_auth)
 
 

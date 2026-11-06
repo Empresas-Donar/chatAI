@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+
+{% block title %}Tractores — Donar{% endblock %}
+{% block gf_attrs %}data-skip-auto-report{% endblock %}
+
+{% block body %}
+<div class="container">
+  <div class="page-header tr-head">
+    <div>
+      <h1>Tractores</h1>
+      <p>La ficha del conductor se guarda: licencia, horario y el precio de su jornada. El listado de tractores sigue en borrador.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="tr-add" disabled>Agregar</button>
+  </div>
+
+  <div class="tr-tabs" role="tablist">
+    <button type="button" class="tr-tab is-active" data-tab="flota" role="tab" aria-selected="true">Tractores</button>
+    <button type="button" class="tr-tab" data-tab="conductores" role="tab" aria-selected="false">Conductores</button>
+  </div>
+
+  <div id="tr-flota">
+  <form id="tr-filters" class="filter-bar" onsubmit="return false">
+    <div>
+      <label for="tr-q">Buscar</label>
+      <input id="tr-q" placeholder="Patente, máquina o tractorista" autocomplete="off" />
+    </div>
+    <div>
+      <label for="tr-fil-campo">Campo</label>
+      <select id="tr-fil-campo">
+        <option value="">Todos</option>
+      </select>
+    </div>
+    <div>
+      <label for="tr-fil-estado">Estado</label>
+      <select id="tr-fil-estado">
+        <option value="">Todos</option>
+        <option value="en_uso">En uso</option>
+        <option value="quieto">Quieto</option>
+        <option value="sin_tarjas">Sin uso</option>
+      </select>
+    </div>
+  </form>
+
+  <p class="tr-note" id="tr-page-error" hidden></p>
+  <p id="tr-empty" style="padding:16px;margin:0">Cargando…</p>
+
+  <div class="table-card" id="tr-card" hidden>
+    <div class="table-header">
+      <span>Flota</span>
+      <span class="count" id="tr-count"></span>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Patente</th>
+          <th>Máquina</th>
+          <th>Tractorista</th>
+          <th>Conductores</th>
+          <th>Campo</th>
+          <th>Antigüedad</th>
+          <th>Cumple</th>
+          <th>Última tarja</th>
+          <th>Estado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tr-body"></tbody>
+    </table>
+  </div>
+
+  <div class="table-card" id="tr-cost-card" hidden>
+    <div class="table-header">
+      <span>Costo por uso</span>
+      <span class="count">Jornada normal, con operador</span>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Uso</th>
+          <th class="num">Con carnet</th>
+          <th class="num">Sin carnet</th>
+        </tr>
+      </thead>
+      <tbody id="tr-cost-body"></tbody>
+    </table>
+    <p class="tr-tarifa-note" id="tr-tarifa-note"></p>
+  </div>
+</div>
+
+  <div id="tr-conductores" hidden>
+    <form class="filter-bar" onsubmit="return false">
+      <div>
+        <label for="cd-q">Buscar</label>
+        <input id="cd-q" placeholder="Nombre" autocomplete="off" />
+      </div>
+    </form>
+    <p id="cd-empty" style="padding:16px;margin:0" hidden>Cargando…</p>
+    <div class="table-card" id="cd-card" hidden>
+      <div class="table-header">
+        <span>Perfiles</span>
+        <span class="count" id="cd-count"></span>
+      </div>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Conductor</th>
+            <th>Licencia</th>
+            <th>Horario</th>
+            <th class="num">Jornada 9 h</th>
+            <th class="num">Jornada 7,5 h</th>
+            <th>Desde</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cd-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="tr-overlay" class="tr-overlay" hidden></div>
+<aside id="tr-panel" class="tr-panel" hidden role="dialog" aria-modal="true" aria-labelledby="tr-panel-title">
+  <div class="tr-panel-head">
+    <div>
+      <h2 id="tr-panel-title">Tractor</h2>
+      <p id="tr-panel-sub" class="tr-panel-sub">Borrador. Guardar solo cambia esta pantalla.</p>
+    </div>
+    <button type="button" class="tr-panel-close" id="tr-panel-close" aria-label="Cerrar">✕</button>
+  </div>
+  <form id="tr-form" class="tr-panel-form">
+    <div class="tr-panel-scroll">
+      <div class="tr-field">
+        <label for="tr-patente">Patente</label>
+        <input id="tr-patente" maxlength="12" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-maquina">Nombre en la app</label>
+        <input id="tr-maquina" maxlength="80" required autocomplete="off" />
+        <p class="tr-hint">Es el texto que queda en la tarja, por ejemplo PTFK72-Same 3 75.</p>
+      </div>
+      <div class="tr-field">
+        <label for="tr-anio">Año o fecha</label>
+        <input id="tr-anio" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label>Antigüedad</label>
+        <p id="tr-antiguedad" class="tr-readonly">Sin año</p>
+      </div>
+      <div class="tr-field">
+        <label for="tr-cumple">Cumple</label>
+        <select id="tr-cumple">
+          <option value="">Sin dato</option>
+          <option value="SI">Sí</option>
+          <option value="NO">No</option>
+        </select>
+      </div>
+      <div class="tr-field">
+        <label for="tr-color">Color</label>
+        <input id="tr-color" maxlength="40" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-tractorista">Tractorista del catálogo</label>
+        <input id="tr-tractorista" maxlength="40" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-campo">Campo</label>
+        <select id="tr-campo">
+          <option value="">Sin campo</option>
+        </select>
+      </div>
+      <div class="tr-uso" id="tr-uso" hidden>
+        <span>Última tarja</span>
+        <p id="tr-uso-texto"></p>
+      </div>
+      <div id="tr-detalle" hidden>
+        <div class="tr-block">
+          <span>Conductores</span>
+          <table class="tr-mini" id="tr-conductores-mini"></table>
+        </div>
+        <ul class="tr-avisos" id="tr-avisos"></ul>
+      </div>
+      <p class="err-text" id="tr-error" hidden></p>
+    </div>
+    <div class="tr-panel-actions">
+      <button type="submit" class="btn btn-primary" id="tr-save">Guardar en el borrador</button>
+      <button type="button" class="btn btn-secondary" id="tr-cancel">Cancelar</button>
+    </div>
+  </form>
+</aside>
+
+<div id="cd-overlay" class="tr-overlay" hidden></div>
+<aside id="cd-panel" class="tr-panel" hidden role="dialog" aria-modal="true" aria-labelledby="cd-panel-title">
+  <div class="tr-panel-head">
+    <div>
+      <h2 id="cd-panel-title">Conductor</h2>
+      <p class="tr-panel-sub">La próxima tarja que se guarde usa este precio. Las ya pagadas no cambian.</p>
+    </div>
+    <button type="button" class="tr-panel-close" id="cd-panel-close" aria-label="Cerrar">✕</button>
+  </div>
+  <form id="cd-form" class="tr-panel-form">
+    <div class="tr-panel-scroll">
+      <div class="tr-field">
+        <label for="cd-nombre">Nombre</label>
+        <input id="cd-nombre" maxlength="120" required autocomplete="off" />
+        <p class="tr-hint">Tiene que ser el mismo nombre que queda en la tarja.</p>
+      </div>
+      <div class="tr-field">
+        <label for="cd-carnet">Licencia</label>
+        <select id="cd-carnet">
+          <option value="si">Con carnet</option>
+          <option value="no">Sin carnet</option>
+        </select>
+      </div>
+      <div class="tr-field">
+        <label for="cd-operador">Va con operador</label>
+        <select id="cd-operador">
+          <option value="si">Sí</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+      <div class="tr-field">
+        <label for="cd-horario">Horario</label>
+        <select id="cd-horario">
+          <option value="lun_vie">Lunes a viernes, jornada de 9 h</option>
+          <option value="lun_sab">Lunes a sábado, jornada de 7,5 h</option>
+        </select>
+      </div>
+      <div class="tr-field">
+        <label for="cd-desde">Vigente desde</label>
+        <input id="cd-desde" placeholder="DD/MM/YYYY" maxlength="10" required autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="cd-hasta">Vigente hasta</label>
+        <input id="cd-hasta" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off" />
+      </div>
+      <div class="tr-field" id="cd-campo-9">
+        <label for="cd-costo-9">Jornada de 9 h</label>
+        <input id="cd-costo-9" inputmode="numeric" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="cd-costo-75">Jornada de 7,5 h</label>
+        <input id="cd-costo-75" inputmode="numeric" autocomplete="off" />
+      </div>
+      <p class="tr-hint">Si dejas el monto de la tarifa, el precio sigue la licencia. Si lo cambias, queda fijo para este conductor.</p>
+      <p class="err-text" id="cd-error" hidden></p>
+    </div>
+    <div class="tr-panel-actions">
+      <button type="submit" class="btn btn-primary" id="cd-save">Guardar ficha</button>
+      <button type="button" class="btn btn-secondary" id="cd-cancel">Cancelar</button>
+    </div>
+  </form>
+</aside>
+<style>
+.tr-tabs { display: flex; gap: 4px; margin: 4px 0 16px; border-bottom: 1px solid var(--border); }
+.tr-tab {
+  appearance: none; background: none; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -1px; padding: 8px 14px; font-size: 14px; font-weight: 700;
+  color: var(--text-muted); cursor: pointer;
+}
+.tr-tab.is-active { color: var(--text); border-bottom-color: var(--terra); }
+.tr-note { margin: 0 0 12px; font-size: 13px; color: var(--text-muted); }
+.tr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.tr-head .btn { flex-shrink: 0; margin-top: 4px; }
+.tr-actions { white-space: nowrap; }
+#tr-card { margin-top: 4px; }
+.tr-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.tr-pill--en_uso { background: #e5f4e8; color: #1b5e20; }
+.tr-pill--quieto { background: #fff4d6; color: #8a5a00; }
+.tr-pill--sin_tarjas { background: #eeeae4; color: #6b6258; }
+.tr-cumple--SI { color: #1b5e20; font-weight: 700; }
+.tr-cumple--NO { color: var(--danger); font-weight: 700; }
+.tr-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 20, 9, 0.35);
+  z-index: 500;
+}
+.tr-overlay[hidden],
+.tr-panel[hidden] { display: none !important; }
+.tr-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(560px, 100vw);
+  height: 100vh;
+  background: var(--surface);
+  z-index: 510;
+  box-shadow: -8px 0 32px rgba(42, 32, 24, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.tr-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.tr-panel-head h2 { margin: 0; font-size: 18px; font-weight: 800; color: var(--text); }
+.tr-panel-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+.tr-panel-close {
+  background: none; border: none; font-size: 20px; color: var(--text-muted);
+  cursor: pointer; line-height: 1; padding: 4px 8px; border-radius: 6px;
+}
+.tr-panel-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tr-panel-scroll {
+  overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px;
+}
+.tr-field label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-muted); display: block; margin-bottom: 4px;
+}
+.tr-field input, .tr-field select {
+  width: 100%; box-sizing: border-box; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+  background: white; color: var(--text);
+}
+.tr-hint, .tr-readonly { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+.tr-uso {
+  background: var(--bg-warm, #f6f1ea); border-radius: 8px; padding: 10px 12px;
+  font-size: 13px;
+}
+.tr-uso span {
+  display: block; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;
+}
+.tr-uso p { margin: 0; }
+.tr-block span {
+  display: block; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;
+}
+.tr-mini { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tr-mini th, .tr-mini td { text-align: left; padding: 4px 6px 4px 0; vertical-align: top; }
+.tr-mini .num, .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+.tr-avisos { margin: 0; padding-left: 18px; color: #8a5a00; font-size: 13px; }
+.tr-avisos li + li { margin-top: 6px; }
+#tr-cost-card { margin-top: 18px; }
+.tr-tarifa-note { margin: 0; padding: 10px 14px 14px; font-size: 13px; color: var(--text-muted); }
+.tr-panel-actions {
+  display: flex; gap: 10px; padding: 12px 18px 18px; border-top: 1px solid var(--border);
+}
+</style>
+<script src="/static/tractores.js?v={{ static_v }}"></script>
+{% endblock %}

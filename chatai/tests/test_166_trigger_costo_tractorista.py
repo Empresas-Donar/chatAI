@@ -269,3 +269,30 @@ def test_166_different_load_hour_is_not_a_duplicate(conn):
         ("t166-hour-a", 27600),
         ("t166-hour-b", 27600),
     ]
+
+
+def test_166_driver_price_override_replaces_only_that_shift(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE appsheet.tarjas_esquema_tractorista
+           SET costo_9h = 80000,
+               costo_75 = 61000
+         WHERE id = 'felipe'
+        """
+    )
+    cur.execute(
+        "SELECT appsheet.costo_tractorista(%s, %s, %s, %s::date)",
+        ("Felipe Cordova", "Jornada Tractor normal", 9, "2026-09-01"),
+    )
+    assert int(cur.fetchone()[0]) == 80000
+    cur.execute(
+        "SELECT appsheet.costo_tractorista(%s, %s, %s, %s::date)",
+        ("Felipe Cordova", "Jornada Tractor normal", 7.5, "2026-09-07"),
+    )
+    assert int(cur.fetchone()[0]) == 61000
+    cur.execute(
+        "SELECT appsheet.costo_tractorista(%s, %s, %s, %s::date)",
+        ("Felipe Cordova", "Hora Extra", 2, "2026-09-03"),
+    )
+    assert int(cur.fetchone()[0]) == 6800
