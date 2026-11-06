@@ -6,7 +6,7 @@ date: 2026-11-06
 
 El mismo trabajo que `specs/174-cherry-harvest-quality-n8n`, para el
 informe Looker «Control de Calidad Cosecha-Cerezas Isla de Maipo».
-Cada hora de 08:00 a 16:00 hora de Chile baja el PDF, deja solo las
+Una vez al día, a las 17:00 hora de Chile, baja el PDF, deja solo las
 hojas con filas de cosechero y lo envía a su propio flujo de n8n si
 el contenido cambió.
 
@@ -18,7 +18,7 @@ el contenido cambió.
 - [x] Misma regla de hoja vacía: «No hay datos» o «No data» sin filas se quita. El título «Cosechero» no salva la hoja.
 - [x] `production_url` es `https://gestionempresasdonar.app.n8n.cloud/webhook/a36c5908-03f6-4d86-bf9f-e79b3ba15ccd`, el webhook de producción del flujo `Demvw9lpEtE5Vvn1`. El campo del archivo es `data` y `forzar=1` solo fuera de 08:00–16:00 o en `now`.
 - [x] Cloud Run Job `harvest-quality-isla` con la misma imagen y el comando `python -m harvest_quality run isla`. El deploy crea un job `harvest-quality-<campo>` por cada archivo de `config/reports/` que tenga webhook.
-- [ ] Cloud Scheduler propio, `0 8-16 * * *`, `America/Santiago`, cuenta Donar. GitHub no lo crea.
+- [x] Cloud Scheduler `harvest-quality-isla-hourly`, `0 17 * * *`, `America/Santiago`, cuenta Donar. A las 17:00 manda `forzar=1`. GitHub no lo crea.
 
 ## Context
 

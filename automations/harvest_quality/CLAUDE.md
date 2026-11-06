@@ -56,13 +56,13 @@ El horario es el Cloud Scheduler `harvest-quality-hourly` en `southamerica-east1
 
 Un predio nuevo es un archivo `config/reports/<campo>.yaml`: su URL de Looker, su `proceso`, su webhook y su `pdf_name`. El comando es `python -m harvest_quality run <campo>`. El deploy crea el Cloud Run Job `harvest-quality-<campo>` cuando ese yaml tiene un webhook. La huella queda en `intranet.proceso_estado` bajo ese `proceso`, así que no se mezcla con otro campo.
 
-El horario de cada campo es un Cloud Scheduler propio en la cuenta Donar, el mismo cron `0 8-16 * * *`. GitHub no lo crea. El informe original sigue siendo `harvest-quality` sin perfil.
+El horario de cada campo es un Cloud Scheduler propio en la cuenta Donar. GitHub no lo crea. El informe original sigue en `0 8-16 * * *`. Isla de Maipo corre una vez al día a las 17:00 (`0 17 * * *`) y manda `forzar`, porque n8n ya cerró.
 
 ## Isla de Maipo
 
 El mismo proceso, otro informe: «Control de Calidad Cosecha-Cerezas Isla de Maipo». Perfil `isla` (`config/reports/isla.yaml`). Misma sesión de Google, mismo reloj y la misma regla de hojas vacías. La huella no se mezcla con el informe original.
 
-El POST va a `https://gestionempresasdonar.app.n8n.cloud/webhook/a36c5908-03f6-4d86-bf9f-e79b3ba15ccd`. El enlace `/workflow/Demvw9lpEtE5Vvn1` es solo el editor. El deploy crea el Cloud Run Job `harvest-quality-isla` con el comando `python -m harvest_quality run isla`. El horario es otro Cloud Scheduler en la cuenta Donar. GitHub no lo crea.
+El POST va a `https://gestionempresasdonar.app.n8n.cloud/webhook/a36c5908-03f6-4d86-bf9f-e79b3ba15ccd`. El enlace `/workflow/Demvw9lpEtE5Vvn1` es solo el editor. El deploy crea el Cloud Run Job `harvest-quality-isla` con el comando `python -m harvest_quality run isla`. El horario `harvest-quality-isla-hourly` es `0 17 * * *` en `America/Santiago`. A las 17:00 manda `forzar=1`. GitHub no lo crea.
 
 ## Hoja vacía
 

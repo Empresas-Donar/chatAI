@@ -168,6 +168,7 @@ def test_report_profiles_lists_only_webhooks():
 def test_isla_profile_is_a_separate_report():
     job, n8n = load_profile("isla")
     assert job["proceso"] == "calidad-cosecha-isla"
+    assert list(job["hours"]) == [17]
     assert "90e3af30-e527-41a9-96c8-8b1157dacffb" in job["report_url"]
     assert job["pdf_name"] == "calidad-cosecha-isla.pdf"
     assert n8n["file_field"] == "data"
