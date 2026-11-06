@@ -44,32 +44,39 @@ gcloud run jobs deploy "${JOB}" \
   --max-retries=0 \
   --quiet
 
-# Isla de Maipo uses the same image and session. It stays out until
-# config/reports/isla.yaml has a webhook URL, not the workflow editor.
-ISLA_JOB=harvest-quality-isla
+# One Cloud Run Job per config/reports/*.yaml that has a webhook.
+# A file without that URL is skipped. Scheduler stays outside this script.
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ISLA_URL="$(
+PROFILES="$(
   python3 - "$ROOT_DIR" << 'PY'
 from pathlib import Path
 import sys
 
-text = Path(sys.argv[1], "config", "reports", "isla.yaml").read_text(encoding="utf-8")
-url = ""
-for line in text.splitlines():
-    if line.startswith("production_url:"):
-        url = line.split(":", 1)[1].strip().strip("\"'")
-        break
-print(url)
+folder = Path(sys.argv[1]) / "config" / "reports"
+if not folder.is_dir():
+    raise SystemExit(0)
+for path in sorted(folder.glob("*.yaml")):
+    name = path.stem
+    if name != name.lower() or not name.replace("-", "").isalnum():
+        continue
+    url = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("production_url:"):
+            url = line.split(":", 1)[1].strip().strip("\"'")
+            break
+    if url.startswith("https://") and "/webhook/" in url and "/workflow/" not in url:
+        print(name)
 PY
 )"
 
-if [[ "${ISLA_URL}" == https://*"/webhook/"* && "${ISLA_URL}" != *"/workflow/"* ]]; then
-  gcloud run jobs deploy "${ISLA_JOB}" \
+while IFS= read -r profile; do
+  [ -z "${profile}" ] && continue
+  gcloud run jobs deploy "harvest-quality-${profile}" \
     --project="${PROJECT}" \
     --region="${REGION}" \
     --image="${IMAGE}" \
     --command=python \
-    --args=-m,harvest_quality,run,isla \
+    --args=-m,harvest_quality,run,"${profile}" \
     --service-account="${RUNTIME_SA}" \
     --env-vars-file="${ENV_FILE}" \
     --memory=2Gi \
@@ -77,9 +84,7 @@ if [[ "${ISLA_URL}" == https://*"/webhook/"* && "${ISLA_URL}" != *"/workflow/"* 
     --task-timeout=1800 \
     --max-retries=0 \
     --quiet
-else
-  echo "Isla webhook is not set; harvest-quality-isla was not deployed"
-fi
+done <<< "${PROFILES}"
 
 rm -f "${ENV_FILE}"
 
@@ -90,11 +95,12 @@ gcloud run jobs add-iam-policy-binding "${JOB}" \
   --role=roles/run.invoker \
   --quiet >/dev/null
 
-if [[ "${ISLA_URL}" == https://*"/webhook/"* && "${ISLA_URL}" != *"/workflow/"* ]]; then
-  gcloud run jobs add-iam-policy-binding "${ISLA_JOB}" \
+while IFS= read -r profile; do
+  [ -z "${profile}" ] && continue
+  gcloud run jobs add-iam-policy-binding "harvest-quality-${profile}" \
     --project="${PROJECT}" \
     --region="${REGION}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role=roles/run.invoker \
     --quiet >/dev/null
-fi
+done <<< "${PROFILES}"

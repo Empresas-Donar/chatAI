@@ -17,7 +17,7 @@ el contenido cambió.
 - [x] `proceso` `calidad-cosecha-isla` en `intranet.proceso_estado`. No compara contra la huella del otro predio.
 - [x] Misma regla de hoja vacía: «No hay datos» o «No data» sin filas se quita. El título «Cosechero» no salva la hoja.
 - [x] `production_url` es `https://gestionempresasdonar.app.n8n.cloud/webhook/a36c5908-03f6-4d86-bf9f-e79b3ba15ccd`, el webhook de producción del flujo `Demvw9lpEtE5Vvn1`. El campo del archivo es `data` y `forzar=1` solo fuera de 08:00–16:00 o en `now`.
-- [ ] Cloud Run Job `harvest-quality-isla` con la misma imagen y el comando `python -m harvest_quality run isla`. El deploy lo crea solo cuando el webhook ya está en el yaml.
+- [x] Cloud Run Job `harvest-quality-isla` con la misma imagen y el comando `python -m harvest_quality run isla`. El deploy crea un job `harvest-quality-<campo>` por cada archivo de `config/reports/` que tenga webhook.
 - [ ] Cloud Scheduler propio, `0 8-16 * * *`, `America/Santiago`, cuenta Donar. GitHub no lo crea.
 
 ## Context

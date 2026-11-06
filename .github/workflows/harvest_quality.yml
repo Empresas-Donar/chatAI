@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "Vacío = informe actual. isla = Isla de Maipo."
+        description: "Vacío = informe original. Otro valor = archivo en config/reports, por ejemplo isla."
         required: false
         default: ""
         type: string

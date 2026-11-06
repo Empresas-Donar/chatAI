@@ -52,6 +52,12 @@ La comparación usa la última fila de ese proceso con `enviado` verdadero. La h
 
 El horario es el Cloud Scheduler `harvest-quality-hourly` en `southamerica-east1`, proyecto `integraciones-484915`, creado con la configuración gcloud `donar` (`gestion@empresasdonar.cl`). Corre `0 8-16 * * *` en `America/Santiago` y llama al Cloud Run Job `harvest-quality` en `southamerica-west1`. No es el servicio `chatai`. GitHub solo despliega la imagen; no crea ni actualiza ese horario. `schedule.py` deja pasar solo las 08:00–16:00. Esas horas no mandan `forzar`. **Run workflow** sigue sirviendo para `now`.
 
+## Otro campo
+
+Un predio nuevo es un archivo `config/reports/<campo>.yaml`: su URL de Looker, su `proceso`, su webhook y su `pdf_name`. El comando es `python -m harvest_quality run <campo>`. El deploy crea el Cloud Run Job `harvest-quality-<campo>` cuando ese yaml tiene un webhook. La huella queda en `intranet.proceso_estado` bajo ese `proceso`, así que no se mezcla con otro campo.
+
+El horario de cada campo es un Cloud Scheduler propio en la cuenta Donar, el mismo cron `0 8-16 * * *`. GitHub no lo crea. El informe original sigue siendo `harvest-quality` sin perfil.
+
 ## Isla de Maipo
 
 El mismo proceso, otro informe: «Control de Calidad Cosecha-Cerezas Isla de Maipo». Perfil `isla` (`config/reports/isla.yaml`). Misma sesión de Google, mismo reloj y la misma regla de hojas vacías. La huella no se mezcla con el informe original.

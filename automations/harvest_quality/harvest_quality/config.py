@@ -39,6 +39,25 @@ def webhook_url(url: str) -> str:
     raise ValueError("n8n production_url must be the webhook, not the workflow editor")
 
 
+def report_profiles() -> list[str]:
+    """Profiles in config/reports whose production_url is a webhook."""
+    folder = ROOT / "config" / "reports"
+    if not folder.is_dir():
+        return []
+    names: list[str] = []
+    for path in sorted(folder.glob("*.yaml")):
+        name = path.stem
+        if name != name.lower() or not name.replace("-", "").isalnum():
+            continue
+        data = load_yaml(f"reports/{name}.yaml")
+        try:
+            webhook_url(str(data.get("production_url") or ""))
+        except ValueError:
+            continue
+        names.append(name)
+    return names
+
+
 def load_profile(name: str | None) -> tuple[dict, dict]:
     """None is the original report. A name loads config/reports/<name>.yaml."""
     if not name:

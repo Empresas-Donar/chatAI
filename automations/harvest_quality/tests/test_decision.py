@@ -159,6 +159,12 @@ def test_default_profile_stays_the_original_report():
     assert webhook_url(n8n["production_url"]).endswith("/webhook/calidad-cosecha-7f3a9c2e41b8")
 
 
+def test_report_profiles_lists_only_webhooks():
+    from harvest_quality.config import report_profiles
+
+    assert report_profiles() == ["isla"]
+
+
 def test_isla_profile_is_a_separate_report():
     job, n8n = load_profile("isla")
     assert job["proceso"] == "calidad-cosecha-isla"
