@@ -1,4 +1,6 @@
 // Catalog of appsheet.tarjas_cc: the tarjas app cost-center list.
+// IIFE: a top-level `const overlay` collides with base.html and kills the nav script.
+(function () {
 
 const form = document.getElementById('cc-form');
 const empty = document.getElementById('cc-empty');
@@ -357,3 +359,5 @@ tbody.addEventListener('click', event => {
 });
 
 load();
+
+})();
