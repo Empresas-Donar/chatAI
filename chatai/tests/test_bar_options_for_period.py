@@ -67,7 +67,8 @@ def test_harvest_only_contractor_shows_for_zuniga_week():
                 cur, "2026-10-28", "2026-11-03", "ISLA DE MAIPO"
             )
         assert "AGROSERVICIOS M Y G SPA" in names
-        assert "Myd betzabe" in names
+        assert "PRESTACION DE SERVICIOS M Y D SPA" in names
+        assert "Myd betzabe" not in names
         assert "AGROSERVICIOS M Y G SPA" not in other
     finally:
         conn.close()
