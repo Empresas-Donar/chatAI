@@ -2,8 +2,8 @@
 # Same clock, same Google session, and its own proceso so the fingerprint
 # does not mix with the other farm.
 timezone: America/Santiago
-# Every hour from 09:00 through 16:00 Chile. n8n is still open, so no forzar.
-hours: [9, 10, 11, 12, 13, 14, 15, 16]
+# Same window as the original report: every hour from 08:00 through 16:00 Chile.
+hours: [8, 9, 10, 11, 12, 13, 14, 15, 16]
 grace_minutes: 25
 proceso: calidad-cosecha-isla
 report_url: https://datastudio.google.com/reporting/90e3af30-e527-41a9-96c8-8b1157dacffb
