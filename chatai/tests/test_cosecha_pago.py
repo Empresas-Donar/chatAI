@@ -10,8 +10,38 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from db import get_connection  # noqa: E402
 from controllers.purchase_orders_controller import cosecha_odoo_lines  # noqa: E402
-from services.cosecha_pago import payable  # noqa: E402
+from services.cosecha_pago import calendar_counts, payable  # noqa: E402
 from services.cosecha_rendimiento import amount_due, fold, query_detalle  # noqa: E402
+
+
+def test_calendar_counts_capachos_and_distinct_bins():
+    """A day shows scanned capachos and distinct bins. The bin number is not summed."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            zuniga = calendar_counts(
+                cur, "2026-11-10", "2026-11-10", "2026-11-10", "2026-11-10", None, "ZUÑIGA"
+            )
+            isla = calendar_counts(
+                cur,
+                "2026-11-10",
+                "2026-11-10",
+                "2026-11-10",
+                "2026-11-10",
+                None,
+                "ISLA DE MAIPO",
+            )
+            week = calendar_counts(
+                cur, "2026-11-04", "2026-11-10", "2026-11-04", "2026-11-10", None, None
+            )
+    finally:
+        conn.close()
+    assert zuniga["days"]["2026-11-10"] == {"capachos": 2742, "bins": 80}
+    assert isla["days"]["2026-11-10"] == {"capachos": 224, "bins": 11}
+    assert week["capachos"] == 26333
+    assert week["capachos"] == sum(day["capachos"] for day in week["days"].values())
+    assert 0 < week["bins"] < week["capachos"]
+    assert week["bins"] <= sum(day["bins"] for day in week["days"].values())
 
 
 def test_talagante_has_no_harvest_pay():

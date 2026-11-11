@@ -41,8 +41,8 @@ const FLAG_LABELS = {
 };
 
 const MAL_DIGITADO_FLAGS = new Set([
-  'bad_rut', 'double_space_name', 'name_has_digits',
-  'implausible_horas_extra', 'hours_and_extras', 'implausible_hours',
+  'double_space_name', 'name_has_digits',
+  'implausible_horas_extra', 'implausible_hours',
 ]);
 
 const EDIT_FIELDS = [
@@ -324,6 +324,8 @@ function renderCalendar(data) {
     const info = byDate.get(cell.iso);
     const total = info ? info.total : 0;
     const planes = info ? (info.planes || 0) : 0;
+    const capachos = info ? (info.capachos || 0) : 0;
+    const bins = info ? (info.bins || 0) : 0;
     const sospechosos = info ? (info.sospechosos || 0) : 0;
     const duplicadas = info ? (info.duplicadas || 0) : 0;
     const issue = sospechosos + duplicadas;
@@ -346,6 +348,9 @@ function renderCalendar(data) {
     const planChip = planes
       ? `<div class="tcal-plans">${fmtInt(planes)} plan${planes === 1 ? '' : 'es'}</div>`
       : '';
+    const harvestChip = capachos
+      ? `<div class="tcal-harvest">${fmtInt(capachos)} cap. · ${fmtInt(bins)} bin${bins === 1 ? '' : 's'}</div>`
+      : '';
     const warn = sospechosos
       ? `<div class="tcal-suspect">${fmtInt(sospechosos)} mal digitado${sospechosos === 1 ? '' : 's'}</div>`
       : '';
@@ -356,6 +361,7 @@ function renderCalendar(data) {
     html += `<div class="${cls}"${href}>
       <div class="tcal-day-num">${cell.day}</div>
       ${count}
+      ${harvestChip}
       ${planChip}
       ${dupChip}
       ${warn}
@@ -373,6 +379,9 @@ function renderMeta(data) {
   el.innerHTML =
     `<span><strong>${fmtInt(data.total || 0)}</strong> registros en el mes</span>` +
     `<span><span class="tcal-dot tcal-dot-plan"></span><strong>${fmtInt(data.planes || 0)}</strong> planes (rango)</span>` +
+    ((data.capachos || 0)
+      ? `<span><span class="tcal-dot tcal-dot-harvest"></span><strong>${fmtInt(data.capachos)}</strong> capachos · ${fmtInt(data.bins || 0)} bins</span>`
+      : '') +
     `<span><span class="tcal-dot tcal-dot-ok"></span>${fmtInt(data.aprobado || 0)} aprobados</span>` +
     `<span><span class="tcal-dot tcal-dot-pend"></span>${fmtInt(data.pendiente || 0)} pendientes</span>` +
     (dups
@@ -494,6 +503,11 @@ function normKeyPart(v) {
   return String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function hourKey(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : '0';
+}
+
 function dupKey(row) {
   return [
     normKeyPart(row && row.trabajador),
@@ -501,6 +515,8 @@ function dupKey(row) {
     normKeyPart(row && row.nombre_campo),
     normKeyPart(row && row.contratista),
     normKeyPart(row && row.cuartel_cc),
+    hourKey(row && row.horas_trabajadas),
+    hourKey(row && row.horas_extras),
   ].join('|');
 }
 

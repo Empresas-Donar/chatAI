@@ -104,6 +104,20 @@ class TestPivotColWidths:
         assert table_pct < 100.0
         assert table_pct == pytest.approx(64 + 3.5 * 3)
 
+    def test_contratista_day_column_fits_a_clp_amount(self):
+        """$31.700 was painting as $31.70: 3.5% of A4 landscape is narrower
+        than the amount. The day column has to stay at least 5.5% of the page."""
+        w = tc._pivot_col_widths(
+            {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9},
+            7,
+            date_pct=tc._CONTRATISTA_DATE_PCT,
+        )
+        table_pct = float(w["table"].split(":")[1].rstrip("%"))
+        date_pct = float(w["date"].split(":")[1].rstrip("%"))
+        page_share = date_pct * table_pct / 100.0
+        assert page_share == pytest.approx(5.5)
+        assert page_share > 3.5
+
     def test_52_zero_dates_does_not_divide_by_zero(self):
         w = tc._pivot_col_widths({"worker": 22, "tipo": 14, "total": 12}, 0)
         assert w["date"] == "width:0.0%"

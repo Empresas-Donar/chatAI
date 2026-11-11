@@ -214,10 +214,9 @@ def test_136_flags_are_computed_in_python():
         "missing_estado",
         "unexpected_estado",
         "invalid_fecha",
-        "bad_rut",
         "double_space_name",
         "implausible_horas_extra",
-        "hours_and_extras",
+        "implausible_hours",
     ):
         assert flag in block
     assert "flags" in block
@@ -275,7 +274,6 @@ def test_136_flag_heuristics_unit():
         "tipo_pago": "Al dia",
     }
     typo_flags = flags_fn(typo)
-    assert "bad_rut" in typo_flags
     assert "double_space_name" in typo_flags
     assert "implausible_horas_extra" in typo_flags
     assert mal_fn(typo_flags)
@@ -286,18 +284,17 @@ def test_136_flag_heuristics_unit():
         "horas_extras": 2,
         "tipo_pago": "Al dia",
     }
-    assert "hours_and_extras" not in flags_fn(extras_only)
+    assert flags_fn(extras_only) == []
     both = {
         **clean,
         "horas_trabajadas": 9,
         "horas_extras": 2,
         "tipo_pago": "Al dia",
+        "rut_trabajador": "6,67E+12",
     }
-    both_flags = flags_fn(both)
-    assert "hours_and_extras" in both_flags
-    assert mal_fn(both_flags)
-    assert "hours_and_extras" not in flags_fn(clean)
-    assert "bad_rut" not in flags_fn(clean)
+    assert flags_fn(both) == []
+    assert not mal_fn(flags_fn(both))
+    assert flags_fn(clean) == []
 
 
 CAL_HTML = (
@@ -363,6 +360,8 @@ def test_136_calendario_reuses_registros_filters():
     assert "fmtValue" in js or "toLocaleString('es-CL')" in js
     assert "aplicados" in js
     assert "tcal-range" in js
+    assert "tcal-harvest" in js
+    assert "capachos" in js
     assert "day-panel" in js
     assert "mal digitado" in js.lower() or "mal_digitado" in js
     html = CAL_HTML.read_text(encoding="utf-8")

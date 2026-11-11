@@ -288,18 +288,54 @@ def _source_tables(source: str) -> dict:
     }
 
 
+def _intranet_names(cur) -> list[str]:
+    cur.execute(
+        """
+        SELECT nombre
+        FROM intranet.contratistas
+        WHERE nombre IS NOT NULL AND btrim(nombre) <> ''
+        """
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def _label_as_legal(label: str, catalog: list[str]) -> str:
+    """Geraldina is the app label. The bar shows the one legal name that contains it."""
+    folded = fold(label)
+    if not folded:
+        return label
+    longer = []
+    same = []
+    for legal in catalog:
+        other = fold(legal)
+        if not other:
+            continue
+        if other == folded:
+            same.append(legal)
+            continue
+        short, long = (folded, other) if len(folded) <= len(other) else (other, folded)
+        if len(short) >= 4 and f" {short} " in f" {long} ":
+            longer.append(legal)
+    if len(longer) == 1:
+        return longer[0]
+    if len(same) == 1:
+        return same[0]
+    return label
+
+
 def contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa=None) -> list[str]:
     """Names the tarjas bar can select. Same label payable() filters on.
 
     A crew that only scanned capachos has no tarjas_pagos row, so the bar
-    would hide them. The intranet legal name wins. Without that link, the
-    name stored on the harvest contractor is the one the filter matches.
+    would hide them. The intranet link wins. Without it, a short app label
+    still becomes the one legal name that contains it.
     """
     predios = predios_for_empresa(empresa)
     if not predios:
         return []
     names: list[str] = []
     seen: set[str] = set()
+    catalog = _intranet_names(cur)
     for source in predios:
         tables = _source_tables(source)
         cur.execute(
@@ -325,10 +361,140 @@ def contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa=None) -> l
             (fecha_inicio, fecha_termino),
         )
         for (name,) in cur.fetchall():
-            if name not in seen:
-                seen.add(name)
-                names.append(name)
+            legal = _label_as_legal(name, catalog)
+            if legal not in seen:
+                seen.add(legal)
+                names.append(legal)
     return names
+
+
+def _contratista_sql() -> str:
+    """Match the bar's legal name or the short name stored on the harvest app."""
+    folded_name = (
+        "translate(upper(btrim(COALESCE("
+        "NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), '')"
+        "))), %s, %s)"
+    )
+    return f"""
+      AND (
+        COALESCE(
+          NULLIF(btrim(m.nombre), ''),
+          NULLIF(btrim(c.contratistas), ''),
+          NULLIF(btrim(e.contratista), '')
+        ) = %s
+        OR lower(btrim(COALESCE(m.nombre_corto, ''))) = lower(btrim(%s))
+        OR (
+          length(btrim(COALESCE(c.contratistas, e.contratista, ''))) >= 3
+          AND (
+            position({folded_name} IN %s) > 0
+            OR position(%s IN {folded_name}) > 0
+          )
+        )
+      )
+    """
+
+
+def _contratista_params(contratista: str) -> list:
+    return [
+        contratista,
+        contratista,
+        _FOLD_FROM,
+        _FOLD_TO,
+        fold(contratista),
+        fold(contratista),
+        _FOLD_FROM,
+        _FOLD_TO,
+    ]
+
+
+def _scan_select(source: str, fecha_inicio, fecha_termino, contratista) -> tuple[str, list]:
+    """One scan per row, with the bin id. Manual loads without an id do not count as a bin."""
+    tables = _source_tables(source)
+    sql = f"""
+        SELECT
+          COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
+          NULLIF(btrim(COALESCE(
+            NULLIF(e.id_bins, ''),
+            CASE
+              WHEN lower(btrim(COALESCE(e.bins, ''))) = 'manual' THEN NULL
+              ELSE e.bins
+            END
+          )), '') AS bin_id
+        FROM {tables["escaneo"]} e
+        LEFT JOIN {tables["contratistas"]} c
+          ON c.id_contratista = e.id_contratista
+        LEFT JOIN intranet.contratistas m
+          ON m.id_intranet = c.id_intranet_contratistas
+        WHERE COALESCE(e.fecha, e.fecha_y_hora::date) BETWEEN %s AND %s
+        {tables["campo_sql"]}
+    """
+    params: list = [fecha_inicio, fecha_termino]
+    if contratista:
+        sql += _contratista_sql()
+        params.extend(_contratista_params(contratista))
+    return sql, params
+
+
+def calendar_counts(
+    cur,
+    grid_start,
+    grid_end,
+    month_start,
+    month_end,
+    contratista=None,
+    empresa=None,
+) -> dict:
+    """Capachos and distinct bins per day. Bins are identifiers, never a sum.
+
+    Day counts cover the visible grid. The month totals cover only that month,
+    so a bin used on two days counts once in the month.
+    """
+    empty = {"days": {}, "capachos": 0, "bins": 0}
+    predios = predios_for_empresa(empresa)
+    if not predios:
+        return empty
+
+    def scans(inicio, termino) -> tuple[str, list]:
+        parts = []
+        params: list = []
+        for source in predios:
+            sql, source_params = _scan_select(source, inicio, termino, contratista)
+            parts.append(sql)
+            params.extend(source_params)
+        body = " UNION ALL ".join(parts)
+        return body, params
+
+    grid_sql, grid_params = scans(grid_start, grid_end)
+    cur.execute(
+        f"""
+        SELECT fecha::text,
+               COUNT(*)::int AS capachos,
+               COUNT(DISTINCT bin_id) FILTER (WHERE bin_id IS NOT NULL)::int AS bins
+        FROM ({grid_sql}) scans
+        GROUP BY fecha
+        """,
+        grid_params,
+    )
+    days = {
+        fecha: {"capachos": int(capachos or 0), "bins": int(bins or 0)}
+        for fecha, capachos, bins in cur.fetchall()
+        if fecha
+    }
+    month_sql, month_params = scans(month_start, month_end)
+    cur.execute(
+        f"""
+        SELECT COUNT(*)::int,
+               COUNT(DISTINCT bin_id) FILTER (WHERE bin_id IS NOT NULL)::int
+        FROM ({month_sql}) scans
+        """,
+        month_params,
+    )
+    capachos, bins = cur.fetchone()
+    return {
+        "days": days,
+        "capachos": int(capachos or 0),
+        "bins": int(bins or 0),
+    }
 
 
 def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) -> dict:
@@ -387,40 +553,8 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
     if contratista:
         # The tarjas bar uses the legal name. The app may only store the
         # short one (Herbi inside HERBI ML SPA) and have no intranet link.
-        folded_name = (
-            "translate(upper(btrim(COALESCE("
-            "NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), '')"
-            "))), %s, %s)"
-        )
-        sql += f"""
-          AND (
-            COALESCE(
-              NULLIF(btrim(m.nombre), ''),
-              NULLIF(btrim(c.contratistas), ''),
-              NULLIF(btrim(e.contratista), '')
-            ) = %s
-            OR lower(btrim(COALESCE(m.nombre_corto, ''))) = lower(btrim(%s))
-            OR (
-              length(btrim(COALESCE(c.contratistas, e.contratista, ''))) >= 3
-              AND (
-                position({folded_name} IN %s) > 0
-                OR position(%s IN {folded_name}) > 0
-              )
-            )
-          )
-        """
-        params.extend(
-            [
-                contratista,
-                contratista,
-                _FOLD_FROM,
-                _FOLD_TO,
-                fold(contratista),
-                fold(contratista),
-                _FOLD_FROM,
-                _FOLD_TO,
-            ]
-        )
+        sql += _contratista_sql()
+        params.extend(_contratista_params(contratista))
     cur.execute(sql, params)
     scans = cur.fetchall()
     if not scans:

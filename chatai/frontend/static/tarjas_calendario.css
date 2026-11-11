@@ -32,6 +32,7 @@
 .tcal-dot-ok { background: #166534; }
 .tcal-dot-pend { background: #d97706; }
 .tcal-dot-plan { background: #6b4c8a; }
+.tcal-dot-harvest { background: #3f6212; }
 
 .tcal-empty {
   text-align: center;
@@ -166,6 +167,16 @@
   font-weight: 700;
   color: #4c2d69;
   background: #e9dcf3;
+  border-radius: 999px;
+  padding: 1px 7px;
+  align-self: flex-start;
+}
+.tcal-harvest {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #3f6212;
+  background: #ecfccb;
   border-radius: 999px;
   padding: 1px 7px;
   align-self: flex-start;

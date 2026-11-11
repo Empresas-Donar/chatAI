@@ -82,8 +82,8 @@ function fmtValue(v) {
 }
 
 const MAL_DIGITADO_FLAGS = new Set([
-  'bad_rut', 'double_space_name', 'name_has_digits',
-  'implausible_horas_extra', 'hours_and_extras', 'implausible_hours',
+  'double_space_name', 'name_has_digits',
+  'implausible_horas_extra', 'implausible_hours',
 ]);
 const EDITABLE_FIELDS = new Set([
   'trabajador', 'rut_trabajador', 'horas_trabajadas', 'horas_extras',
@@ -219,13 +219,8 @@ function renderCard(r, idx) {
   const flagText = flags.map(f => FLAG_LABELS[f] || f).join(' · ');
 
   const warnKeys = new Set();
-  if (flags.includes('bad_rut')) warnKeys.add('rut_trabajador');
   if (flags.includes('double_space_name') || flags.includes('name_has_digits') || flags.includes('missing_trabajador')) warnKeys.add('trabajador');
   if (flags.includes('implausible_horas_extra')) warnKeys.add('horas_extras');
-  if (flags.includes('hours_and_extras')) {
-    warnKeys.add('horas_trabajadas');
-    warnKeys.add('horas_extras');
-  }
   if (flags.includes('implausible_hours')) warnKeys.add('horas_trabajadas');
   if (flags.includes('missing_campo')) warnKeys.add('nombre_campo');
   if (flags.includes('missing_supervisor')) warnKeys.add('id_supervisor');

@@ -72,7 +72,7 @@ from auth import require_auth
 from db import get_connection
 from services.cosecha_pago import LABOR as COSECHA_LABOR
 from services.cosecha_pago import TIPO as COSECHA_TIPO
-from services.cosecha_pago import contratistas_en_periodo, payable as cosecha_payable
+from services.cosecha_pago import calendar_counts, contratistas_en_periodo, payable as cosecha_payable
 from services.cosecha_rendimiento import fold as fold_name
 from tarjas_empresa import (
     annotate_detalle_resumen,
@@ -412,6 +412,11 @@ table.detalle-tract-pivot { margin-top: 12px; }
 table.detalle-tract-pivot th.th-group { background: #1F4E79; color: #ffffff; text-align: center; }
 table.detalle-tract-pivot tfoot td { font-weight: bold; background: #e8eef4; }
 """
+
+
+# A Detalle Contratistas day cell is a CLP amount such as $31.700.
+# 3.5% of an A4 landscape page clips the last digit.
+_CONTRATISTA_DATE_PCT = 5.5
 
 
 # Beyond this many date columns, each column becomes too narrow for
@@ -4787,7 +4792,9 @@ def _build_contratista_html(
         g["by_date"][r["fecha"]] = g["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
 
     w = _pivot_col_widths(
-        {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9}, len(dates)
+        {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9},
+        len(dates),
+        date_pct=_CONTRATISTA_DATE_PCT,
     )
     date_headers = "".join(
         f'<th class="num" style="{w["date"]}">'
@@ -7523,13 +7530,13 @@ _REGISTROS_CAMPO_NUMERIC = frozenset(
     }
 )
 _REGISTROS_CAMPO_ESTADOS = {"aprobado": "Aprobado", "pendiente": "Pendiente"}
+# A day plus overtime on the same row is how the app records extra hours.
+# A short RUT is not an incident. Real incidents are identical copies.
 _MAL_DIGITADO_FLAGS = frozenset(
     {
-        "bad_rut",
         "double_space_name",
         "name_has_digits",
         "implausible_horas_extra",
-        "hours_and_extras",
         "implausible_hours",
     }
 )
@@ -7540,18 +7547,11 @@ _HORAS_NUM_SQL = (
 )
 _REGISTROS_CAMPO_MAL_SQL = (
     "("
-    " (NULLIF(TRIM(rut_trabajador), '') IS NOT NULL AND ("
-    "   rut_trabajador ~* '[eE][+\\-]' "
-    "   OR length(regexp_replace(rut_trabajador, '[^0-9kK]', '', 'g')) "
-    "      BETWEEN 1 AND 6"
-    " ))"
-    " OR (NULLIF(TRIM(trabajador), '') IS NOT NULL AND ("
+    " (NULLIF(TRIM(trabajador), '') IS NOT NULL AND ("
     "   position('  ' in trabajador) > 0 OR trabajador ~ '[0-9]'"
     " ))"
     f" OR COALESCE({_HORAS_NUM_SQL.format(col='horas_extras')}, 0) > 8"
     f" OR COALESCE({_HORAS_NUM_SQL.format(col='horas_trabajadas')}, 0) > 14"
-    f" OR (COALESCE({_HORAS_NUM_SQL.format(col='horas_trabajadas')}, 0) > 0"
-    f"     AND COALESCE({_HORAS_NUM_SQL.format(col='horas_extras')}, 0) > 0)"
     ")"
 )
 
@@ -7574,17 +7574,6 @@ def _as_number(v):
         return float(s)
     except ValueError:
         return None
-
-
-def _rut_is_malformed(v) -> bool:
-    """True when a present RUT looks typed/exported wrong, not when it is missing."""
-    if _is_blank(v):
-        return False
-    s = str(v).strip()
-    if re.search(r"[eE][+\-]", s):
-        return True
-    digits = re.sub(r"[^0-9kK]", "", s)
-    return 0 < len(digits) < 7
 
 
 def _registros_campo_flags(row: dict) -> list[str]:
@@ -7611,18 +7600,12 @@ def _registros_campo_flags(row: dict) -> list[str]:
         flags.append("invalid_fecha")
     if _is_blank(row.get("id_supervisor")):
         flags.append("missing_supervisor")
-    if _rut_is_malformed(row.get("rut_trabajador")):
-        flags.append("bad_rut")
     horas = _as_number(row.get("horas_trabajadas"))
     extras = _as_number(row.get("horas_extras"))
     if extras is not None and extras > 8:
         flags.append("implausible_horas_extra")
     if horas is not None and horas > 14:
         flags.append("implausible_hours")
-    # 0 regular hours is valid when overtime was entered instead.
-    # Entering both horas_trabajadas and horas_extras on the same row is the typo.
-    if (horas or 0) > 0 and (extras or 0) > 0:
-        flags.append("hours_and_extras")
     return flags
 
 
@@ -8210,6 +8193,8 @@ def _empty_calendar_day(fecha: str) -> dict:
         "sospechosos": 0,
         "duplicadas": 0,
         "planes": 0,
+        "capachos": 0,
+        "bins": 0,
     }
 
 
@@ -8317,7 +8302,9 @@ async def get_tarjas_calendario(
                     lower(regexp_replace(trim(COALESCE(labor, '')), '\\s+', ' ', 'g')) AS k_labor,
                     lower(regexp_replace(trim(COALESCE(nombre_campo, '')), '\\s+', ' ', 'g')) AS k_campo,
                     lower(regexp_replace(trim(COALESCE(contratista, '')), '\\s+', ' ', 'g')) AS k_cont,
-                    lower(regexp_replace(trim(COALESCE(cuartel_cc, '')), '\\s+', ' ', 'g')) AS k_cc
+                    lower(regexp_replace(trim(COALESCE(cuartel_cc, '')), '\\s+', ' ', 'g')) AS k_cc,
+                    COALESCE(horas_trabajadas, 0) AS h_trab,
+                    COALESCE(horas_extras, 0) AS h_extra
                   FROM appsheet.tarjas_pagos
                   LEFT JOIN appsheet.tarjas_pagos_revision rev
                     ON rev.id_resumen = "id_Resumen"
@@ -8326,7 +8313,8 @@ async def get_tarjas_calendario(
                 marked AS (
                   SELECT *,
                     COUNT(*) OVER (
-                      PARTITION BY fecha, k_trab, k_labor, k_campo, k_cont, k_cc
+                      PARTITION BY fecha, k_trab, k_labor, k_campo, k_cont, k_cc,
+                                   h_trab, h_extra
                     ) AS copies
                   FROM base
                 )
@@ -8416,6 +8404,29 @@ async def get_tarjas_calendario(
             except Exception:
                 logger.exception("Calendar plan overlay failed for mes=%s", mes)
                 planes_total = 0
+
+            capachos_total = 0
+            bins_total = 0
+            if not estado and not supervisor and _cosecha_labor_selected(labor):
+                try:
+                    harvest = calendar_counts(
+                        cur,
+                        grid_start,
+                        grid_end,
+                        month_start,
+                        month_end,
+                        contratista or None,
+                        empresa or None,
+                    )
+                    capachos_total = harvest["capachos"]
+                    bins_total = harvest["bins"]
+                    for fecha, counts in harvest["days"].items():
+                        if fecha not in by_fecha:
+                            by_fecha[fecha] = _empty_calendar_day(fecha)
+                        by_fecha[fecha]["capachos"] = counts["capachos"]
+                        by_fecha[fecha]["bins"] = counts["bins"]
+                except Exception:
+                    logger.exception("Calendar harvest overlay failed for mes=%s", mes)
     except HTTPException:
         raise
     except Exception as exc:
@@ -8438,6 +8449,8 @@ async def get_tarjas_calendario(
         "sospechosos": sospechosos_total,
         "duplicadas": duplicadas_total,
         "planes": planes_total,
+        "capachos": capachos_total,
+        "bins": bins_total,
         "max": max_count,
         "contratistas": contratistas,
     }

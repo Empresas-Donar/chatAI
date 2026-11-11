@@ -72,3 +72,18 @@ def test_harvest_only_contractor_shows_for_zuniga_week():
         assert "AGROSERVICIOS M Y G SPA" not in other
     finally:
         conn.close()
+
+
+def test_isla_geraldina_uses_the_legal_name():
+    """The app stores Geraldina and the row has no intranet link. The bar
+    shows Agrícola Geraldina San Martin, the only legal name that contains it."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            names, _ = bar_options_for_period(
+                cur, "2026-11-04", "2026-11-10", "ISLA DE MAIPO"
+            )
+        assert "AGRÍCOLA GERALDINA SAN MARTIN E.I.R.L" in names
+        assert "Geraldina" not in names
+    finally:
+        conn.close()
