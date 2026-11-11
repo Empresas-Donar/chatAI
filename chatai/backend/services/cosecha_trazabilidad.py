@@ -1,7 +1,9 @@
-"""Worker trace for Zúñiga harvest.
+"""Worker trace for harvest scans.
 
-Each scan keeps its own copy of the worker. Deleting the QR credential
-does not remove those rows. This search reads both and says when they diverge.
+Zúñiga comes from cosecha_zuniga. Isla de Maipo and Talagante come from
+cosecha_app. Each scan keeps its own copy of the worker. Deleting the QR
+credential does not remove those rows. This search reads both and says
+when they diverge.
 """
 
 from __future__ import annotations
@@ -10,8 +12,10 @@ import re
 from collections import defaultdict
 
 from services.cosecha_rendimiento import (
+    _APP_CAMPO,
     _FOLD_FROM,
     _FOLD_TO,
+    _PREDIO_LABEL,
     _money,
     amount_due,
     fold,
@@ -80,12 +84,17 @@ def _match_sql(name_col: str, rut_col: str, text: str) -> tuple[str, list]:
     return " OR ".join(clauses), params
 
 
-def _contractor_expr() -> str:
-    col = "COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), ''))"
+def _contractor_expr(column: str | None = None) -> str:
+    col = column or "COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), ''))"
     return _FOLD.format(col=col)
 
 
-def _scan_scope(desde: str | None, hasta: str | None, contratista: str | None) -> tuple[str, list]:
+def _scan_scope(
+    desde: str | None,
+    hasta: str | None,
+    contratista: str | None,
+    contractor_column: str | None = None,
+) -> tuple[str, list]:
     """Date and contractor limits shared by the picker and the person detail."""
     clauses = []
     params: list = []
@@ -97,7 +106,7 @@ def _scan_scope(desde: str | None, hasta: str | None, contratista: str | None) -
         params.append(hasta)
     folded = fold(contratista)
     if folded:
-        expr = _contractor_expr()
+        expr = _contractor_expr(contractor_column)
         clauses.append(
             f"({expr} = %s OR position({expr} in %s) > 0 OR position(%s in {expr}) > 0)"
         )
@@ -107,9 +116,12 @@ def _scan_scope(desde: str | None, hasta: str | None, contratista: str | None) -
 
 def list_workers(cur, empresa=None, contratista=None, desde=None, hasta=None) -> dict:
     """One row per person who worked inside the global filters."""
-    if not predios_for_empresa(empresa):
+    sources = predios_for_empresa(empresa)
+    if not sources:
         return {"trabajadores": []}
-    scope_sql, scope_params = _scan_scope(desde, hasta, contratista)
+    scope_sql, scope_params = _scan_scope(
+        desde, hasta, contratista, "e.contratista_nombre"
+    )
     cur.execute(
         f"""
         SELECT
@@ -120,16 +132,11 @@ def list_workers(cur, empresa=None, contratista=None, desde=None, hasta=None) ->
           END AS person_key,
           (array_agg(e.trabajador ORDER BY e.fecha_y_hora DESC NULLS LAST))[1] AS nombre,
           (array_agg(e.rut_trabajador ORDER BY e.fecha_y_hora DESC NULLS LAST))[1] AS rut,
-          (array_agg(
-            COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), ''))
-            ORDER BY e.fecha_y_hora DESC NULLS LAST
-          ))[1] AS contratista,
+          (array_agg(e.contratista_nombre ORDER BY e.fecha_y_hora DESC NULLS LAST))[1] AS contratista,
           (array_agg(e.cuadrilla::text ORDER BY e.fecha_y_hora DESC NULLS LAST))[1] AS cuadrilla,
           count(*)::int AS capachos,
           count(DISTINCT COALESCE(e.fecha::date, e.fecha_y_hora::date))::int AS dias_trabajados
-        FROM appsheet.cosecha_zuniga_escaneo e
-        LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-          ON c.id_contratista = e.id_contratista
+        FROM {_worker_scans(sources)} e
         WHERE (NULLIF(btrim(e.trabajador), '') IS NOT NULL
            OR NULLIF(btrim(e.rut_trabajador), '') IS NOT NULL)
           AND {scope_sql}
@@ -160,11 +167,9 @@ def list_workers(cur, empresa=None, contratista=None, desde=None, hasta=None) ->
               END AS person_key,
               q.trabajador,
               q.rut,
-              COALESCE(NULLIF(btrim(c.contratistas), ''), '') AS contratista,
+              q.contratista,
               q.cuadrilla::text
-            FROM appsheet.cosecha_zuniga_qr q
-            LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-              ON c.id_contratista = q.id_contratista
+            FROM {_worker_credentials(sources)} q
             WHERE NULLIF(btrim(q.trabajador), '') IS NOT NULL
                OR NULLIF(btrim(q.rut), '') IS NOT NULL
             """
@@ -187,76 +192,167 @@ def list_workers(cur, empresa=None, contratista=None, desde=None, hasta=None) ->
 def search_workers(cur, query: str, empresa=None, contratista=None, desde=None, hasta=None) -> dict:
     """People matching a name or RUT, limited to the global filters."""
     text = (query or "").strip()
+    sources = predios_for_empresa(empresa)
     scan_where, scan_params = _match_sql("e.trabajador", "e.rut_trabajador", text)
-    if not predios_for_empresa(empresa):
-        return {"q": text, "predio": "Zúñiga", "personas": []}
+    if not sources:
+        return {"q": text, "predio": "", "personas": []}
     scope_sql, scope_params = _scan_scope(desde, hasta, contratista)
     limited = bool(desde or hasta or contratista)
+    predio = _PREDIO_LABEL[sources[0]] if len(sources) == 1 else ""
 
-    cur.execute(_scan_sql(f"({scan_where}) AND ({scope_sql})"), scan_params + scope_params)
+    cur.execute(
+        _scan_sql(f"({scan_where}) AND ({scope_sql})", sources),
+        (scan_params + scope_params) * len(sources),
+    )
     matched_scans = cur.fetchall()
     matched_qr = []
     if not limited:
         qr_where, qr_params = _match_sql("q.trabajador", "q.rut", text)
-        cur.execute(_qr_sql(qr_where), qr_params)
+        cur.execute(_qr_sql(qr_where, sources), qr_params * len(sources))
         matched_qr = cur.fetchall()
 
     ruts, names = _keys(matched_scans, matched_qr)
     scans, fichas = (matched_scans, matched_qr)
     if ruts or names:
-        scans, fichas = _expand(cur, ruts, names, scope_sql, scope_params)
+        scans, fichas = _expand(cur, ruts, names, scope_sql, scope_params, sources)
 
     codes = _unique(row[11] for row in scans)
-    by_code = _credentials_by_code(cur, codes) if codes else {}
+    by_code = _credentials_by_code(cur, codes, sources) if codes else {}
     people = _people(scans, fichas, by_code)
     if limited:
         people = [person for person in people if person["capachos"]]
-    return {"q": text, "predio": "Zúñiga", "personas": people}
+    return {"q": text, "predio": predio, "personas": people}
 
 
-def _scan_sql(where: str) -> str:
-    return f"""
-        SELECT
-          COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
-          e.fecha_y_hora,
-          e.trabajador,
-          e.rut_trabajador,
-          e.cuadrilla,
-          COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), '')) AS contratista,
-          e.bins,
-          e.cuartel,
-          NULLIF(btrim(cu.nombre_cuartel), '') AS nombre_cuartel,
-          e.precio_trato_aplicado,
-          COALESCE(s.accion_piso, e.piso_aplicado) AS piso_aplicado,
-          e.codigo_qr,
-          e.id_qr
-        FROM appsheet.cosecha_zuniga_escaneo e
-        LEFT JOIN appsheet.cosecha_zuniga_salidas_trabajador s
-          ON s.fecha = COALESCE(e.fecha, e.fecha_y_hora::date)
-         AND s.id_qr = e.id_qr
-        LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-          ON c.id_contratista = e.id_contratista
-        LEFT JOIN appsheet.cosecha_zuniga_cuarteles cu
-          ON cu.id_cuartel = e.cuartel
-        WHERE {where}
-        ORDER BY e.fecha_y_hora
-    """
+def _tables(source: str) -> dict:
+    if source == "zuniga":
+        return {
+            "escaneo": "appsheet.cosecha_zuniga_escaneo",
+            "salidas": "appsheet.cosecha_zuniga_salidas_trabajador",
+            "contratistas": "appsheet.cosecha_zuniga_contratistas",
+            "cuarteles": "appsheet.cosecha_zuniga_cuarteles",
+            "qr": "appsheet.cosecha_zuniga_qr",
+            "campo_sql": "",
+            "salida_sql": "",
+            "cuartel_sql": "",
+        }
+    campo = _APP_CAMPO[source]
+    return {
+        "escaneo": "appsheet.cosecha_app_escaneo",
+        "salidas": "appsheet.cosecha_app_salidas_trabajador",
+        "contratistas": "appsheet.cosecha_app_contratistas",
+        "cuarteles": "appsheet.cosecha_app_cuarteles",
+        "qr": "appsheet.cosecha_app_qr",
+        "campo_sql": f" AND e.id_campo = '{campo}'",
+        "salida_sql": " AND s.id_campo = e.id_campo",
+        "cuartel_sql": " AND cu.id_campo = e.id_campo",
+    }
 
 
-def _qr_sql(where: str) -> str:
-    return f"""
-        SELECT
-          q.id_qr,
-          q.qr_trabajador,
-          q.trabajador,
-          q.rut,
-          q.cuadrilla,
-          COALESCE(NULLIF(btrim(c.contratistas), ''), '') AS contratista
-        FROM appsheet.cosecha_zuniga_qr q
-        LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-          ON c.id_contratista = q.id_contratista
-        WHERE {where}
-    """
+def _worker_scans(sources: list[str]) -> str:
+    branches = []
+    for source in sources:
+        tables = _tables(source)
+        branches.append(
+            f"""
+            SELECT
+              e.trabajador,
+              e.rut_trabajador,
+              e.fecha,
+              e.fecha_y_hora,
+              e.cuadrilla,
+              e.contratista,
+              COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), ''))
+                AS contratista_nombre
+            FROM {tables["escaneo"]} e
+            LEFT JOIN {tables["contratistas"]} c
+              ON c.id_contratista = e.id_contratista
+            WHERE TRUE {tables["campo_sql"]}
+            """
+        )
+    return "(" + " UNION ALL ".join(branches) + ")"
+
+
+def _worker_credentials(sources: list[str]) -> str:
+    branches = []
+    for source in sources:
+        tables = _tables(source)
+        campo = _APP_CAMPO.get(source)
+        campo_sql = f" AND q.id_campo = '{campo}'" if campo else ""
+        branches.append(
+            f"""
+            SELECT
+              q.trabajador,
+              q.rut,
+              q.cuadrilla,
+              COALESCE(NULLIF(btrim(c.contratistas), ''), '') AS contratista
+            FROM {tables["qr"]} q
+            LEFT JOIN {tables["contratistas"]} c
+              ON c.id_contratista = q.id_contratista
+            WHERE TRUE {campo_sql}
+            """
+        )
+    return "(" + " UNION ALL ".join(branches) + ")"
+
+
+def _scan_sql(where: str, sources: list[str]) -> str:
+    branches = []
+    for source in sources:
+        tables = _tables(source)
+        branches.append(
+            f"""
+            SELECT
+              COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
+              e.fecha_y_hora,
+              e.trabajador,
+              e.rut_trabajador,
+              e.cuadrilla,
+              COALESCE(NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), '')) AS contratista,
+              e.bins,
+              e.cuartel,
+              NULLIF(btrim(cu.nombre_cuartel), '') AS nombre_cuartel,
+              e.precio_trato_aplicado,
+              COALESCE(s.accion_piso, e.piso_aplicado) AS piso_aplicado,
+              e.codigo_qr,
+              e.id_qr
+            FROM {tables["escaneo"]} e
+            LEFT JOIN {tables["salidas"]} s
+              ON s.fecha = COALESCE(e.fecha, e.fecha_y_hora::date)
+             AND s.id_qr = e.id_qr
+             {tables["salida_sql"]}
+            LEFT JOIN {tables["contratistas"]} c
+              ON c.id_contratista = e.id_contratista
+            LEFT JOIN {tables["cuarteles"]} cu
+              ON cu.id_cuartel = e.cuartel
+             {tables["cuartel_sql"]}
+            WHERE {where} {tables["campo_sql"]}
+            """
+        )
+    return "SELECT * FROM (" + " UNION ALL ".join(branches) + ") scans ORDER BY fecha_y_hora"
+
+
+def _qr_sql(where: str, sources: list[str]) -> str:
+    branches = []
+    for source in sources:
+        tables = _tables(source)
+        campo = _APP_CAMPO.get(source)
+        campo_sql = f" AND q.id_campo = '{campo}'" if campo else ""
+        branches.append(
+            f"""
+            SELECT
+              q.id_qr,
+              q.qr_trabajador,
+              q.trabajador,
+              q.rut,
+              q.cuadrilla,
+              COALESCE(NULLIF(btrim(c.contratistas), ''), '') AS contratista
+            FROM {tables["qr"]} q
+            LEFT JOIN {tables["contratistas"]} c
+              ON c.id_contratista = q.id_contratista
+            WHERE ({where}) {campo_sql}
+            """
+        )
+    return " UNION ALL ".join(branches)
 
 
 def _keys(scans, fichas) -> tuple[set[str], set[str]]:
@@ -277,7 +373,7 @@ def _keys(scans, fichas) -> tuple[set[str], set[str]]:
     return ruts, names
 
 
-def _expand(cur, ruts: set[str], names: set[str], scope_sql="TRUE", scope_params=None) -> tuple[list, list]:
+def _expand(cur, ruts: set[str], names: set[str], scope_sql="TRUE", scope_params=None, sources=None) -> tuple[list, list]:
     """Every scan and credential of the matched people, including other name spellings."""
     scan_filter = []
     scan_params: list = []
@@ -299,17 +395,18 @@ def _expand(cur, ruts: set[str], names: set[str], scope_sql="TRUE", scope_params
         qr_params.append(list(names))
 
     scope_params = list(scope_params or [])
+    sources = sources or ["zuniga"]
     cur.execute(
-        _scan_sql(f"({' OR '.join(scan_filter)}) AND ({scope_sql})"),
-        scan_params + scope_params,
+        _scan_sql(f"({' OR '.join(scan_filter)}) AND ({scope_sql})", sources),
+        (scan_params + scope_params) * len(sources),
     )
     scans = cur.fetchall()
-    cur.execute(_qr_sql(" OR ".join(qr_filter)), qr_params)
+    cur.execute(_qr_sql(" OR ".join(qr_filter), sources), qr_params * len(sources))
     return scans, cur.fetchall()
 
 
-def _credentials_by_code(cur, codes: list[str]) -> dict:
-    cur.execute(_qr_sql("q.qr_trabajador = ANY(%s)"), (codes,))
+def _credentials_by_code(cur, codes: list[str], sources: list[str]) -> dict:
+    cur.execute(_qr_sql("q.qr_trabajador = ANY(%s)", sources), (codes,) * len(sources))
     found = {}
     for row in cur.fetchall():
         found[row[1]] = row

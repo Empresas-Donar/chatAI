@@ -25,6 +25,46 @@ def test_talagante_has_no_harvest_pay():
         conn.close()
 
 
+def test_tarjas_legal_name_pays_the_isla_app_and_exports():
+    from controllers.purchase_orders_controller import (
+        cosecha_odoo_lines,
+        group_odoo_export_rows,
+    )
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            short = payable(cur, "2026-11-07", "2026-11-10", "Herbi", "ISLA DE MAIPO")
+            legal = payable(cur, "2026-11-07", "2026-11-10", "HERBI ML SPA", "ISLA DE MAIPO")
+            lines = cosecha_odoo_lines(
+                cur, "HERBI ML SPA", "ISLA DE MAIPO", "2026-11-07", "2026-11-10"
+            )
+            exported, excluded = group_odoo_export_rows(lines)
+    finally:
+        conn.close()
+    assert short["total"] == legal["total"] > 0
+    assert sum(line["total"] for line in lines) == legal["total"]
+    assert excluded == 0
+    assert exported
+    assert "402" in exported[0][3]
+
+
+def test_isla_app_pay_adds_the_floor_and_stays_off_zuniga():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            isla = payable(cur, "2026-11-10", "2026-11-10", None, "ISLA DE MAIPO")
+            zuniga = payable(cur, "2026-11-10", "2026-11-10", None, "ZUÑIGA")
+            detalle = query_detalle(cur, "2026-11-10", "2026-11-10", empresa="ISLA DE MAIPO")
+    finally:
+        conn.close()
+    assert isla["capachos"] > 0
+    assert isla["total"] == detalle["totales"]["a_pagar"]
+    assert isla["total"] == isla["trato"] + isla["piso"]
+    assert isla["capachos"] != zuniga["capachos"]
+    assert all(line["cc"] for line in isla["lines"])
+
+
 def test_zuniga_pay_is_piece_rate_plus_one_daily_floor():
     conn = get_connection()
     try:

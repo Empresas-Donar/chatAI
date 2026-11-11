@@ -549,13 +549,31 @@ async def tarjas_general_page(request: Request):
     return _templates.TemplateResponse(request, "tarjas_general.html")
 
 
+def _same_contractor(left, right) -> bool:
+    """Herbi and HERBI ML SPA are one contractor. SPA alone is too short to glue names."""
+    a, b = fold_name(left), fold_name(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and f" {short} " in f" {long} "
+
+
 def _merge_contratistas(tarjas_names, cosecha_names) -> list[str]:
-    """One option per name. A tarjas spelling wins over the harvest label."""
+    """One option per contractor. The tarjas legal name wins over the app label."""
     chosen = {}
-    for name in list(tarjas_names) + list(cosecha_names):
+    for name in tarjas_names:
         key = fold_name(name)
         if key and key not in chosen:
             chosen[key] = name
+    for name in cosecha_names:
+        key = fold_name(name)
+        if not key or key in chosen:
+            continue
+        if any(_same_contractor(name, kept) for kept in chosen.values()):
+            continue
+        chosen[key] = name
     return [chosen[key] for key in sorted(chosen)]
 
 
@@ -5806,6 +5824,16 @@ async def get_tarjas_hora_ponderada_filters():
                   ON cc.id_campo = 3
                  AND cc.id_cc::text = (regexp_match(cu."nombre_cuartel", '(\\d{3})'))[1]
                 WHERE cu."nombre_cuartel" IS NOT NULL
+                UNION
+                SELECT DISTINCT cc.id_cc::text, cc.cultivo, cc.valor_odoo
+                FROM appsheet.cosecha_app_cuarteles cu
+                JOIN appsheet.tarjas_cc cc
+                  ON cc.id_campo = CASE cu.id_campo
+                       WHEN 'isla-de-maipo' THEN 2
+                       WHEN 'talagante' THEN 1
+                     END
+                 AND cc.id_cc::text = (regexp_match(cu.nombre_cuartel, '(\\d{3})'))[1]
+                WHERE cu.nombre_cuartel IS NOT NULL
                 """
             )
             known_cc = {item["id"] for item in centros_costo}

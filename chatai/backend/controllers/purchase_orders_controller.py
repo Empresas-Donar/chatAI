@@ -362,13 +362,21 @@ def _analytic_export_json(valor) -> str | None:
     return "{" + body + "}"
 
 
-def _zuniga_cost_centers(cur) -> dict[str, tuple]:
+def _harvest_cost_centers(cur, empresa) -> dict[str, tuple]:
+    """Cost centers of the predios in this order. Isla is campo 2, not Zúñiga."""
+    from services.cosecha_pago import _TARJAS_CAMPO
+    from services.cosecha_rendimiento import predios_for_empresa
+
+    campos = [_TARJAS_CAMPO[source] for source in predios_for_empresa(empresa)]
+    if not campos:
+        return {}
     cur.execute(
         """
         SELECT id_cc, cultivo, valor_odoo
         FROM appsheet.tarjas_cc
-        WHERE id_campo = 3
-        """
+        WHERE id_campo = ANY(%s)
+        """,
+        (campos,),
     )
     return {str(row[0]): (row[1], row[2]) for row in cur.fetchall()}
 
@@ -427,13 +435,13 @@ def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
     """Harvest lines in the same grain as the order screen and the PDF.
 
     Product is COSECHA MANUAL (12.2). Price is the harvest amount, with no
-    tarjas factor. A cuartel without a Zúñiga cost center is returned without
-    analytic so the preview marks it incomplete instead of inventing one.
+    tarjas factor. A cuartel without a cost center on that predio is returned
+    without analytic so the preview marks it incomplete instead of inventing one.
     """
     data = cosecha_payable(cur, fecha_inicio, fecha_termino, contratista, empresa)
     if not data["total"]:
         return []
-    centers = _zuniga_cost_centers(cur)
+    centers = _harvest_cost_centers(cur, empresa)
     lines = []
     for item in data["lines"]:
         if not item["total_labor"]:

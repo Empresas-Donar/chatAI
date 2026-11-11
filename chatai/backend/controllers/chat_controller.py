@@ -661,7 +661,14 @@ Las fechas en tarjas_pagos y otros son tipo TEXT — usar CAST(fecha AS DATE) o 
 ### appsheet.cosecha_zuniga_* — Cosecha de capachos en Zúñiga
 La app de cosecha de Zúñiga. No es tarjas y no es despacho_ingreso.
 Sirve para preguntar qué se está cosechando, cuántos capachos van y cuánto hay que pagar.
-Solo existe para Zúñiga. Isla de Maipo, Talagante y KONTROLAG no tienen estas filas.
+Solo Zúñiga. Isla de Maipo y Talagante están en appsheet.cosecha_app_*. KONTROLAG no tiene cosecha.
+
+### appsheet.cosecha_app_* — Cosecha de capachos en Isla de Maipo y Talagante
+Misma regla que Zúñiga: 1 fila de cosecha_app_escaneo = 1 capacho.
+El predio es id_campo: 'isla-de-maipo' o 'talagante' (cosecha_app_campos.nombre_campo).
+Pago, por persona y día: SUM(precio_trato_aplicado) + el piso una vez. Sin factor 1.45 ni 1.50.
+Si hay fila en cosecha_app_salidas_trabajador para esa fecha, id_qr e id_campo, el piso del día es accion_piso. 0 no paga piso.
+No seleccionar cosecha_app_usuarios."contraseña".
 
 Grano: 1 fila de cosecha_zuniga_escaneo = 1 capacho. El trabajador escanea su QR contra un bin.
 Pago, por persona y día:
@@ -884,9 +891,9 @@ PREGUNTAS FRECUENTES Y CÓMO RESPONDERLAS:
    → Complementar con status_system para temp_min/max
 
 6. "¿Cómo va la cosecha?" o "¿Cuánto hay que pagar de cosecha?"
-   → Consultar appsheet.cosecha_zuniga_escaneo. Una fila es un capacho
-   → Pago = SUM(precio_trato_aplicado) + el piso una vez por trabajador y fecha
-   → Si hay fila en cosecha_zuniga_salidas_trabajador para esa fecha, el piso del día es accion_piso en todos los bins. 0 no paga piso
+   → Zúñiga: appsheet.cosecha_zuniga_escaneo. Isla de Maipo y Talagante: appsheet.cosecha_app_escaneo filtrando id_campo ('isla-de-maipo' o 'talagante')
+   → Una fila es un capacho. Pago = SUM(precio_trato_aplicado) + el piso una vez por trabajador y fecha
+   → Si hay fila en *_salidas_trabajador para esa fecha, el piso del día es accion_piso en todos los bins. 0 no paga piso
    → No usar el factor 1.45 ni 1.50, y no usar total_a_recibir de la vista resumen
 
 GLOSARIO AGRONÓMICO:
@@ -943,7 +950,7 @@ _TOOLS = [
         name="query_postgres",
         description=(
             "Ejecuta SQL en PostgreSQL (appsheet y public schemas) y devuelve resultados. "
-            "Schemas disponibles: appsheet (tarjas, despacho, cosecha Zúñiga) y public (sensores, riego). "
+            "Schemas disponibles: appsheet (tarjas, despacho, cosecha Zúñiga y cosecha_app) y public (sensores, riego). "
             "Tablas: appsheet.tarjas_pagos, appsheet.tarjas_reporte, appsheet.tarjas_contratistas, "
             "appsheet.tarjas_personal, appsheet.tarjas_campo, appsheet.tarjas_cc, "
             "appsheet.tarjas_labor, appsheet.despacho_ingreso, appsheet.despacho_guia, "
@@ -951,7 +958,10 @@ _TOOLS = [
             "appsheet.cosecha_zuniga_escaneo (1 fila = 1 capacho; pago = suma del precio + piso una vez por persona y día, sin factor 1.45/1.50), "
             "appsheet.cosecha_zuniga_registro, appsheet.cosecha_zuniga_cuarteles, appsheet.cosecha_zuniga_tratos, "
             "appsheet.cosecha_zuniga_tratos_cuarteles, appsheet.cosecha_zuniga_contratistas, appsheet.cosecha_zuniga_cuadrillas, "
-            "appsheet.cosecha_zuniga_qr, intranet.contratistas, "
+            "appsheet.cosecha_zuniga_qr, "
+            "appsheet.cosecha_app_escaneo (Isla de Maipo id_campo 'isla-de-maipo', Talagante id_campo 'talagante'; mismo pago que Zúñiga), "
+            "appsheet.cosecha_app_campos, appsheet.cosecha_app_contratistas, appsheet.cosecha_app_cuarteles, "
+            "intranet.contratistas, "
             "public.sensor_inventory, public.ubi_soil_sensors, public.wc_farms_irrigation, "
             "public.field_sectors, "
             "public.looker_reports (id, name, description, url, category) — catálogo de reportes Looker Studio."

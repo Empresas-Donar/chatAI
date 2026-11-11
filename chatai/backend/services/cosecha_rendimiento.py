@@ -14,9 +14,26 @@ from typing import Any
 _FOLD_FROM = "ÁÉÍÓÚÜÑÀÈÌÒÙ"
 _FOLD_TO = "AEIOUUNAEIOU"
 
-_SOURCES = ("zuniga",)
+_SOURCES = ("zuniga", "isla", "talagante")
 _EMPRESA_LABEL = {
     "zuniga": "ZUÑIGA",
+    "isla": "ISLA DE MAIPO",
+    "talagante": "TALAGANTE",
+}
+_PREDIO_LABEL = {
+    "zuniga": "Zúñiga",
+    "isla": "Isla de Maipo",
+    "talagante": "Talagante",
+}
+# cosecha_app stores the predio as text. tarjas_cc uses the integer campo.
+_APP_CAMPO = {
+    "isla": "isla-de-maipo",
+    "talagante": "talagante",
+}
+_TARJAS_CAMPO = {
+    "zuniga": 3,
+    "isla": 2,
+    "talagante": 1,
 }
 
 
@@ -27,14 +44,20 @@ def fold(value: str | None) -> str:
 
 
 def predios_for_empresa(empresa: str | None) -> list[str]:
-    """Map the shared Empresa filter onto the harvest app.
+    """Map the shared Empresa filter onto the harvest apps.
 
-    The detail report reads only cosecha_zuniga. Empty or Zúñiga returns
-    that predio. Isla de Maipo, Talagante and KONTROLAG return none.
+    Empty reads Zúñiga (cosecha_zuniga) and Isla de Maipo / Talagante
+    (cosecha_app). KONTROLAG has no harvest app.
     """
     folded = fold(empresa)
-    if not folded or "ZUNIGA" in folded:
+    if not folded:
+        return list(_SOURCES)
+    if "ZUNIGA" in folded:
         return ["zuniga"]
+    if "ISLA" in folded:
+        return ["isla"]
+    if "TALAGANTE" in folded:
+        return ["talagante"]
     return []
 
 
@@ -76,6 +99,7 @@ def _floor_once_per_person_day(rows: list[dict]) -> None:
 
 
 def _person_key(row: dict) -> tuple:
+    """One person on one day. A second crew does not earn a second floor."""
     fecha = row["fecha"]
     if not isinstance(fecha, str):
         fecha = _iso(fecha)
@@ -83,7 +107,6 @@ def _person_key(row: dict) -> tuple:
         fecha,
         row["predio"],
         row["contratista"],
-        row["cuadrilla"],
         row["trabajador"],
     )
 
@@ -91,7 +114,7 @@ def _person_key(row: dict) -> tuple:
 def _labels(rows: list[dict], field: str) -> str | None:
     seen: list[str] = []
     for row in rows:
-        text = (row.get(field) or "").strip()
+        text = str(row.get(field) or "").strip()
         if text and text not in seen:
             seen.append(text)
     return ", ".join(seen) if seen else None
@@ -120,7 +143,7 @@ def _group_person_days(rows: list[dict], bins_by_person: dict[tuple, int]) -> li
                 "fecha": head["fecha"],
                 "predio": head["predio"],
                 "contratista": head["contratista"],
-                "cuadrilla": head["cuadrilla"],
+                "cuadrilla": _labels(group, "cuadrilla"),
                 "cuartel": _labels(group, "cuartel"),
                 "cultivo": _labels(group, "cultivo"),
                 "variedad": _labels(group, "variedad"),
@@ -136,7 +159,7 @@ def _group_person_days(rows: list[dict], bins_by_person: dict[tuple, int]) -> li
     grouped.sort(
         key=lambda row: (
             row["fecha"] or "",
-            row["cuadrilla"] if row["cuadrilla"] is not None else 10**9,
+            row["cuadrilla"] or "",
             -row["capachos"],
             row["trabajador"] or "",
         )
@@ -184,6 +207,35 @@ def _scan_sql(source: str) -> str:
               ON c."id_contratista" = e."id_contratista"
             LEFT JOIN appsheet.cosecha_zuniga_cuarteles cu
               ON cu."id_cuartel" = e."cuartel"
+        """
+    campo = _APP_CAMPO.get(source)
+    if campo:
+        predio = _PREDIO_LABEL[source]
+        return f"""
+            SELECT
+              '{predio}'::text AS predio,
+              COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
+              COALESCE(c.contratistas, e.contratista) AS contratista,
+              trunc(e.cuadrilla)::int AS cuadrilla,
+              COALESCE(cu.nombre_cuartel, e.cuartel) AS cuartel,
+              e.cuartel AS cuartel_id,
+              cu.cultivo AS cultivo,
+              COALESCE(e.variedad, cu.variedad) AS variedad,
+              e.trabajador AS trabajador,
+              e.precio_trato_aplicado AS precio,
+              COALESCE(s.accion_piso, e.piso_aplicado) AS piso,
+              COALESCE(e.id_bins, e.bins) AS bin_key
+            FROM appsheet.cosecha_app_escaneo e
+            LEFT JOIN appsheet.cosecha_app_salidas_trabajador s
+              ON s.fecha = COALESCE(e.fecha, e.fecha_y_hora::date)
+             AND s.id_qr = e.id_qr
+             AND s.id_campo = e.id_campo
+            LEFT JOIN appsheet.cosecha_app_contratistas c
+              ON c.id_contratista = e.id_contratista
+            LEFT JOIN appsheet.cosecha_app_cuarteles cu
+              ON cu.id_cuartel = e.cuartel
+             AND cu.id_campo = e.id_campo
+            WHERE e.id_campo = '{campo}'
         """
     raise ValueError(source)
 
@@ -336,12 +388,12 @@ def query_detalle(
         cte
         + """
         SELECT
-          fecha, predio, contratista, cuadrilla, trabajador,
+          fecha, predio, contratista, trabajador,
           count(DISTINCT bin_key) FILTER (
             WHERE bin_key IS NOT NULL AND btrim(bin_key::text) <> ''
           )::int AS bins
         FROM scans
-        GROUP BY 1, 2, 3, 4, 5
+        GROUP BY 1, 2, 3, 4
         """,
         params,
     )
@@ -456,8 +508,8 @@ def _hint(cur, predios: list[str], params: dict) -> dict | None:
 def _scope_predios(empresa: str | None) -> list[str]:
     """Predios for a cosecha filter. An empresa without harvest does not narrow."""
     if not fold(empresa):
-        return ["zuniga"]
-    return predios_for_empresa(empresa) or ["zuniga"]
+        return list(_SOURCES)
+    return predios_for_empresa(empresa) or list(_SOURCES)
 
 
 def _empresas_con_cosecha(

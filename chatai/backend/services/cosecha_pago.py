@@ -13,7 +13,16 @@ from __future__ import annotations
 import datetime
 import re
 
-from services.cosecha_rendimiento import _money, amount_due, predios_for_empresa
+from services.cosecha_rendimiento import (
+    _APP_CAMPO,
+    _FOLD_FROM,
+    _FOLD_TO,
+    _TARJAS_CAMPO,
+    _money,
+    amount_due,
+    fold,
+    predios_for_empresa,
+)
 
 TIPO = "Cosecha"
 # Harvest is piece rate. The floor is part of that trato, including a day
@@ -253,6 +262,32 @@ def _pay_by_cuartel(days: dict) -> list[dict]:
     return [buckets[name] for name in sorted(buckets)]
 
 
+def _source_tables(source: str) -> dict:
+    """Table names and the campo predicate for one harvest app."""
+    if source == "zuniga":
+        return {
+            "escaneo": "appsheet.cosecha_zuniga_escaneo",
+            "salidas": "appsheet.cosecha_zuniga_salidas_trabajador",
+            "contratistas": "appsheet.cosecha_zuniga_contratistas",
+            "cuarteles": "appsheet.cosecha_zuniga_cuarteles",
+            "campo_sql": "",
+            "salida_sql": "",
+            "cuartel_sql": "",
+            "tarjas_campo": _TARJAS_CAMPO["zuniga"],
+        }
+    campo = _APP_CAMPO[source]
+    return {
+        "escaneo": "appsheet.cosecha_app_escaneo",
+        "salidas": "appsheet.cosecha_app_salidas_trabajador",
+        "contratistas": "appsheet.cosecha_app_contratistas",
+        "cuarteles": "appsheet.cosecha_app_cuarteles",
+        "campo_sql": f" AND e.id_campo = '{campo}'",
+        "salida_sql": " AND s.id_campo = e.id_campo",
+        "cuartel_sql": " AND cu.id_campo = e.id_campo",
+        "tarjas_campo": _TARJAS_CAMPO[source],
+    }
+
+
 def contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa=None) -> list[str]:
     """Names the tarjas bar can select. Same label payable() filters on.
 
@@ -260,85 +295,132 @@ def contratistas_en_periodo(cur, fecha_inicio, fecha_termino, empresa=None) -> l
     would hide them. The intranet legal name wins. Without that link, the
     name stored on the harvest contractor is the one the filter matches.
     """
-    if not predios_for_empresa(empresa):
+    predios = predios_for_empresa(empresa)
+    if not predios:
         return []
-    cur.execute(
-        """
-        SELECT DISTINCT nombre
-        FROM (
-          SELECT COALESCE(
-            NULLIF(btrim(m.nombre), ''),
-            NULLIF(btrim(c."contratistas"), ''),
-            NULLIF(btrim(e."contratista"), '')
-          ) AS nombre
-          FROM appsheet.cosecha_zuniga_escaneo e
-          LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-            ON c."id_contratista" = e."id_contratista"
-          LEFT JOIN intranet.contratistas m
-            ON m.id_intranet = c."id_intranet_contratistas"
-          WHERE COALESCE(e."fecha", e."fecha_y_hora"::date) BETWEEN %s AND %s
-        ) names
-        WHERE nombre IS NOT NULL AND length(btrim(nombre)) >= 3
-        ORDER BY nombre
-        """,
-        (fecha_inicio, fecha_termino),
-    )
-    return [row[0] for row in cur.fetchall()]
+    names: list[str] = []
+    seen: set[str] = set()
+    for source in predios:
+        tables = _source_tables(source)
+        cur.execute(
+            f"""
+            SELECT DISTINCT nombre
+            FROM (
+              SELECT COALESCE(
+                NULLIF(btrim(m.nombre), ''),
+                NULLIF(btrim(c.contratistas), ''),
+                NULLIF(btrim(e.contratista), '')
+              ) AS nombre
+              FROM {tables["escaneo"]} e
+              LEFT JOIN {tables["contratistas"]} c
+                ON c.id_contratista = e.id_contratista
+              LEFT JOIN intranet.contratistas m
+                ON m.id_intranet = c.id_intranet_contratistas
+              WHERE COALESCE(e.fecha, e.fecha_y_hora::date) BETWEEN %s AND %s
+              {tables["campo_sql"]}
+            ) names
+            WHERE nombre IS NOT NULL AND length(btrim(nombre)) >= 3
+            ORDER BY nombre
+            """,
+            (fecha_inicio, fecha_termino),
+        )
+        for (name,) in cur.fetchall():
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
 
 
 def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) -> dict:
     """Harvest amount for a tarjas filter.
 
-    Empresa limits the predio: only Zúñiga (or an empty empresa) has scans.
-    Contratista matches the tarjas legal name through the intranet link, or
-    the short name stored on the harvest contractor.
+    Empresa limits the predio. Empty reads Zúñiga and cosecha_app (Isla de
+    Maipo, Talagante). Contratista matches the tarjas legal name through
+    the intranet link, or the short name stored on the harvest contractor.
     """
-    if not predios_for_empresa(empresa):
+    predios = predios_for_empresa(empresa)
+    if not predios:
         return _empty()
+    parts = [
+        _payable_source(cur, fecha_inicio, fecha_termino, contratista, source)
+        for source in predios
+    ]
+    return _merge_payables(parts)
 
-    sql = """
+
+def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) -> dict:
+    tables = _source_tables(source)
+    sql = f"""
         SELECT
-          COALESCE(e."fecha", e."fecha_y_hora"::date) AS fecha,
-          COALESCE(NULLIF(btrim(e."trabajador"), ''), '(sin nombre)') AS trabajador,
+          COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
+          COALESCE(NULLIF(btrim(e.trabajador), ''), '(sin nombre)') AS trabajador,
           COALESCE(
             NULLIF(btrim(m.nombre), ''),
-            NULLIF(btrim(c."contratistas"), ''),
-            NULLIF(btrim(e."contratista"), '')
+            NULLIF(btrim(c.contratistas), ''),
+            NULLIF(btrim(e.contratista), '')
           ) AS contratista,
           NULLIF(btrim(m.nombre_corto), '') AS nombre_corto,
           COALESCE(
-            NULLIF(btrim(cu."nombre_cuartel"), ''),
-            NULLIF(btrim(e."cuartel"), ''),
+            NULLIF(btrim(cu.nombre_cuartel), ''),
+            NULLIF(btrim(e.cuartel), ''),
             'Sin cuartel'
           ) AS cuartel,
-          NULLIF(btrim(cu."cultivo"), '') AS cultivo,
-          e."precio_trato_aplicado" AS precio,
-          COALESCE(s.accion_piso, e."piso_aplicado") AS piso
-        FROM appsheet.cosecha_zuniga_escaneo e
-        LEFT JOIN appsheet.cosecha_zuniga_salidas_trabajador s
-          ON s.fecha = COALESCE(e."fecha", e."fecha_y_hora"::date)
+          NULLIF(btrim(cu.cultivo), '') AS cultivo,
+          e.precio_trato_aplicado AS precio,
+          COALESCE(s.accion_piso, e.piso_aplicado) AS piso
+        FROM {tables["escaneo"]} e
+        LEFT JOIN {tables["salidas"]} s
+          ON s.fecha = COALESCE(e.fecha, e.fecha_y_hora::date)
          AND s.id_qr = e.id_qr
-        LEFT JOIN appsheet.cosecha_zuniga_contratistas c
-          ON c."id_contratista" = e."id_contratista"
+         {tables["salida_sql"]}
+        LEFT JOIN {tables["contratistas"]} c
+          ON c.id_contratista = e.id_contratista
         LEFT JOIN intranet.contratistas m
-          ON m.id_intranet = c."id_intranet_contratistas"
-        LEFT JOIN appsheet.cosecha_zuniga_cuarteles cu
-          ON cu."id_cuartel" = e."cuartel"
-        WHERE COALESCE(e."fecha", e."fecha_y_hora"::date) BETWEEN %s AND %s
+          ON m.id_intranet = c.id_intranet_contratistas
+        LEFT JOIN {tables["cuarteles"]} cu
+          ON cu.id_cuartel = e.cuartel
+         {tables["cuartel_sql"]}
+        WHERE COALESCE(e.fecha, e.fecha_y_hora::date) BETWEEN %s AND %s
+        {tables["campo_sql"]}
     """
     params: list = [fecha_inicio, fecha_termino]
     if contratista:
-        sql += """
+        # The tarjas bar uses the legal name. The app may only store the
+        # short one (Herbi inside HERBI ML SPA) and have no intranet link.
+        folded_name = (
+            "translate(upper(btrim(COALESCE("
+            "NULLIF(btrim(c.contratistas), ''), NULLIF(btrim(e.contratista), '')"
+            "))), %s, %s)"
+        )
+        sql += f"""
           AND (
             COALESCE(
               NULLIF(btrim(m.nombre), ''),
-              NULLIF(btrim(c."contratistas"), ''),
-              NULLIF(btrim(e."contratista"), '')
+              NULLIF(btrim(c.contratistas), ''),
+              NULLIF(btrim(e.contratista), '')
             ) = %s
             OR lower(btrim(COALESCE(m.nombre_corto, ''))) = lower(btrim(%s))
+            OR (
+              length(btrim(COALESCE(c.contratistas, e.contratista, ''))) >= 3
+              AND (
+                position({folded_name} IN %s) > 0
+                OR position(%s IN {folded_name}) > 0
+              )
+            )
           )
         """
-        params.extend([contratista, contratista])
+        params.extend(
+            [
+                contratista,
+                contratista,
+                _FOLD_FROM,
+                _FOLD_TO,
+                fold(contratista),
+                fold(contratista),
+                _FOLD_FROM,
+                _FOLD_TO,
+            ]
+        )
     cur.execute(sql, params)
     scans = cur.fetchall()
     if not scans:
@@ -408,9 +490,9 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
             """
             SELECT id_cc::text, cultivo, valor_odoo
             FROM appsheet.tarjas_cc
-            WHERE id_campo = 3 AND id_cc::text = ANY(%s)
+            WHERE id_campo = %s AND id_cc::text = ANY(%s)
             """,
-            (codes,),
+            (tables["tarjas_campo"], codes),
         )
         names = {code: (cultivo, valor) for code, cultivo, valor in cur.fetchall()}
         for line in lines:
@@ -422,6 +504,44 @@ def payable(cur, fecha_inicio, fecha_termino, contratista=None, empresa=None) ->
             cell["cultivo"] = cultivo or ""
             cell["valor_odoo"] = valor
     cuarteles_pago = _pay_by_cuartel(days)
+    total = sum(row["a_pagar"] for row in personas_dias)
+    jornadas = len(personas_dias)
+    return {
+        "es_cosecha": True,
+        "total": total,
+        "trato": sum(row["trato"] for row in personas_dias),
+        "piso": sum(row["piso"] for row in personas_dias),
+        "pago_trato": total,
+        "pago_al_dia": 0,
+        "jornadas_trato": jornadas,
+        "jornadas_al_dia": 0,
+        "capachos": sum(row["capachos"] for row in personas_dias),
+        "jornadas": jornadas,
+        "personas": len({row["trabajador"] for row in personas_dias}),
+        "promedio_diario": round(total / jornadas) if jornadas else None,
+        "lines": lines,
+        "personas_dias": personas_dias,
+        "cuarteles_pago": cuarteles_pago,
+        "celdas": celdas,
+    }
+
+
+def _merge_payables(parts: list[dict]) -> dict:
+    filled = [part for part in parts if part["personas_dias"]]
+    if not filled:
+        return _empty()
+    if len(filled) == 1:
+        return filled[0]
+    personas_dias = []
+    lines = []
+    celdas = []
+    cuarteles_pago = []
+    for part in filled:
+        personas_dias.extend(part["personas_dias"])
+        lines.extend(part["lines"])
+        celdas.extend(part["celdas"])
+        cuarteles_pago.extend(part["cuarteles_pago"])
+    personas_dias.sort(key=lambda row: (row["trabajador"], row["fecha"]))
     total = sum(row["a_pagar"] for row in personas_dias)
     jornadas = len(personas_dias)
     return {
