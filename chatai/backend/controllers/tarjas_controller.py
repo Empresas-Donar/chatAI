@@ -104,6 +104,33 @@ def _fmt_clp(v) -> str:
         return "-"
 
 
+def _cosecha_detail_lines(capachos, trato, piso, precios=None) -> list[str]:
+    """Small PDF lines: the floor, then capachos at each price."""
+    lines = []
+    piso_i = int(round(float(piso or 0)))
+    if piso_i:
+        lines.append(f"piso {_fmt_clp(piso_i)}")
+    if precios:
+        for price in sorted(precios, key=lambda item: float(item)):
+            qty = int(precios[price] or 0)
+            if qty:
+                lines.append(f"{qty} × {_fmt_clp(price)}")
+        return lines
+    capachos_i = int(capachos or 0)
+    trato_i = int(round(float(trato or 0)))
+    if capachos_i and trato_i % capachos_i == 0:
+        lines.append(f"{capachos_i} × {_fmt_clp(trato_i // capachos_i)}")
+    elif capachos_i:
+        lines.append(f"{capachos_i} cap. · {_fmt_clp(trato_i)}")
+    return lines
+
+
+def _cosecha_detail_html(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    return '<br/><span class="cosecha-detail">' + "<br/>".join(lines) + "</span>"
+
+
 # Detalle contratista marks a payment when it is strictly above this amount.
 # The live value is appsheet.tarjas_configuracion.umbral_diario (row 'general');
 # this default only applies before that row exists.
@@ -392,6 +419,7 @@ tr.worker-first td { border-top: 1.5px solid #888888; }
 table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
 table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .pdf-note { font-size: 7pt; font-style: italic; color: #666666; margin: 0 0 8px 0; }
+.cosecha-detail { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
 .pdf-summary { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; }
 .pdf-summary td { width: 33.33%; border: 1px solid #cccccc; background: #f7f7f7; padding: 6px 10px; font-size: 8pt; text-align: center; }
 .pdf-summary b { display: block; font-size: 11pt; color: #111111; }
@@ -1235,6 +1263,7 @@ def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict
                 "nombre_campo": "ZUÑIGA",
                 "total_empresa": line["total_empresa"],
                 "es_cosecha": True,
+                "detalle": line.get("detalle") or {},
             }
         )
     _apply_nombre_cc(harvest_rows, "centro_costo", "centro_costo_nombre")
@@ -2461,7 +2490,9 @@ async def download_tarjas_resumen_persona_excel(
                 {
                     "trabajador": person["trabajador"],
                     "contratista": person["contratista"],
-                    "tipo_pago": person.get("tipo_pago") or COSECHA_TIPO,
+                    # Keep harvest off the tarjas "trato" row. Same person and
+                    # day can also have a labor payment.
+                    "tipo_pago": COSECHA_TIPO,
                     "fecha": person["fecha"],
                     "total_trabajado": person["a_pagar"],
                 }
@@ -4257,9 +4288,12 @@ def _build_resumen_persona_html(
                 rows.append(
                     {
                         "trabajador": person["trabajador"],
-                        "tipo_pago": person.get("tipo_pago") or "",
+                        "tipo_pago": COSECHA_TIPO,
                         "fecha": person["fecha"],
                         "total": person["a_pagar"],
+                        "cosecha_lineas": _cosecha_detail_lines(
+                            person.get("capachos"), person.get("trato"), person.get("piso")
+                        ),
                     }
                 )
 
@@ -4268,11 +4302,13 @@ def _build_resumen_persona_html(
     for r in rows:
         k = (r["trabajador"] or "", r["tipo_pago"] or "")
         if k not in workers:
-            workers[k] = {"by_date": {}, "total": 0}
+            workers[k] = {"by_date": {}, "detail": {}, "total": 0}
         workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(
             r["fecha"], 0
         ) + float(r["total"] or 0)
         workers[k]["total"] += float(r["total"] or 0)
+        if r.get("cosecha_lineas"):
+            workers[k]["detail"][r["fecha"]] = r["cosecha_lineas"]
     # Alphabetical by worker name, keeping each worker's "Al día"/"trato"
     # rows contiguous — required for the is_first "print name once" logic
     # below (issue #137).
@@ -4303,8 +4339,9 @@ def _build_resumen_persona_html(
         )
         for d in dates:
             v = entry["by_date"].get(d, 0)
+            detail = _cosecha_detail_html(entry["detail"].get(d))
             rows_html += (
-                f'<td class="num" style="{w["date"]}">{_fmt_clp(v) if v else "0"}</td>'
+                f'<td class="num" style="{w["date"]}">{(_fmt_clp(v) + detail) if v else "0"}</td>'
             )
         rows_html += f'<td class="total" style="{w["total"]}">{_fmt_clp(entry["total"])}</td></tr>'
 
@@ -4597,18 +4634,26 @@ def _build_detalle_html(
         "trab": "width:13%",
         "pct": "width:15%",
     }
-    rows_html = "".join(
-        f'<tr><td style="{DW["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
-        f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
-        f'<td style="{DW["labor"]}">{r["labor"]}</td><td style="{DW["cc"]}">{r["centro_costo"]}</td>'
-        f'<td style="{DW["nombre_cc"]}">{_escape_html(r["centro_costo_nombre"] or "—")}</td>'
-        f'<td class="num" style="{DW["costo_hora"]}">{fmtCLP(r["costo_hora"])}</td>'
-        f'<td class="num" style="{DW["jornadas"]}">{"—" if r.get("jornadas") is None else r["jornadas"]}</td>'
-        f'<td class="num" style="{DW["trab"]}">{fmtCLP(r.get("total_trabajado"))}</td>'
-        f'<td class="total" style="{DW["total"]}">{fmtCLP(r.get("total_empresa"))}</td>'
-        f'<td class="num" style="{DW["pct"]}">{fmtPct(r["pct_pago"])}</td></tr>'
-        for r in rows
-    )
+    def _detalle_row(r) -> str:
+        detail = ""
+        if r.get("es_cosecha"):
+            info = r.get("detalle") or {}
+            detail = _cosecha_detail_html(
+                _cosecha_detail_lines(0, 0, info.get("piso"), info.get("precios"))
+            )
+        return (
+            f'<tr><td style="{DW["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
+            f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'
+            f'<td style="{DW["labor"]}">{r["labor"]}{detail}</td><td style="{DW["cc"]}">{r["centro_costo"]}</td>'
+            f'<td style="{DW["nombre_cc"]}">{_escape_html(r["centro_costo_nombre"] or "—")}</td>'
+            f'<td class="num" style="{DW["costo_hora"]}">{fmtCLP(r["costo_hora"])}</td>'
+            f'<td class="num" style="{DW["jornadas"]}">{"—" if r.get("jornadas") is None else r["jornadas"]}</td>'
+            f'<td class="num" style="{DW["trab"]}">{fmtCLP(r.get("total_trabajado"))}</td>'
+            f'<td class="total" style="{DW["total"]}">{fmtCLP(r.get("total_empresa"))}</td>'
+            f'<td class="num" style="{DW["pct"]}">{fmtPct(r["pct_pago"])}</td></tr>'
+        )
+
+    rows_html = "".join(_detalle_row(r) for r in rows)
     sum_jornadas = sum(float(r["jornadas"] or 0) for r in rows)
     sum_emp = sum(float(r.get("total_empresa") or 0) for r in rows)
     sum_trab = sum(float(r.get("total_trabajado") or 0) for r in rows)
@@ -4768,6 +4813,9 @@ def _build_contratista_html(
                     "fecha": person["fecha"],
                     "total": person["a_pagar"],
                     "horas": 0,
+                    "cosecha_lineas": _cosecha_detail_lines(
+                        person.get("capachos"), person.get("trato"), person.get("piso")
+                    ),
                 }
             )
     umbral = _umbral_diario(cur)
@@ -4785,11 +4833,13 @@ def _build_contratista_html(
     for r in rows:
         key = (r["trabajador"], r["contratista"], r["labor"], r["tipo_pago"])
         if key not in groups:
-            groups[key] = {"total_ganado": 0.0, "total_horas": 0.0, "by_date": {}}
+            groups[key] = {"total_ganado": 0.0, "total_horas": 0.0, "by_date": {}, "detail": {}}
         g = groups[key]
         g["total_ganado"] += float(r["total"] or 0)
         g["total_horas"] += float(r["horas"] or 0)
         g["by_date"][r["fecha"]] = g["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
+        if r.get("cosecha_lineas"):
+            g["detail"][r["fecha"]] = r["cosecha_lineas"]
 
     w = _pivot_col_widths(
         {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9},
@@ -4802,13 +4852,14 @@ def _build_contratista_html(
         for d in dates
     )
 
-    def money_td(css_class, width, amount, *, dash_if_empty=False):
+    def money_td(css_class, width, amount, *, dash_if_empty=False, detail=None):
         if dash_if_empty and not amount:
             return f'<td class="{css_class}" style="{width}">-</td>'
+        text = clp(amount) + _cosecha_detail_html(detail or [])
         return _marked_money_td(
             css_class,
             width,
-            clp(amount),
+            text,
             _exceeds_umbral_diario(amount, umbral),
         )
 
@@ -4826,7 +4877,13 @@ def _build_contratista_html(
             else "-"
         )
         date_cells = "".join(
-            money_td("num", w["date"], g["by_date"].get(d), dash_if_empty=True)
+            money_td(
+                "num",
+                w["date"],
+                g["by_date"].get(d),
+                dash_if_empty=True,
+                detail=g["detail"].get(d),
+            )
             for d in dates
         )
         rows_html += (

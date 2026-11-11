@@ -114,10 +114,21 @@ def _collapse_lines_by_cc(lines: list[dict]) -> list[dict]:
     empty. The amount is the sum, with no tarjas factor.
     """
     totals: dict[str, int] = {}
+    detail: dict[str, dict] = {}
     for line in lines:
+        is_floor = (line.get("labor") or "").endswith("· piso")
         for cuartel, pesos in (line.get("shares") or {}).items():
             code = _cc_code(cuartel)
             totals[code] = totals.get(code, 0) + int(pesos)
+            bucket = detail.setdefault(code, {"piso": 0, "precios": {}})
+            if is_floor:
+                bucket["piso"] += int(pesos)
+                continue
+            qty = int(line.get("jornadas") or 0)
+            price = line.get("total_unitario")
+            if qty and price is not None:
+                key = int(price) if float(price) == int(float(price)) else price
+                bucket["precios"][key] = bucket["precios"].get(key, 0) + qty
     collapsed = []
     for code in sorted(totals):
         total = totals[code]
@@ -127,6 +138,7 @@ def _collapse_lines_by_cc(lines: list[dict]) -> list[dict]:
         row["cc"] = code
         row["jornadas"] = None
         row["total_unitario"] = None
+        row["detalle"] = detail.get(code) or {"piso": 0, "precios": {}}
         collapsed.append(row)
     return collapsed
 

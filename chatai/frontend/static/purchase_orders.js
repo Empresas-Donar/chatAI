@@ -15,6 +15,20 @@ function esc(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function cosechaDetalleHtml(detalle) {
+  if (!detalle) return '';
+  const lines = [];
+  const piso = Number(detalle.piso) || 0;
+  if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  const precios = detalle.precios || {};
+  for (const price of Object.keys(precios).sort((a, b) => Number(a) - Number(b))) {
+    const qty = Number(precios[price]) || 0;
+    if (qty) lines.push(`${qty} × ${fmtCLP.format(Number(price))}`);
+  }
+  if (!lines.length) return '';
+  return `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`;
+}
+
 const PAYMENT_TYPE_LABELS = { 'trato': 'A Trato', 'Al dia': 'Al Día' };
 const PAYMENT_TYPE_BADGE  = { 'trato': 'badge-trato', 'Al dia': 'badge-aldia' };
 
@@ -150,7 +164,7 @@ function renderDocument(h, rows, cosecha) {
       <td><span class="badge ${badgeCls}">${esc(label)}</span></td>
       <td>${esc(line.CC || line.cc || '')}</td>
       <td>${esc(line['Nombre CC'] || line.cultivo || line.cuartel || '—')}</td>
-      <td>${esc(line['Nombre Labor'] || line.labor || '')}</td>
+      <td>${esc(line['Nombre Labor'] || line.labor || '')}${cosechaDetalleHtml(line.detalle)}</td>
       <td class="num">${line.jornadas != null ? line.jornadas : '—'}</td>
       <td class="num">${line.total_unitario != null ? fmtCLP.format(line.total_unitario) : '—'}</td>
       <td class="num">${fmtCLP.format(amount)}</td>

@@ -146,6 +146,16 @@
   background: linear-gradient(90deg, #f59e0b33 0%, #f59e0b22 100%);
 }
 
+.trp-pivot .cosecha-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #64748b;
+  white-space: nowrap;
+}
+
 .trp-pivot .cell-zero {
   text-align: right;
   color: var(--text-muted);

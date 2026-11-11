@@ -9,6 +9,21 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function cosechaLineas(row) {
+  const capachos = Number(row.capachos) || 0;
+  const trato = Number(row.trato) || 0;
+  const piso = Number(row.piso) || 0;
+  const lines = [];
+  if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  if (capachos) {
+    const unit = trato % capachos === 0 ? trato / capachos : null;
+    lines.push(unit != null
+      ? `${capachos} × ${fmtCLP.format(unit)}`
+      : `${capachos} cap. · ${fmtCLP.format(trato)}`);
+  }
+  return lines;
+}
+
 function formatDisplayDate(isoStr) {
   if (!isoStr) return '';
   const [y, m, d] = isoStr.slice(0, 10).split('-');
@@ -112,6 +127,9 @@ async function generate() {
       total_contratista: 0,
       tipo_pago: person.tipo_pago || 'trato',
       es_cosecha: true,
+      capachos: person.capachos,
+      trato: person.trato,
+      piso: person.piso,
       cuarteles: (person.cuarteles || []).join(', '),
     }));
     const rows = (data.rows || []).concat(cosechaRows);
@@ -215,7 +233,7 @@ function renderPivot(columns, rows, header) {
     const tipos = String(r.tipo_pago || '').split(',').map(s => s.trim()).filter(Boolean);
     tipos.forEach(t => g.tipos.add(t));
     if (fecha) {
-      const prev = g.byDate[fecha] || { total: 0, trabajado: 0, comision: 0, cosecha: 0, cuarteles: '' };
+      const prev = g.byDate[fecha] || { total: 0, trabajado: 0, comision: 0, cosecha: 0, cuarteles: '', lines: [] };
       const cuarteles = r.es_cosecha ? (r.cuarteles || '') : (prev.cuarteles || '');
       const joined = [prev.cuarteles, cuarteles].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ');
       g.byDate[fecha] = {
@@ -224,6 +242,7 @@ function renderPivot(columns, rows, header) {
         comision: prev.comision + comision,
         cosecha: (prev.cosecha || 0) + (r.es_cosecha ? trabajado : 0),
         cuarteles: joined,
+        lines: (prev.lines || []).concat(r.es_cosecha ? cosechaLineas(r) : []),
       };
     }
   });
@@ -258,11 +277,11 @@ function renderPivot(columns, rows, header) {
     const val = cell?.trabajado || 0;
     if (!val) return `<td class="cell-dash">-</td>`;
     if (!cell.cosecha) return `<td class="cell-date">${fmtCLP.format(val)}</td>`;
-    const note = cell.cosecha === val
-      ? 'Cosecha'
-      : `Cosecha ${fmtCLP.format(cell.cosecha)}`;
-    const where = cell.cuarteles ? ` · ${cell.cuarteles}` : '';
-    return `<td class="cell-date cell-cosecha" title="${esc(note + where)}">${fmtCLP.format(val)}<span class="cosecha-mark">cosecha</span></td>`;
+    const lines = cell.lines || [];
+    const detail = lines.length
+      ? `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`
+      : `<span class="cosecha-mark">cosecha</span>`;
+    return `<td class="cell-date cell-cosecha" title="${esc(lines.join(' · '))}">${fmtCLP.format(val)}${detail}</td>`;
   }
 
   const thead = document.getElementById('bo-pivot-thead');

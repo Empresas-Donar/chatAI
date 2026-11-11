@@ -92,6 +92,10 @@
 .oc-table tbody tr:nth-child(even) { background: #f8fafc; }
 .oc-table tbody tr:hover { background: #eff6ff; }
 .oc-table tbody td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+.cosecha-detail {
+  display: block; margin-top: 2px; font-size: 10px; font-weight: 500;
+  line-height: 1.2; color: #64748b;
+}
 .oc-table tbody tr:last-child td { border-bottom: none; }
 /* CC sections — one table per CC */
 .cc-section { margin-top: 24px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }

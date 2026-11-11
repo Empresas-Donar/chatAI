@@ -20,6 +20,26 @@ function formatShortDate(isoStr) {
   return `${d}/${m}/${y}`;
 }
 
+function cosechaLineas(person) {
+  const capachos = Number(person.capachos) || 0;
+  const trato = Number(person.trato) || 0;
+  const piso = Number(person.piso) || 0;
+  const lines = [];
+  if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  if (capachos) {
+    const unit = trato % capachos === 0 ? trato / capachos : null;
+    lines.push(unit != null
+      ? `${capachos} × ${fmtCLP.format(unit)}`
+      : `${capachos} cap. · ${fmtCLP.format(trato)}`);
+  }
+  return lines;
+}
+
+function cosechaDetailHtml(lines) {
+  if (!lines || !lines.length) return '';
+  return `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`;
+}
+
 // Candidate column names for the worker field (AppSheet names vary)
 const WORKER_CANDIDATES = [
   'trabajador', 'Trabajador', 'nombre_trabajador', 'Nombre_trabajador',
@@ -103,6 +123,7 @@ async function queryData() {
       total_trabajado: person.a_pagar,
       horas_trabajadas: 0,
       es_cosecha: true,
+      cosecha_lineas: cosechaLineas(person),
       cuarteles: (person.cuarteles || []).join(', '),
     }));
     if (!data.rows.length && !cosechaRows.length) {
@@ -168,7 +189,7 @@ function renderPivot(columns, rows, umbralDiario) {
     const horas = parseFloat(r.horas_trabajadas) || 0;
 
     if (!groups.has(key)) {
-      groups.set(key, { worker, labor, tipo, totalGanado: 0, totalHoras: 0, byDate: {} });
+      groups.set(key, { worker, labor, tipo, totalGanado: 0, totalHoras: 0, byDate: {}, detail: {} });
     }
 
     const g = groups.get(key);
@@ -177,6 +198,7 @@ function renderPivot(columns, rows, umbralDiario) {
     if (r.es_cosecha) {
       g.es_cosecha = true;
       g.cuarteles = r.cuarteles || '';
+      if (fecha && r.cosecha_lineas && r.cosecha_lineas.length) g.detail[fecha] = r.cosecha_lineas;
     }
     if (fecha) {
       g.byDate[fecha] = (g.byDate[fecha] || 0) + value;
@@ -245,7 +267,9 @@ function renderPivot(columns, rows, umbralDiario) {
       colTotals[d] += val || 0;
       if (val != null && val > 0) {
         const cls = mark(val) ? 'cell-value cell-highlight' : 'cell-value';
-        html += `<td class="${cls}">${fmtCLPDec.format(val)}</td>`;
+        const lines = g.detail[d] || [];
+        const note = lines.length ? ` title="${esc(lines.join(' · '))}"` : '';
+        html += `<td class="${cls}"${note}>${fmtCLPDec.format(val)}${cosechaDetailHtml(lines)}</td>`;
       } else {
         html += `<td class="cell-value"><span class="cell-dash">-</span></td>`;
       }

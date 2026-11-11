@@ -16,6 +16,26 @@ function formatShortDate(isoStr) {
   return `${d}/${m}/${y}`;
 }
 
+function cosechaLineas(person) {
+  const capachos = Number(person.capachos) || 0;
+  const trato = Number(person.trato) || 0;
+  const piso = Number(person.piso) || 0;
+  const lines = [];
+  if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  if (capachos) {
+    const unit = trato % capachos === 0 ? trato / capachos : null;
+    lines.push(unit != null
+      ? `${capachos} × ${fmtCLP.format(unit)}`
+      : `${capachos} cap. · ${fmtCLP.format(trato)}`);
+  }
+  return lines;
+}
+
+function cosechaDetailHtml(lines) {
+  if (!lines || !lines.length) return '';
+  return `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`;
+}
+
 // ── Init dates (current week) ─────────────────────────────────────────
 function initDates() {
   const fromEl = document.getElementById('fil-from');
@@ -85,10 +105,13 @@ async function queryData() {
     document.getElementById('empty-state').style.display = 'none';
     const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
       trabajador: person.trabajador,
-      tipo_pago: person.tipo_pago || 'Cosecha',
+      // Tarjas also uses tipo "trato". A shared label would add the harvest
+      // floor onto a labor payment from the same day.
+      tipo_pago: 'Cosecha',
       fecha: person.fecha,
       total_trabajado: person.a_pagar,
       es_cosecha: true,
+      cosecha_lineas: cosechaLineas(person),
       cuarteles: (person.cuarteles || []).join(', '),
     }));
     renderPivot(data.rows.concat(cosechaRows));
@@ -114,10 +137,11 @@ function renderPivot(rows) {
     const w = r.trabajador ?? '(sin nombre)';
     if (!workers.has(w)) workers.set(w, new Map());
     const tipos = workers.get(w);
-    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0, es_cosecha: !!r.es_cosecha, cuarteles: r.cuarteles || '' });
+    if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, detail: {}, total: 0, es_cosecha: !!r.es_cosecha, cuarteles: r.cuarteles || '' });
     const entry = tipos.get(r.tipo_pago);
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + Number(r.total_trabajado || 0);
     entry.total += Number(r.total_trabajado || 0);
+    if (r.cosecha_lineas && r.cosecha_lineas.length) entry.detail[r.fecha] = r.cosecha_lineas;
     if (r.cuarteles && !String(entry.cuarteles).includes(r.cuarteles)) {
       entry.cuarteles = entry.cuarteles ? `${entry.cuarteles}, ${r.cuarteles}` : r.cuarteles;
     }
@@ -170,7 +194,9 @@ function renderPivot(rows) {
       dates.forEach(d => {
         const val = entry.byDate[d];
         if (val && val > 0) {
-          html += `<td class="cell-value has-value">${fmtCLP.format(val)}</td>`;
+          const lines = entry.detail[d] || [];
+          const note = lines.length ? ` title="${esc(lines.join(' · '))}"` : '';
+          html += `<td class="cell-value has-value"${note}>${fmtCLP.format(val)}${cosechaDetailHtml(lines)}</td>`;
         } else {
           html += '<td class="cell-zero">0</td>';
         }

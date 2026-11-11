@@ -260,6 +260,15 @@
     font-weight: 600 !important;
   }
 
+  .cosecha-detail {
+    display: block !important;
+    margin-top: 1px !important;
+    font-size: 7pt !important;
+    font-weight: 500 !important;
+    line-height: 1.15 !important;
+    color: #64748b !important;
+  }
+
   .cell-zero {
     text-align: right !important;
     color: #bbb !important;

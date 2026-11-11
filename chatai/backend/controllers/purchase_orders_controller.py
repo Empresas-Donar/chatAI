@@ -480,6 +480,7 @@ def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
                 "cultivo": nombre or item.get("cultivo") or "",
                 "es_cosecha": True,
                 "al_dia": bool(item.get("al_dia")),
+                "detalle": item.get("detalle") or {"piso": 0, "precios": {}},
             }
         )
     return lines
@@ -1386,6 +1387,7 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .badge-trato { color: #1d4ed8; font-weight: 700; }
 .badge-aldia { color: #15803d; font-weight: 700; }
 .badge-cosecha { color: #8aa394; font-weight: 500; font-size: 6.5pt; }
+.cosecha-detail { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
 """
 
 
@@ -1705,6 +1707,11 @@ async def billing_order_pdf(
             )
 
     if cosecha:
+        from controllers.tarjas_controller import (
+            _cosecha_detail_html,
+            _cosecha_detail_lines,
+        )
+
         total_pagar += cosecha["total"]
         total_trato += cosecha.get("pago_trato") or 0
         total_al_dia += cosecha.get("pago_al_dia") or 0
@@ -1715,13 +1722,17 @@ async def billing_order_pdf(
                 workers[worker] = {}
                 worker_tipos[worker] = set()
             prev = workers[worker].get(
-                fecha, {"total": 0.0, "trabajado": 0.0, "comision": 0.0, "cosecha": 0.0}
+                fecha, {"total": 0.0, "trabajado": 0.0, "comision": 0.0, "cosecha": 0.0, "cosecha_lineas": []}
             )
             workers[worker][fecha] = {
                 "total": prev["total"] + person["a_pagar"],
                 "trabajado": prev["trabajado"] + person["a_pagar"],
                 "comision": prev["comision"],
                 "cosecha": prev.get("cosecha", 0.0) + person["a_pagar"],
+                "cosecha_lineas": (prev.get("cosecha_lineas") or [])
+                + _cosecha_detail_lines(
+                    person.get("capachos"), person.get("trato"), person.get("piso")
+                ),
             }
             lugares = ", ".join(person["cuarteles"])
             worker_tipos[worker].add(person.get("tipo_pago") or "trato")
@@ -1765,7 +1776,10 @@ async def billing_order_pdf(
             v = cell["trabajado"] if cell else 0
             cosecha_v = cell.get("cosecha") or 0 if cell else 0
             mark = ' <span class="badge-cosecha">Cosecha</span>' if cosecha_v else ""
-            cells += f'<td class="num">{(_fmt_clp(v) + mark) if v else "-"}</td>'
+            detail = ""
+            if cell and cell.get("cosecha_lineas"):
+                detail = _cosecha_detail_html(cell["cosecha_lineas"])
+            cells += f'<td class="num">{(_fmt_clp(v) + mark + detail) if v else "-"}</td>'
         even_cls = "even" if len(rows_html) % 2 == 0 else ""
         badges = _tipo_badges_html(worker_tipos.get(worker, set()))
         name_cell = f"{worker} {badges}".strip() if badges else worker
@@ -1967,6 +1981,11 @@ async def purchase_order_print_pdf(
     if cosecha:
         document_rows.extend(cosecha["lines"])
 
+    from controllers.tarjas_controller import (
+        _cosecha_detail_html,
+        _cosecha_detail_lines,
+    )
+
     rows_html = ""
     for i, r in enumerate(document_rows):
         tipo = r.get("tipo_pago")
@@ -1975,11 +1994,17 @@ async def purchase_order_print_pdf(
         tipo_cls = "badge-trato" if is_trato else "badge-aldia"
         even_cls = "even" if i % 2 == 0 else ""
         jornadas = r.get("jornadas")
+        labor = r.get("Nombre Labor") or r.get("labor") or ""
+        if r.get("es_cosecha"):
+            info = r.get("detalle") or {}
+            labor += _cosecha_detail_html(
+                _cosecha_detail_lines(0, 0, info.get("piso"), info.get("precios"))
+            )
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{r.get("CC") or ""}</td>
           <td>{r.get("Nombre CC") or "—"}</td>
-          <td>{r.get("Nombre Labor") or r.get("labor") or ""}</td>
+          <td>{labor}</td>
           <td class="num">{int(jornadas) if jornadas is not None else "–"}</td>
           <td class="num">{_fmt_clp(r.get("total_unitario"))}</td>
           <td class="num">{_fmt_clp(r.get("total_labor"))}</td>

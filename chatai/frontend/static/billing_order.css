@@ -54,6 +54,15 @@
   text-align: right;
   min-width: 90px;
 }
+.bo-pivot td.cell-cosecha .cosecha-detail {
+  display: block;
+  margin-left: auto;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.15;
+}
 .bo-pivot td.cell-cosecha .cosecha-mark {
   display: block;
   margin-left: auto;

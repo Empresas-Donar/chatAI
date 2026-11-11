@@ -131,6 +131,17 @@
   font-size: 12px;
 }
 
+.tc-pivot .cosecha-detail,
+.tc-pivot td.cell-highlight .cosecha-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #64748b;
+  white-space: nowrap;
+}
+
 /* Payment above tarjas_configuracion.umbral_diario (Detalle contratista
    and Hora ponderada 9h). Beats the total-column background. */
 .tc-pivot tbody td.cell-highlight {
