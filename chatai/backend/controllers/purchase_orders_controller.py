@@ -269,6 +269,14 @@ def _cosecha_block(cur, contratista, empresa, fecha_inicio, fecha_termino):
     data["lines"] = cosecha_odoo_lines(
         cur, contratista, empresa, fecha_inicio, fecha_termino
     )
+    data["pago_trato_empresa"] = sum(
+        float(line["total"]) for line in data["lines"] if not line.get("al_dia")
+    )
+    data["pago_al_dia_empresa"] = sum(
+        float(line["total"]) for line in data["lines"] if line.get("al_dia")
+    )
+    data["total_empresa"] = data["pago_trato_empresa"] + data["pago_al_dia_empresa"]
+    data["adicional"] = data["total_empresa"] - float(data["total"])
     return data
 
 
@@ -431,12 +439,44 @@ def _shares_analytic(centers: dict, shares: dict) -> tuple[str | None, str, str]
     )
 
 
+def _apply_cosecha_adicional(lines):
+    """Add the contractor rate on each harvest line.
+
+    The worker amount stays in total_trabajado. The last line of each payment
+    type absorbs rounding so the lines sum to total_empresa of that base.
+    """
+    buckets: dict[str, list] = {}
+    for line in lines:
+        tipo = "al dia" if line.get("al_dia") else "trato"
+        buckets.setdefault(tipo, []).append(line)
+    for tipo, group in buckets.items():
+        base = sum(float(line["total_trabajado"]) for line in group)
+        target = float(total_empresa(tipo, base)) if base else 0.0
+        running = 0.0
+        for index, line in enumerate(group):
+            worker = float(line["total_trabajado"])
+            if index == len(group) - 1:
+                billed = target - running
+            else:
+                billed = float(total_empresa(tipo, worker))
+                running += billed
+            qty = float(line.get("qty") or 0) or 1.0
+            line["total"] = billed
+            line["total_labor"] = billed
+            line["adicional"] = billed - worker
+            unit = billed if qty == 1 else billed / qty
+            line["price_unit"] = unit
+            line["total_unitario"] = unit
+    return lines
+
+
 def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
     """Harvest lines in the same grain as the order screen and the PDF.
 
-    Product is COSECHA MANUAL (12.2). Price is the harvest amount, with no
-    tarjas factor. A cuartel without a cost center on that predio is returned
-    without analytic so the preview marks it incomplete instead of inventing one.
+    Product is COSECHA MANUAL (12.2). Price is the worker amount plus the
+    contractor rate from total_empresa. A cuartel without a cost center on
+    that predio is returned without analytic so the preview marks it
+    incomplete instead of inventing one.
     """
     data = cosecha_payable(cur, fecha_inicio, fecha_termino, contratista, empresa)
     if not data["total"]:
@@ -481,9 +521,11 @@ def cosecha_odoo_lines(cur, contratista, empresa, fecha_inicio, fecha_termino):
                 "es_cosecha": True,
                 "al_dia": bool(item.get("al_dia")),
                 "detalle": item.get("detalle") or {"piso": 0, "precios": {}},
+                "total_trabajado": total,
+                "adicional": 0.0,
             }
         )
-    return lines
+    return _apply_cosecha_adicional(lines)
 
 
 def _analytic_has_empty_key(analytic) -> bool:
@@ -1405,12 +1447,20 @@ def _fmt_pct(v) -> str:
     return text.replace(".", ",") + "%"
 
 
+def _harvest_bill(worker, tipo_pago):
+    """Worker pay plus the contractor rate. Harvest piece-rate stays the base."""
+    base = float(worker or 0)
+    if not base:
+        return 0.0, 0.0, 0.0
+    billed = float(total_empresa(tipo_pago, base))
+    return base, billed - base, billed
+
+
 def _billing_vista(header, cosecha):
     """Header printed on the billing screen and the PDF.
 
-    Harvest is added on top of the tarjas header and is not multiplied by
-    the tarjas factor. A payment type that only comes from harvest still
-    shows the contractor rate (Trato 45 %, Al Día 50 %) from markup_pct.
+    Harvest worker pay is the base. The contractor rate (Trato +45 %,
+    Al Día +50 %, from total_empresa) is added on top, same as tarjas.
     """
     if not header and not (cosecha or {}).get("total"):
         return None
@@ -1425,16 +1475,30 @@ def _billing_vista(header, cosecha):
         "pct_comision_al_dia": None,
     }
     if cosecha and cosecha.get("total"):
-        vista["total"] = float(vista.get("total") or 0) + float(cosecha["total"])
-        vista["total_trato"] = float(vista.get("total_trato") or 0) + float(
-            cosecha.get("pago_trato") or 0
-        )
-        vista["total_al_dia"] = float(vista.get("total_al_dia") or 0) + float(
-            cosecha.get("pago_al_dia") or 0
-        )
-        vista["total_trabajado"] = float(vista.get("total_trabajado") or 0) + float(
-            cosecha["total"]
-        )
+        if cosecha.get("total_empresa") is not None:
+            trab_trato = float(cosecha.get("pago_trato") or 0)
+            trab_dia = float(cosecha.get("pago_al_dia") or 0)
+            bill_trato = float(cosecha.get("pago_trato_empresa") or 0)
+            bill_dia = float(cosecha.get("pago_al_dia_empresa") or 0)
+            extra_trato = bill_trato - trab_trato
+            extra_dia = bill_dia - trab_dia
+        else:
+            trab_trato, extra_trato, bill_trato = _harvest_bill(
+                cosecha.get("pago_trato"), "trato"
+            )
+            trab_dia, extra_dia, bill_dia = _harvest_bill(
+                cosecha.get("pago_al_dia"), "al dia"
+            )
+        vista["total_trabajado"] = float(vista.get("total_trabajado") or 0) + trab_trato + trab_dia
+        vista["total_contratista"] = float(vista.get("total_contratista") or 0) + extra_trato + extra_dia
+        vista["total"] = float(vista.get("total") or 0) + bill_trato + bill_dia
+        vista["total_trato"] = float(vista.get("total_trato") or 0) + bill_trato
+        vista["total_al_dia"] = float(vista.get("total_al_dia") or 0) + bill_dia
+        vista["pct_comision"] = _pct(vista["total_contratista"], vista["total_trabajado"])
+        if trab_trato:
+            vista["pct_comision_trato"] = float(markup_pct("trato"))
+        if trab_dia:
+            vista["pct_comision_al_dia"] = float(markup_pct("al dia"))
     if vista.get("pct_comision") is None:
         vista["pct_comision"] = _pct(
             vista.get("total_contratista"), vista.get("total_trabajado")
@@ -2014,9 +2078,9 @@ async def purchase_order_print_pdf(
         total_al_dia = 0
         total_pagar = 0
     if cosecha:
-        total_pagar += cosecha["total"]
-        total_trato += cosecha.get("pago_trato") or 0
-        total_al_dia += cosecha.get("pago_al_dia") or 0
+        total_pagar += cosecha["total_empresa"]
+        total_trato += cosecha["pago_trato_empresa"]
+        total_al_dia += cosecha["pago_al_dia_empresa"]
 
     d1 = _fmt_date_display(fecha_inicio)
     d2 = _fmt_date_display(fecha_termino)
@@ -2046,6 +2110,11 @@ async def purchase_order_print_pdf(
             labor += _cosecha_detail_html(
                 _cosecha_detail_lines(0, 0, info.get("piso"), info.get("precios"))
             )
+            if r.get("adicional"):
+                labor += (
+                    f'<br/><span class="cosecha-detail">'
+                    f'adicional {_fmt_clp(r["adicional"])}</span>'
+                )
         rows_html += f"""<tr class="{even_cls}">
           <td><span class="{tipo_cls}">{tipo_label}</span></td>
           <td>{r.get("CC") or ""}</td>

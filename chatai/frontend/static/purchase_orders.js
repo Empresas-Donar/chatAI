@@ -15,16 +15,17 @@ function esc(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function cosechaDetalleHtml(detalle) {
-  if (!detalle) return '';
+function cosechaDetalleHtml(detalle, adicional) {
   const lines = [];
-  const piso = Number(detalle.piso) || 0;
+  const piso = Number(detalle?.piso) || 0;
   if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
-  const precios = detalle.precios || {};
+  const precios = detalle?.precios || {};
   for (const price of Object.keys(precios).sort((a, b) => Number(a) - Number(b))) {
     const qty = Number(precios[price]) || 0;
     if (qty) lines.push(`${qty} × ${fmtCLP.format(Number(price))}`);
   }
+  const extra = Number(adicional) || 0;
+  if (extra) lines.push(`adicional ${fmtCLP.format(extra)}`);
   if (!lines.length) return '';
   return `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`;
 }
@@ -107,7 +108,7 @@ document.getElementById('btn-generate').addEventListener('click', () => {
 
 // ── Render document ──────────────────────────────────────────────────────
 function renderDocument(h, rows, cosecha) {
-  const cosechaTotal = Number(cosecha?.total) || 0;
+  const cosechaTotal = Number(cosecha?.total_empresa ?? cosecha?.total) || 0;
   const pagar = (Number(h.total) || 0) + cosechaTotal;
   document.getElementById('doc-company').textContent    = h.company;
   document.getElementById('doc-contractor').textContent = h.contractor;
@@ -120,8 +121,8 @@ function renderDocument(h, rows, cosecha) {
   document.getElementById('doc-glosa').textContent =
     `SERVICIOS DE LABORES AGRÍCOLAS SEMANA DEL ${fmtDate(h.date_from)} AL ${fmtDate(h.date_to)}`;
 
-  const trato = (Number(h.total_trato) || 0) + (Number(cosecha?.pago_trato) || 0);
-  const alDia = (Number(h.total_al_dia) || 0) + (Number(cosecha?.pago_al_dia) || 0);
+  const trato = (Number(h.total_trato) || 0) + (Number(cosecha?.pago_trato_empresa ?? cosecha?.pago_trato) || 0);
+  const alDia = (Number(h.total_al_dia) || 0) + (Number(cosecha?.pago_al_dia_empresa ?? cosecha?.pago_al_dia) || 0);
   document.getElementById('doc-total-trato').textContent = fmtCLP.format(trato);
   document.getElementById('doc-total-aldia').textContent = fmtCLP.format(alDia);
   document.getElementById('doc-total').textContent       = fmtCLP.format(pagar);
@@ -164,7 +165,7 @@ function renderDocument(h, rows, cosecha) {
       <td><span class="badge ${badgeCls}">${esc(label)}</span></td>
       <td>${esc(line.CC || line.cc || '')}</td>
       <td>${esc(line['Nombre CC'] || line.cultivo || line.cuartel || '—')}</td>
-      <td>${esc(line['Nombre Labor'] || line.labor || '')}${cosechaDetalleHtml(line.detalle)}</td>
+      <td>${esc(line['Nombre Labor'] || line.labor || '')}${cosechaDetalleHtml(line.detalle, line.adicional)}</td>
       <td class="num">${line.jornadas != null ? line.jornadas : '—'}</td>
       <td class="num">${line.total_unitario != null ? fmtCLP.format(line.total_unitario) : '—'}</td>
       <td class="num">${fmtCLP.format(amount)}</td>

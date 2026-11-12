@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from db import get_connection  # noqa: E402
 from controllers.purchase_orders_controller import cosecha_odoo_lines  # noqa: E402
+from tarjas_empresa import total_empresa  # noqa: E402
 from services.cosecha_pago import calendar_counts, payable  # noqa: E402
 from services.cosecha_rendimiento import amount_due, fold, query_detalle  # noqa: E402
 
@@ -73,7 +74,10 @@ def test_tarjas_legal_name_pays_the_isla_app_and_exports():
     finally:
         conn.close()
     assert short["total"] == legal["total"] > 0
-    assert sum(line["total"] for line in lines) == legal["total"]
+    assert sum(line["total_trabajado"] for line in lines) == legal["total"]
+    assert sum(line["total"] for line in lines) == float(
+        total_empresa("trato", legal["pago_trato"])
+    ) + float(total_empresa("al dia", legal["pago_al_dia"]))
     assert excluded == 0
     assert exported
     assert "402" in exported[0][3]
@@ -199,12 +203,13 @@ def test_harvest_odoo_line_uses_cosecha_manual_and_cuartel_center():
                 "2026-10-14",
                 "2026-10-20",
             )
-            assert sum(line["total"] for line in lines) == 193_000
+            assert lines[0]["total_trabajado"] == 193_000
+            assert sum(line["total"] for line in lines) == float(total_empresa("trato", 193_000))
             assert {line["product_id"] for line in lines} == {"12.2"}
             assert len(lines) == 1
             assert lines[0]["cc"] == "894"
             assert lines[0]["qty"] == 1
-            assert lines[0]["price_unit"] == 193_000
+            assert lines[0]["price_unit"] == float(total_empresa("trato", 193_000))
             assert '"410": 100.00' in lines[0]["analytic"]
             assert lines[0]["labor"] == "COSECHA"
             daily = cosecha_odoo_lines(
@@ -214,16 +219,34 @@ def test_harvest_odoo_line_uses_cosecha_manual_and_cuartel_center():
                 "2026-10-26",
                 "2026-10-27",
             )
-            assert sum(item["total"] for item in daily) == 24 * 22_000
+            worker = sum(item["total_trabajado"] for item in daily)
+            assert worker > 0
+            assert sum(item["total"] for item in daily) == float(total_empresa("trato", worker))
             assert {item["cc"] for item in daily} == {"894", "895"}
             assert {item["labor"] for item in daily} == {"COSECHA"}
             by_cc = {item["cc"]: item for item in daily}
-            assert by_cc["894"]["total"] == 173_599
-            assert by_cc["895"]["total"] == 354_401
             assert '"410": 100.00' in by_cc["894"]["analytic"]
             assert '"411": 100.00' in by_cc["895"]["analytic"]
     finally:
         conn.close()
+
+
+def test_cosecha_odoo_line_adds_the_contractor_rate():
+    from controllers.purchase_orders_controller import _apply_cosecha_adicional
+
+    lines = [
+        {"qty": 1, "al_dia": False, "total_trabajado": 173_599},
+        {"qty": 1, "al_dia": False, "total_trabajado": 354_401},
+    ]
+    _apply_cosecha_adicional(lines)
+    assert sum(line["total_trabajado"] for line in lines) == 528_000
+    assert sum(line["total"] for line in lines) == float(total_empresa("trato", 528_000))
+    assert sum(line["adicional"] for line in lines) == float(total_empresa("trato", 528_000)) - 528_000
+    geraldina = [{"qty": 1, "al_dia": False, "total_trabajado": 1_005_500}]
+    _apply_cosecha_adicional(geraldina)
+    assert geraldina[0]["total"] == 1_457_975
+    assert geraldina[0]["adicional"] == 452_475
+    assert geraldina[0]["price_unit"] == 1_457_975
 
 
 def test_bulk_reportes_include_the_same_harvest_as_the_web():
@@ -544,7 +567,10 @@ def _assert_surfaces_square(cur, inicio, termino, contratista):
     assert data["total"] == sum(row["a_pagar"] for row in data["personas_dias"])
     assert data["total"] == sum(line["total_labor"] for line in data["lines"])
     assert data["total"] == sum(item["total"] for item in data["cuarteles_pago"])
-    assert data["total"] == sum(line["total"] for line in odoo)
+    assert data["total"] == sum(line["total_trabajado"] for line in odoo)
+    assert sum(line["total"] for line in odoo) == float(
+        total_empresa("trato", data["pago_trato"])
+    ) + float(total_empresa("al dia", data["pago_al_dia"]))
     assert detail["totales"]["a_pagar"] == data["total"]
     assert detail["totales"]["capachos"] == data["capachos"]
     by_person: dict[tuple, int] = {}

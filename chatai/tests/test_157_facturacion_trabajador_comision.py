@@ -131,20 +131,21 @@ class TestWorkerCommissionSplit:
         body = run(_pdf_bytes(resp))
         assert body[:4] == b"%PDF"
 
-    def test_157_vista_cosecha_muestra_porcentaje_contratista(self):
-        """Harvest-only orders have no tarjas header. The printed header
-        still shows the contractor trato rate, and the money stays in Trato.
-        """
+    def test_157_vista_cosecha_suma_porcentaje_contratista(self):
+        """Harvest worker pay is the base. Trato adds the contractor 45 %."""
         cosecha = {"total": 1_005_500, "pago_trato": 1_005_500, "pago_al_dia": 0}
         vista = poc._billing_vista(None, cosecha)
-        assert vista["total"] == 1_005_500
-        assert vista["total_trato"] == 1_005_500
-        assert vista["total_al_dia"] == 0
         assert vista["total_trabajado"] == 1_005_500
-        assert vista["total_contratista"] == 0
-        assert vista["pct_comision"] == 0.0
+        assert vista["total_contratista"] == 452_475
+        assert vista["total"] == 1_457_975
+        assert vista["total_trato"] == 1_457_975
+        assert vista["total_al_dia"] == 0
+        assert vista["pct_comision"] == 45.0
         assert vista["pct_comision_trato"] == 45.0
         assert vista["pct_comision_al_dia"] is None
+        assert vista["total"] == pytest.approx(
+            vista["total_trabajado"] + vista["total_contratista"], abs=0.01
+        )
         assert "45%" in poc._tipo_badges_html(["trato"], vista["pct_comision_trato"], None)
 
     def test_157_fmt_pct(self):
