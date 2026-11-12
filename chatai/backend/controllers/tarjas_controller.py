@@ -344,9 +344,8 @@ def _summary_table_html(resumen: list[dict], total: float, jornadas) -> str:
     (kept for call-site arity); money and % never use total_pagar
     (issue #160)."""
     _ = total
-    # A caller that already folded harvest leaves total_empresa as
-    # the tarjas company cost plus the harvest amount. Annotating again
-    # would apply the tarjas factor to that harvest.
+    # A caller that already folded harvest has priced it with
+    # total_empresa(). Annotating again would apply the factor twice.
     ready = bool(resumen) and all(
         "total_empresa" in row and "recargo" in row and "pct" in row
         for row in resumen
@@ -1209,9 +1208,15 @@ def _fold_tipo(tipo) -> str:
 
 
 def _add_cosecha_into_tipo(resumen: list[dict], tipo: str, amount, jornadas) -> None:
-    """Fold harvest pay into the matching tarjas row. The amount is already final."""
+    """Fold harvest worker pay into the matching row and add its Costo Empresa.
+
+    total_trabajado stays the worker amount. total_empresa adds
+    total_empresa(tipo, amount) on top of the tarjas bill, same as the OC.
+    """
     if not amount:
         return
+    billed = float(total_empresa(tipo, amount))
+    recargo = markup_pct(tipo)
     wanted = _fold_tipo(tipo)
     row = next((item for item in resumen if _fold_tipo(item.get("tipo_pago")) == wanted), None)
     if row is None:
@@ -1221,25 +1226,54 @@ def _add_cosecha_into_tipo(resumen: list[dict], tipo: str, amount, jornadas) -> 
                 "total_pagar": amount,
                 "total_trabajado": amount,
                 "jornadas": jornadas,
-                "total_empresa": amount,
-                "recargo_pct": 0.0,
-                "recargo": "—",
+                "total_empresa": billed,
+                "recargo_pct": float(recargo),
+                "recargo": format_markup(recargo),
                 "es_cosecha": True,
             }
         )
         return
     row["total_trabajado"] = float(row.get("total_trabajado") or 0) + float(amount)
     row["total_pagar"] = float(row.get("total_pagar") or 0) + float(amount)
-    row["total_empresa"] = float(row.get("total_empresa") or 0) + float(amount)
+    row["total_empresa"] = float(row.get("total_empresa") or 0) + billed
     row["jornadas"] = (row.get("jornadas") or 0) + jornadas
+    if recargo:
+        row["recargo_pct"] = float(recargo)
+        row["recargo"] = format_markup(recargo)
+
+
+def _price_cosecha_detail_rows(rows: list[dict]) -> None:
+    """Price each harvest detail row. The last row of a tipo absorbs rounding."""
+    buckets: dict[str, list] = {}
+    for row in rows:
+        tipo = "al dia" if row.get("al_dia") else (row.get("tipo_pago") or "trato")
+        buckets.setdefault(tipo, []).append(row)
+    for tipo, group in buckets.items():
+        base = sum(float(row.get("total_trabajado") or 0) for row in group)
+        target = float(total_empresa(tipo, base)) if base else 0.0
+        running = 0.0
+        for index, row in enumerate(group):
+            worker = float(row.get("total_trabajado") or 0)
+            if index == len(group) - 1:
+                billed = target - running
+            else:
+                billed = float(total_empresa(tipo, worker))
+                running += billed
+            row["total_empresa"] = billed
+            row["adicional"] = billed - worker
 
 
 def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict) -> None:
-    """Fold every harvest line into Trato. Capachos and the floor are both
-    cosecha a trato. The amount is not multiplied by the tarjas factor.
+    """Fold harvest into the detalle. Capachos and the floor are trato.
+
+    Worker pay stays in total_trabajado. Costo Empresa adds the contractor
+    rate from total_empresa(), same as the other labores on this report.
     """
     _add_cosecha_into_tipo(
-        resumen, "trato", cosecha.get("total") or 0, cosecha.get("jornadas") or 0
+        resumen, "trato", cosecha.get("pago_trato") or 0, cosecha.get("jornadas_trato") or 0
+    )
+    _add_cosecha_into_tipo(
+        resumen, "Al dia", cosecha.get("pago_al_dia") or 0, cosecha.get("jornadas_al_dia") or 0
     )
     grand = sum(float(row.get("total_trabajado") or 0) for row in resumen)
     for row in resumen:
@@ -1261,11 +1295,13 @@ def _append_cosecha_detalle(resumen: list[dict], rows: list[dict], cosecha: dict
                 "total_trabajado": line["total_trabajado"],
                 "costo_hora": None,
                 "nombre_campo": "ZUÑIGA",
-                "total_empresa": line["total_empresa"],
+                "total_empresa": line.get("total_trabajado"),
                 "es_cosecha": True,
+                "al_dia": bool(line.get("al_dia")),
                 "detalle": line.get("detalle") or {},
             }
         )
+    _price_cosecha_detail_rows(harvest_rows)
     _apply_nombre_cc(harvest_rows, "centro_costo", "centro_costo_nombre")
     rows.extend(harvest_rows)
     detail_grand = sum(float(row.get("total_trabajado") or 0) for row in rows)
@@ -4641,6 +4677,11 @@ def _build_detalle_html(
             detail = _cosecha_detail_html(
                 _cosecha_detail_lines(0, 0, info.get("piso"), info.get("precios"))
             )
+            if r.get("adicional"):
+                detail += (
+                    f'<br/><span class="cosecha-detail">adicional '
+                    f'{_fmt_clp(r["adicional"])}</span>'
+                )
         return (
             f'<tr><td style="{DW["tipo"]}"><span class="{_tipo_pago_badge_class(r["tipo_pago"])}">'
             f'{_escape_html(_tipo_pago_label(r["tipo_pago"]))}</span></td>'

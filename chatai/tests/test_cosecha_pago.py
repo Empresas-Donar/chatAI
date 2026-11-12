@@ -249,8 +249,28 @@ def test_cosecha_odoo_line_adds_the_contractor_rate():
     assert geraldina[0]["price_unit"] == 1_457_975
 
 
+def test_cosecha_detalle_adds_the_contractor_rate():
+    import controllers.tarjas_controller as tc
+
+    resumen = []
+    tc._add_cosecha_into_tipo(resumen, "trato", 1_005_500, 35)
+    assert resumen[0]["total_trabajado"] == 1_005_500
+    assert resumen[0]["total_empresa"] == float(total_empresa("trato", 1_005_500))
+    assert resumen[0]["recargo"] == "+45 %"
+    rows = [
+        {"tipo_pago": "trato", "al_dia": False, "total_trabajado": 173_599},
+        {"tipo_pago": "trato", "al_dia": False, "total_trabajado": 354_401},
+    ]
+    tc._price_cosecha_detail_rows(rows)
+    assert sum(row["total_empresa"] for row in rows) == float(total_empresa("trato", 528_000))
+    assert sum(row["adicional"] for row in rows) == float(total_empresa("trato", 528_000)) - 528_000
+
+
 def test_bulk_reportes_include_the_same_harvest_as_the_web():
-    """The /reportes PDF builders are the web PDF. Harvest is added, not factored."""
+    """Detalle Costo Empresa bills harvest with the contractor rate.
+
+    General, por persona and resumen persona stay on the worker amount.
+    """
     import controllers.tarjas_controller as tc
     from tarjas_empresa import annotate_detalle_resumen
 
@@ -284,28 +304,13 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
     finally:
         conn.close()
 
-    assert pay["total"] == 528_000
-    assert pay["pago_trato"] == 528_000
+    assert pay["total"] > 0
+    assert pay["pago_trato"] == pay["total"]
     assert pay["pago_al_dia"] == 0
-    wrong_rows = []
-    for row in tarjas_only:
-        copy = {
-            "tipo_pago": row["tipo_pago"],
-            "total_trabajado": float(row["total_trabajado"] or 0),
-            "jornadas": row["jornadas"],
-        }
-        if tc._fold_tipo(copy["tipo_pago"]) == "trato":
-            copy["total_trabajado"] += pay["total"]
-        wrong_rows.append(copy)
-    if not any(tc._fold_tipo(row["tipo_pago"]) == "trato" for row in wrong_rows):
-        wrong_rows.append(
-            {"tipo_pago": "trato", "total_trabajado": pay["total"], "jornadas": 24}
-        )
-    wrong = sum(row["total_empresa"] for row in annotate_detalle_resumen(wrong_rows))
-    right = sum(float(row["total_empresa"]) for row in tarjas_only) + pay["total"]
-    assert tc._fmt_clp(right) in detalle
-    assert wrong != right
-    assert tc._fmt_clp(wrong) not in detalle
+    billed = float(total_empresa("trato", pay["total"]))
+    company = sum(float(row["total_empresa"]) for row in tarjas_only) + billed
+    assert tc._fmt_clp(company) in detalle
+    assert "+45 %" in detalle
     assert "COSECHA" in detalle
     assert "894" in detalle and "895" in detalle
     assert "COSECHA ·" not in detalle
@@ -338,7 +343,10 @@ def test_bulk_reportes_include_the_same_harvest_as_the_web():
     persona_xl = asyncio.run(
         sheet(tc.download_tarjas_contratista_excel(fi, ft, contratista, "ZUÑIGA", None, None, None))
     )
-    assert int(detalle_xl.cell(detalle_xl.max_row, 9).value) == int(right)
+    body = list(detalle_xl.iter_rows(min_row=2, max_row=detalle_xl.max_row - 1, values_only=True))
+    cosecha_empresa = sum(row[8] or 0 for row in body if row[1] == "COSECHA")
+    assert cosecha_empresa == billed
+    assert int(detalle_xl.cell(detalle_xl.max_row, 9).value) == int(sum(row[8] or 0 for row in body))
     cosecha_general = sum(
         row[7] or 0
         for row in general_xl.iter_rows(min_row=2, values_only=True)
