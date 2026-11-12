@@ -131,6 +131,22 @@ class TestWorkerCommissionSplit:
         body = run(_pdf_bytes(resp))
         assert body[:4] == b"%PDF"
 
+    def test_157_vista_cosecha_muestra_porcentaje_contratista(self):
+        """Harvest-only orders have no tarjas header. The printed header
+        still shows the contractor trato rate, and the money stays in Trato.
+        """
+        cosecha = {"total": 1_005_500, "pago_trato": 1_005_500, "pago_al_dia": 0}
+        vista = poc._billing_vista(None, cosecha)
+        assert vista["total"] == 1_005_500
+        assert vista["total_trato"] == 1_005_500
+        assert vista["total_al_dia"] == 0
+        assert vista["total_trabajado"] == 1_005_500
+        assert vista["total_contratista"] == 0
+        assert vista["pct_comision"] == 0.0
+        assert vista["pct_comision_trato"] == 45.0
+        assert vista["pct_comision_al_dia"] is None
+        assert "45%" in poc._tipo_badges_html(["trato"], vista["pct_comision_trato"], None)
+
     def test_157_fmt_pct(self):
         assert poc._fmt_pct(50) == "50%"
         assert poc._fmt_pct(33.3) == "33,3%"
@@ -163,9 +179,9 @@ class TestWorkerCommissionSplit:
         assert "badge-aldia" in js
         assert "renderPivot(data.columns, rows, header)" in js
         assert "h.total_contratista" in js
-        assert "data.cosecha?.pago_trato" in js
-        assert "data.cosecha?.pago_al_dia" in js
-        assert "data.cosecha.pago_trato" not in js
+        assert "data.vista" in js
+        assert "data.cosecha?.pago_trato" not in js
+        assert "pct_comision_trato" in js
 
 
 class TestCrossFarmIsolation:

@@ -133,25 +133,11 @@ async function generate() {
       cuarteles: (person.cuarteles || []).join(', '),
     }));
     const rows = (data.rows || []).concat(cosechaRows);
-    const cosechaTotal = Number(data.cosecha?.total) || 0;
 
-    let header = data.header;
+    const header = data.vista || data.header;
     if (!header) {
-      const total = rows.reduce((s, r) => s + (Number(r.total_pagar) || 0), 0);
-      header = {
-        total,
-        total_trato: 0,
-        total_al_dia: total,
-        total_trabajado: rows.reduce((s, r) => s + (Number(r.total_trabajado) || 0), 0),
-        total_contratista: rows.reduce((s, r) => s + (Number(r.total_contratista) || 0), 0),
-      };
-    } else {
-      header = {
-        ...header,
-        total: (Number(header.total) || 0) + cosechaTotal,
-        total_trato: (Number(header.total_trato) || 0) + (Number(data.cosecha?.pago_trato) || 0),
-        total_al_dia: (Number(header.total_al_dia) || 0) + (Number(data.cosecha?.pago_al_dia) || 0),
-      };
+      document.getElementById('empty-box').classList.remove('hidden');
+      return;
     }
 
     renderHeader(header, contratista, empresa, fecha_inicio, fecha_termino);
@@ -267,7 +253,9 @@ function renderPivot(columns, rows, header) {
       seen.add(key);
       const cls = isTrato ? 'badge-trato' : 'badge-aldia';
       const low = t.toLowerCase();
-      const label = isTrato ? 'Trato' : (low === 'al dia' || low === 'al día' ? 'Al día' : t);
+      const rate = isTrato ? h.pct_comision_trato : h.pct_comision_al_dia;
+      const rateTxt = rate ? ` ${fmtPct(rate)}` : '';
+      const label = (isTrato ? 'Trato' : (low === 'al dia' || low === 'al día' ? 'Al día' : t)) + rateTxt;
       parts.push(`<span class="badge ${cls}">${esc(label)}</span>`);
     }
     return parts.join(' ');

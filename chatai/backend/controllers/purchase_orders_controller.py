@@ -37,7 +37,7 @@ from fastapi.templating import Jinja2Templates
 from auth import require_auth
 from db import get_connection
 from services.cosecha_pago import payable as cosecha_payable
-from tarjas_empresa import not_tractorista_sql, total_empresa
+from tarjas_empresa import markup_pct, not_tractorista_sql, total_empresa
 
 logger = logging.getLogger("controllers.purchase_orders")
 
@@ -1405,6 +1405,47 @@ def _fmt_pct(v) -> str:
     return text.replace(".", ",") + "%"
 
 
+def _billing_vista(header, cosecha):
+    """Header printed on the billing screen and the PDF.
+
+    Harvest is added on top of the tarjas header and is not multiplied by
+    the tarjas factor. A payment type that only comes from harvest still
+    shows the contractor rate (Trato 45 %, Al Día 50 %) from markup_pct.
+    """
+    if not header and not (cosecha or {}).get("total"):
+        return None
+    vista = dict(header) if header else {
+        "total_trato": 0.0,
+        "total_al_dia": 0.0,
+        "total": 0.0,
+        "total_trabajado": 0.0,
+        "total_contratista": 0.0,
+        "pct_comision": None,
+        "pct_comision_trato": None,
+        "pct_comision_al_dia": None,
+    }
+    if cosecha and cosecha.get("total"):
+        vista["total"] = float(vista.get("total") or 0) + float(cosecha["total"])
+        vista["total_trato"] = float(vista.get("total_trato") or 0) + float(
+            cosecha.get("pago_trato") or 0
+        )
+        vista["total_al_dia"] = float(vista.get("total_al_dia") or 0) + float(
+            cosecha.get("pago_al_dia") or 0
+        )
+        vista["total_trabajado"] = float(vista.get("total_trabajado") or 0) + float(
+            cosecha["total"]
+        )
+    if vista.get("pct_comision") is None:
+        vista["pct_comision"] = _pct(
+            vista.get("total_contratista"), vista.get("total_trabajado")
+        )
+    if vista.get("pct_comision_trato") is None and float(vista.get("total_trato") or 0):
+        vista["pct_comision_trato"] = float(markup_pct("trato"))
+    if vista.get("pct_comision_al_dia") is None and float(vista.get("total_al_dia") or 0):
+        vista["pct_comision_al_dia"] = float(markup_pct("al dia"))
+    return vista
+
+
 def _fmt_clp(v) -> str:
     try:
         return f"${int(float(v or 0)):,}".replace(",", ".")
@@ -1434,7 +1475,7 @@ def _fmt_date_display(iso: str) -> str:
         return iso
 
 
-def _tipo_badges_html(tipos) -> str:
+def _tipo_badges_html(tipos, pct_trato=None, pct_al_dia=None) -> str:
     """Compact Trato / Al día marks for the worker column."""
     seen: set[str] = set()
     parts: list[str] = []
@@ -1447,12 +1488,14 @@ def _tipo_badges_html(tipos) -> str:
         if key in seen:
             continue
         seen.add(key)
+        rate = pct_trato if is_trato else pct_al_dia
+        suffix = f" {_fmt_pct(rate)}" if rate else ""
         if is_trato:
-            parts.append('<span class="badge-trato">Trato</span>')
+            parts.append(f'<span class="badge-trato">Trato{suffix}</span>')
         elif t.lower() in ("al dia", "al día"):
-            parts.append('<span class="badge-aldia">Al día</span>')
+            parts.append(f'<span class="badge-aldia">Al día{suffix}</span>')
         else:
-            parts.append(f'<span class="badge-aldia">{t}</span>')
+            parts.append(f'<span class="badge-aldia">{t}{suffix}</span>')
     return " ".join(parts)
 
 
@@ -1629,6 +1672,7 @@ async def billing_order_data(
     ]
     payload = {
         "header": header,
+        "vista": _billing_vista(header, cosecha),
         "columns": [
             "trabajador",
             "fecha",
@@ -1676,14 +1720,15 @@ async def billing_order_pdf(
     header = _billing_header_from_tipo_rows(
         tipo_rows, contratista, empresa, fecha_inicio, fecha_termino
     )
-    total_trato = header["total_trato"] if header else 0
-    total_al_dia = header["total_al_dia"] if header else 0
-    total_pagar = header["total"] if header else 0
-    total_trabajado = header["total_trabajado"] if header else 0
-    total_contratista = header["total_contratista"] if header else 0
-    pct_comision = header.get("pct_comision") if header else None
-    pct_comision_trato = header.get("pct_comision_trato") if header else None
-    pct_comision_al_dia = header.get("pct_comision_al_dia") if header else None
+    vista = _billing_vista(header, cosecha)
+    total_trato = vista["total_trato"] if vista else 0
+    total_al_dia = vista["total_al_dia"] if vista else 0
+    total_pagar = vista["total"] if vista else 0
+    total_trabajado = vista["total_trabajado"] if vista else 0
+    total_contratista = vista["total_contratista"] if vista else 0
+    pct_comision = vista.get("pct_comision") if vista else None
+    pct_comision_trato = vista.get("pct_comision_trato") if vista else None
+    pct_comision_al_dia = vista.get("pct_comision_al_dia") if vista else None
 
     # Build pivot structure: date → {total, trabajado, comision}
     dates: list[str] = sorted({r[1] for r in pivot_rows if r[1]})
@@ -1712,9 +1757,6 @@ async def billing_order_pdf(
             _cosecha_detail_lines,
         )
 
-        total_pagar += cosecha["total"]
-        total_trato += cosecha.get("pago_trato") or 0
-        total_al_dia += cosecha.get("pago_al_dia") or 0
         for person in cosecha["personas_dias"]:
             worker = person["trabajador"] or "(sin nombre)"
             fecha = person["fecha"]
@@ -1781,7 +1823,11 @@ async def billing_order_pdf(
                 detail = _cosecha_detail_html(cell["cosecha_lineas"])
             cells += f'<td class="num">{(_fmt_clp(v) + mark + detail) if v else "-"}</td>'
         even_cls = "even" if len(rows_html) % 2 == 0 else ""
-        badges = _tipo_badges_html(worker_tipos.get(worker, set()))
+        badges = _tipo_badges_html(
+            worker_tipos.get(worker, set()),
+            pct_comision_trato,
+            pct_comision_al_dia,
+        )
         name_cell = f"{worker} {badges}".strip() if badges else worker
         rows_html += (
             f'<tr class="{even_cls}"><td>{name_cell}</td>{cells}'
