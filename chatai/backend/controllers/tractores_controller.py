@@ -1,16 +1,18 @@
 """
 controllers/tractores_controller.py
 ------------------------------------
-Draft catalog of the tractors the tarjas app already uses.
+Fleet catalog and driver profiles for tractorista tarjas.
 
-Reads appsheet.tarjas_maquina (patente, año, cumple, color, tractorista,
-campo) and the latest Tractorista row in appsheet.tarjas_pagos. The page
-does not write: it is a draft to review the fleet.
+appsheet.tarjas_maquina keeps the machine the app already names, plus the
+ficha from the enabled fleet: modelo, chasis, año de fabricación, fecha de
+partida, color, tractorista, cumple and campo. Writes update that table.
+Usage still comes from the latest Tractorista row in appsheet.tarjas_pagos.
 """
 
 import datetime
 import logging
 import re
+import secrets
 import unicodedata
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -31,11 +33,24 @@ _templates: Jinja2Templates = None
 
 _EN_USO_DIAS = 14
 
+_FICHA_DDL = """
+ALTER TABLE appsheet.tarjas_maquina
+    ADD COLUMN IF NOT EXISTS modelo TEXT,
+    ADD COLUMN IF NOT EXISTS chasis TEXT,
+    ADD COLUMN IF NOT EXISTS anio INTEGER,
+    ADD COLUMN IF NOT EXISTS fecha_partida DATE,
+    ADD COLUMN IF NOT EXISTS habilitado BOOLEAN NOT NULL DEFAULT FALSE
+"""
+
 _MAQUINAS_SQL = """
-SELECT id_maquina, maquina, "año" AS anio, cumple, color, patente,
-       tractorista, campo
+SELECT id_maquina, maquina, modelo, "año" AS anio, anio AS anio_modelo,
+       fecha_partida, cumple, color, patente, chasis, tractorista, campo,
+       COALESCE(habilitado, FALSE) AS habilitado
 FROM appsheet.tarjas_maquina
 """
+
+_PATENTE_RE = re.compile(r"^[A-Z0-9]{4,12}$")
+_CHASIS_RE = re.compile(r"^[A-Z0-9]{8,40}$")
 
 # tarjas_pagos.fecha is text "MM/DD/YYYY HH:MM:SS" (AppSheet). Shown as DD/MM/YYYY.
 _USO_SQL = """
@@ -121,6 +136,20 @@ FROM appsheet.tarjas_esquema_tractorista
 def init(templates: Jinja2Templates) -> None:
     global _templates
     _templates = templates
+    _ensure_ficha()
+
+
+def _ensure_ficha() -> None:
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(_FICHA_DDL)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("tractores: no se pudo preparar la ficha: %s", exc)
 
 
 def _fmt(day: datetime.date | None) -> str | None:
@@ -140,6 +169,31 @@ def parse_anio(raw: str | None) -> tuple[datetime.date | None, bool]:
         except ValueError:
             continue
     return None, False
+
+
+def _as_date(value) -> datetime.date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    parsed, precise = parse_anio(str(value))
+    if not precise:
+        return None
+    return parsed
+
+
+def _as_year(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1970 <= year <= 2036:
+        return year
+    return None
 
 
 def antiguedad(day: datetime.date | None, today: datetime.date) -> tuple[int | None, str]:
@@ -170,6 +224,11 @@ def _blank_group(key: str) -> dict:
         "cumple": "",
         "color": "",
         "tractorista": "",
+        "modelo": "",
+        "chasis": "",
+        "anio_modelo": None,
+        "fecha_partida": None,
+        "habilitado": False,
         "campos": set(),
         "nombres": set(),
         "score": -1,
@@ -196,6 +255,12 @@ def _absorb(group: dict, row: dict) -> None:
         score += 1
     if (row.get("campo") or "").strip():
         score += 1
+    if (row.get("chasis") or "").strip():
+        score += 2
+    if row.get("fecha_partida"):
+        score += 2
+    if (row.get("modelo") or "").strip():
+        score += 1
 
     if maquina:
         group["nombres"].add(maquina)
@@ -218,7 +283,8 @@ def _absorb(group: dict, row: dict) -> None:
     campo = (row.get("campo") or "").strip()
     if campo.isdigit():
         group["campos"].add(int(campo))
-    if score >= group["score"]:
+    best = score >= group["score"]
+    if best:
         group["score"] = score
         if (row.get("cumple") or "").strip():
             group["cumple"] = row["cumple"].strip().upper()
@@ -226,6 +292,29 @@ def _absorb(group: dict, row: dict) -> None:
             group["color"] = row["color"].strip()
         if (row.get("tractorista") or "").strip():
             group["tractorista"] = row["tractorista"].strip()
+        modelo = " ".join((row.get("modelo") or "").split())
+        chasis = "".join((row.get("chasis") or "").split()).upper()
+        if modelo:
+            group["modelo"] = modelo
+        if chasis:
+            group["chasis"] = chasis
+        year = _as_year(row.get("anio_modelo"))
+        if year:
+            group["anio_modelo"] = year
+        partida = _as_date(row.get("fecha_partida"))
+        if partida:
+            group["fecha_partida"] = partida
+    else:
+        if not group["modelo"]:
+            group["modelo"] = " ".join((row.get("modelo") or "").split())
+        if not group["chasis"]:
+            group["chasis"] = "".join((row.get("chasis") or "").split()).upper()
+        if group["anio_modelo"] is None:
+            group["anio_modelo"] = _as_year(row.get("anio_modelo"))
+        if group["fecha_partida"] is None:
+            group["fecha_partida"] = _as_date(row.get("fecha_partida"))
+    if row.get("habilitado"):
+        group["habilitado"] = True
     group["en_catalogo"] = True
 
 
@@ -430,7 +519,7 @@ def build_tractores(
     limite = today - datetime.timedelta(days=_EN_USO_DIAS)
     out = []
     for group in groups.values():
-        years, label = antiguedad(group["anio_fecha"], today)
+        years, label = antiguedad(group["fecha_partida"] or group["anio_fecha"], today)
         found = group.get("_uso") or {}
         hasta = found.get("fecha") or found.get("hasta")
         if hasta is None:
@@ -448,9 +537,14 @@ def build_tractores(
             "anio": group["anio"],
             "antiguedad": label,
             "anios": years,
+            "modelo": group["modelo"] or None,
             "cumple": group["cumple"] or None,
             "color": group["color"] or None,
+            "chasis": group["chasis"] or None,
+            "anio_modelo": group["anio_modelo"],
+            "fecha_partida": _fmt(group["fecha_partida"]),
             "tractorista": group["tractorista"] or None,
+            "habilitado": group["habilitado"],
             "campos": [
                 {"id_campo": cid, "nombre": campo_nombre.get(cid, str(cid))}
                 for cid in sorted(group["campos"])
@@ -781,3 +875,243 @@ async def update_conductor(perfil_id: str, body: ConductorIn, _admin=Depends(req
         raise HTTPException(status_code=409, detail="Ya existe una ficha con ese nombre y esa fecha.")
     finally:
         conn.close()
+
+
+class TractorIn(BaseModel):
+    patente: str | None = None
+    maquina: str | None = None
+    modelo: str | None = None
+    color: str | None = None
+    chasis: str | None = None
+    anio: int | str | None = None
+    fecha_partida: str | None = None
+    cumple: str | None = None
+    tractorista: str | None = None
+    campos: list[int | str] = []
+    habilitado: bool = True
+    reemplaza: str | None = None
+
+
+def _parse_anio_modelo(value) -> int | None:
+    if value is None or value == "":
+        return None
+    year = _as_year(value)
+    if year is None:
+        raise HTTPException(status_code=422, detail="El año es un número de 4 dígitos.")
+    return year
+
+
+def clean_tractor(body: TractorIn, valid_campos: set[int]) -> dict:
+    patente = "".join((body.patente or "").split()).upper()
+    if not _PATENTE_RE.fullmatch(patente):
+        raise HTTPException(
+            status_code=422,
+            detail="La patente tiene letras y números, sin espacios.",
+        )
+    modelo = " ".join((body.modelo or "").split()) or None
+    maquina = " ".join((body.maquina or "").split())
+    if not maquina and modelo:
+        maquina = f"{patente}-{modelo}"[:80]
+    if not maquina:
+        raise HTTPException(status_code=422, detail="El nombre en la app es obligatorio.")
+    if len(maquina) > 80:
+        raise HTTPException(status_code=422, detail="El nombre en la app es demasiado largo.")
+    if modelo and len(modelo) > 80:
+        raise HTTPException(status_code=422, detail="La máquina es demasiado larga.")
+    color = " ".join((body.color or "").split()) or None
+    if color and len(color) > 40:
+        raise HTTPException(status_code=422, detail="El color es demasiado largo.")
+    chasis = "".join((body.chasis or "").split()).upper() or None
+    if chasis and not _CHASIS_RE.fullmatch(chasis):
+        raise HTTPException(
+            status_code=422,
+            detail="El chasis son letras y números, sin espacios.",
+        )
+    fecha = _parse_fecha(body.fecha_partida, required=False)
+    cumple = (body.cumple or "").strip().upper() or None
+    if cumple not in (None, "SI", "NO"):
+        raise HTTPException(status_code=422, detail="Cumple es Sí o No.")
+    tractorista = " ".join((body.tractorista or "").split()) or None
+    if tractorista and len(tractorista) > 40:
+        raise HTTPException(status_code=422, detail="El tractorista es demasiado largo.")
+    campos: list[str] = []
+    for raw in body.campos or []:
+        try:
+            cid = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="El campo no es válido.")
+        if cid not in valid_campos:
+            raise HTTPException(status_code=422, detail="El campo no es válido.")
+        text = str(cid)
+        if text not in campos:
+            campos.append(text)
+    if not campos:
+        raise HTTPException(status_code=422, detail="Elige al menos un campo.")
+    reemplaza = " ".join((body.reemplaza or "").split()) or None
+    return {
+        "patente": patente,
+        "maquina": maquina,
+        "modelo": modelo,
+        "color": color,
+        "chasis": chasis,
+        "anio": _parse_anio_modelo(body.anio),
+        "fecha_partida": fecha,
+        "cumple": cumple,
+        "tractorista": tractorista,
+        "campos": campos,
+        "habilitado": bool(body.habilitado),
+        "reemplaza": reemplaza,
+    }
+
+
+def _valid_campos(cur) -> set[int]:
+    cur.execute(_CAMPOS_SQL)
+    return {int(rec[0]) for rec in cur.fetchall()}
+
+
+def _ano_texto(data: dict) -> str | None:
+    if data["fecha_partida"]:
+        return _fmt(data["fecha_partida"])
+    if data["anio"]:
+        return str(data["anio"])
+    return None
+
+
+def _chasis_de_otro(cur, chasis: str | None, patente: str, old_patente: str | None) -> str | None:
+    if not chasis:
+        return None
+    cur.execute(
+        """
+        SELECT upper(btrim(patente))
+        FROM appsheet.tarjas_maquina
+        WHERE upper(btrim(COALESCE(chasis, ''))) = %s
+          AND upper(btrim(COALESCE(patente, ''))) <> %s
+          AND upper(btrim(COALESCE(patente, ''))) <> %s
+        LIMIT 1
+        """,
+        (chasis, patente, old_patente or patente),
+    )
+    found = cur.fetchone()
+    return found[0] if found else None
+
+
+def write_tractor(cur, data: dict, old_patente: str | None) -> str:
+    """Insert or update every campo row of one patente. Does not commit."""
+    patente = data["patente"]
+    if old_patente is None:
+        cur.execute(
+            """
+            SELECT 1 FROM appsheet.tarjas_maquina
+            WHERE upper(btrim(patente)) = %s
+            """,
+            (patente,),
+        )
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="Ya hay un tractor con esa patente.")
+    else:
+        cur.execute(
+            """
+            SELECT 1 FROM appsheet.tarjas_maquina
+            WHERE upper(btrim(patente)) = %s
+            """,
+            (old_patente,),
+        )
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="No está ese tractor.")
+        if patente != old_patente:
+            cur.execute(
+                """
+                SELECT 1 FROM appsheet.tarjas_maquina
+                WHERE upper(btrim(patente)) = %s
+                """,
+                (patente,),
+            )
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail="Ya hay un tractor con esa patente.")
+    taken = _chasis_de_otro(cur, data["chasis"], patente, old_patente)
+    if taken:
+        raise HTTPException(status_code=422, detail=f"Ese chasis ya está en la patente {taken}.")
+
+    campos = data["campos"]
+    values = (
+        data["maquina"], data["modelo"], data["color"], data["chasis"],
+        data["anio"], data["fecha_partida"], _ano_texto(data), data["cumple"],
+        data["tractorista"], patente, data["habilitado"],
+    )
+    if old_patente is None and data["reemplaza"]:
+        cur.execute(
+            """
+            DELETE FROM appsheet.tarjas_maquina
+            WHERE btrim(maquina) = %s
+              AND btrim(COALESCE(patente, '')) = ''
+            """,
+            (data["reemplaza"],),
+        )
+    if old_patente is not None:
+        cur.execute(
+            """
+            DELETE FROM appsheet.tarjas_maquina
+            WHERE upper(btrim(patente)) = %s
+              AND NOT (btrim(COALESCE(campo, '')) = ANY(%s))
+            """,
+            (old_patente, campos),
+        )
+        for campo in campos:
+            cur.execute(
+                """
+                UPDATE appsheet.tarjas_maquina
+                   SET maquina = %s, modelo = %s, color = %s, chasis = %s,
+                       anio = %s, fecha_partida = %s, "año" = %s, cumple = %s,
+                       tractorista = %s, patente = %s, habilitado = %s
+                 WHERE upper(btrim(patente)) = %s
+                   AND btrim(campo) = %s
+                """,
+                (*values, old_patente, campo),
+            )
+            if cur.rowcount:
+                continue
+            _insert_tractor(cur, values, campo)
+        return patente
+    for campo in campos:
+        _insert_tractor(cur, values, campo)
+    return patente
+
+
+def _insert_tractor(cur, values: tuple, campo: str) -> None:
+    cur.execute(
+        """
+        INSERT INTO appsheet.tarjas_maquina
+            (id_maquina, maquina, modelo, color, chasis, anio, fecha_partida,
+             "año", cumple, tractorista, patente, habilitado, campo)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (secrets.token_hex(4), *values, campo),
+    )
+
+
+def _save_tractor(body: TractorIn, old_patente: str | None) -> dict:
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            data = clean_tractor(body, _valid_campos(cur))
+            patente = write_tractor(cur, data, old_patente)
+        conn.commit()
+        return {"patente": patente}
+    except HTTPException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@router.post("/api/tractores", status_code=201)
+async def create_tractor(body: TractorIn, _admin=Depends(require_admin)):
+    return _save_tractor(body, None)
+
+
+@router.patch("/api/tractores/{patente}")
+async def update_tractor(patente: str, body: TractorIn, _admin=Depends(require_admin)):
+    current = "".join(patente.split()).upper()
+    if not _PATENTE_RE.fullmatch(current):
+        raise HTTPException(status_code=404, detail="No está ese tractor.")
+    return _save_tractor(body, current)

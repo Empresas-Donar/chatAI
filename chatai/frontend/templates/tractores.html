@@ -8,7 +8,7 @@
   <div class="page-header tr-head">
     <div>
       <h1>Tractores</h1>
-      <p>La ficha del conductor se guarda: licencia, horario y el precio de su jornada. El listado de tractores sigue en borrador.</p>
+      <p>La ficha del tractor se guarda: máquina, chasis, año, fecha de partida y campo. La del conductor también.</p>
     </div>
     <button type="button" class="btn btn-primary" id="tr-add" disabled>Agregar</button>
   </div>
@@ -22,12 +22,20 @@
   <form id="tr-filters" class="filter-bar" onsubmit="return false">
     <div>
       <label for="tr-q">Buscar</label>
-      <input id="tr-q" placeholder="Patente, máquina o tractorista" autocomplete="off" />
+      <input id="tr-q" placeholder="Patente, chasis, máquina o tractorista" autocomplete="off" />
     </div>
     <div>
       <label for="tr-fil-campo">Campo</label>
       <select id="tr-fil-campo">
         <option value="">Todos</option>
+      </select>
+    </div>
+    <div>
+      <label for="tr-fil-hab">Flota</label>
+      <select id="tr-fil-hab">
+        <option value="1">Habilitados</option>
+        <option value="">Todos</option>
+        <option value="0">No habilitados</option>
       </select>
     </div>
     <div>
@@ -49,14 +57,17 @@
       <span>Flota</span>
       <span class="count" id="tr-count"></span>
     </div>
+    <div class="tr-scroll">
     <table class="tbl">
       <thead>
         <tr>
           <th>Patente</th>
           <th>Máquina</th>
+          <th>Chasis</th>
           <th>Tractorista</th>
-          <th>Conductores</th>
           <th>Campo</th>
+          <th>Año</th>
+          <th>Fecha partida</th>
           <th>Antigüedad</th>
           <th>Cumple</th>
           <th>Última tarja</th>
@@ -66,6 +77,7 @@
       </thead>
       <tbody id="tr-body"></tbody>
     </table>
+    </div>
   </div>
 
   <div class="table-card" id="tr-cost-card" hidden>
@@ -123,15 +135,16 @@
   <div class="tr-panel-head">
     <div>
       <h2 id="tr-panel-title">Tractor</h2>
-      <p id="tr-panel-sub" class="tr-panel-sub">Borrador. Guardar solo cambia esta pantalla.</p>
+      <p id="tr-panel-sub" class="tr-panel-sub">Al guardar queda en el catálogo.</p>
     </div>
     <button type="button" class="tr-panel-close" id="tr-panel-close" aria-label="Cerrar">✕</button>
   </div>
   <form id="tr-form" class="tr-panel-form">
     <div class="tr-panel-scroll">
       <div class="tr-field">
-        <label for="tr-patente">Patente</label>
-        <input id="tr-patente" maxlength="12" autocomplete="off" />
+        <label for="tr-modelo">Máquina</label>
+        <input id="tr-modelo" maxlength="80" autocomplete="off" />
+        <p class="tr-hint">El modelo, por ejemplo Same Frutteto 75.</p>
       </div>
       <div class="tr-field">
         <label for="tr-maquina">Nombre en la app</label>
@@ -139,12 +152,34 @@
         <p class="tr-hint">Es el texto que queda en la tarja, por ejemplo PTFK72-Same 3 75.</p>
       </div>
       <div class="tr-field">
-        <label for="tr-anio">Año o fecha</label>
-        <input id="tr-anio" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off" />
+        <label for="tr-color">Color</label>
+        <input id="tr-color" maxlength="40" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-patente">Patente</label>
+        <input id="tr-patente" maxlength="12" required autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-chasis">Chasis</label>
+        <input id="tr-chasis" maxlength="40" autocomplete="off" />
+      </div>
+      <div class="tr-field">
+        <label for="tr-anio">Año</label>
+        <input id="tr-anio" inputmode="numeric" maxlength="4" placeholder="2024" autocomplete="off" />
+        <p class="tr-hint">Año del tractor, no la fecha en que partió.</p>
+      </div>
+      <div class="tr-field">
+        <label for="tr-fecha">Fecha de partida</label>
+        <input id="tr-fecha" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off" />
+        <p class="tr-hint">La antigüedad se cuenta desde esta fecha.</p>
       </div>
       <div class="tr-field">
         <label>Antigüedad</label>
         <p id="tr-antiguedad" class="tr-readonly">Sin año</p>
+      </div>
+      <div class="tr-field">
+        <label for="tr-tractorista">Tractorista</label>
+        <input id="tr-tractorista" maxlength="40" autocomplete="off" />
       </div>
       <div class="tr-field">
         <label for="tr-cumple">Cumple</label>
@@ -155,19 +190,13 @@
         </select>
       </div>
       <div class="tr-field">
-        <label for="tr-color">Color</label>
-        <input id="tr-color" maxlength="40" autocomplete="off" />
+        <label>Campo</label>
+        <div id="tr-campos" class="tr-checks"></div>
       </div>
-      <div class="tr-field">
-        <label for="tr-tractorista">Tractorista del catálogo</label>
-        <input id="tr-tractorista" maxlength="40" autocomplete="off" />
-      </div>
-      <div class="tr-field">
-        <label for="tr-campo">Campo</label>
-        <select id="tr-campo">
-          <option value="">Sin campo</option>
-        </select>
-      </div>
+      <label class="tr-check">
+        <input type="checkbox" id="tr-habilitado" checked />
+        Habilitado
+      </label>
       <div class="tr-uso" id="tr-uso" hidden>
         <span>Última tarja</span>
         <p id="tr-uso-texto"></p>
@@ -182,7 +211,7 @@
       <p class="err-text" id="tr-error" hidden></p>
     </div>
     <div class="tr-panel-actions">
-      <button type="submit" class="btn btn-primary" id="tr-save">Guardar en el borrador</button>
+      <button type="submit" class="btn btn-primary" id="tr-save">Guardar</button>
       <button type="button" class="btn btn-secondary" id="tr-cancel">Cancelar</button>
     </div>
   </form>
@@ -263,6 +292,14 @@
 .tr-head .btn { flex-shrink: 0; margin-top: 4px; }
 .tr-actions { white-space: nowrap; }
 #tr-card { margin-top: 4px; }
+#tr-card .tr-scroll { overflow-x: auto; }
+.tr-sub { color: var(--text-muted); font-size: 12px; }
+.tr-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.tr-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--text);
+}
+.tr-check input { width: auto; }
 .tr-pill {
   display: inline-block;
   padding: 2px 8px;

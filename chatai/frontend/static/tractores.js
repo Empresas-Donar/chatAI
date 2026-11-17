@@ -1,4 +1,4 @@
-// Draft fleet list. Kept off the global scope so it does not collide with base.html.
+// Fleet catalog. Kept off the global scope so it does not collide with base.html.
 (function () {
 
 const form = document.getElementById('tr-form');
@@ -10,18 +10,24 @@ const card = document.getElementById('tr-card');
 const tbody = document.getElementById('tr-body');
 const queryInput = document.getElementById('tr-q');
 const campoFilter = document.getElementById('tr-fil-campo');
+const habFilter = document.getElementById('tr-fil-hab');
 const estadoFilter = document.getElementById('tr-fil-estado');
 const panel = document.getElementById('tr-panel');
 const overlay = document.getElementById('tr-overlay');
 const panelTitle = document.getElementById('tr-panel-title');
 const patenteInput = document.getElementById('tr-patente');
+const modeloInput = document.getElementById('tr-modelo');
 const maquinaInput = document.getElementById('tr-maquina');
 const anioInput = document.getElementById('tr-anio');
+const fechaInput = document.getElementById('tr-fecha');
 const antiguedadEl = document.getElementById('tr-antiguedad');
 const cumpleInput = document.getElementById('tr-cumple');
 const colorInput = document.getElementById('tr-color');
+const chasisInput = document.getElementById('tr-chasis');
 const tractoristaInput = document.getElementById('tr-tractorista');
-const campoInput = document.getElementById('tr-campo');
+const camposBox = document.getElementById('tr-campos');
+const habilitadoInput = document.getElementById('tr-habilitado');
+const saveBtn = document.getElementById('tr-save');
 const usoBox = document.getElementById('tr-uso');
 const usoTexto = document.getElementById('tr-uso-texto');
 const detalle = document.getElementById('tr-detalle');
@@ -61,7 +67,8 @@ const cdCampo9 = document.getElementById('cd-campo-9');
 const cdError = document.getElementById('cd-error');
 const cdTitle = document.getElementById('cd-panel-title');
 let editingId = null;
-let localSeq = 1;
+let editingPatente = null;
+let editingNombre = null;
 
 function esc(value) {
   return String(value ?? '')
@@ -123,12 +130,6 @@ function ageLabel(raw) {
 function clp(value) {
   const amount = Number(value || 0);
   return '$' + amount.toLocaleString('es-CL');
-}
-
-function nombresConductores(row) {
-  const list = row.conductores || [];
-  if (!list.length) return '—';
-  return list.map(persona => persona.nombre).join(', ');
 }
 
 function campoTexto(row) {
@@ -225,45 +226,83 @@ function paintDetalle(row) {
   detalle.hidden = false;
 }
 
+function fillCampoChecks(selected) {
+  const picked = new Set((selected || []).map(id => String(id)));
+  camposBox.innerHTML = campos.map(campo => `
+    <label class="tr-check">
+      <input type="checkbox" name="campo" value="${esc(campo.id_campo)}" ${picked.has(String(campo.id_campo)) ? 'checked' : ''} />
+      ${esc(campo.nombre)}
+    </label>`).join('');
+}
+
+function checkedCampos() {
+  return [...camposBox.querySelectorAll('input:checked')].map(input => Number(input.value));
+}
+
+function edadFuente() {
+  const fecha = fechaInput.value.trim();
+  if (fecha) return fecha;
+  return anioInput.value.trim();
+}
+
 function openCreate() {
   editingId = null;
+  editingPatente = null;
+  editingNombre = null;
   form.reset();
+  habilitadoInput.checked = true;
+  fillCampoChecks([]);
   panelTitle.textContent = 'Nuevo tractor';
   antiguedadEl.textContent = 'Sin año';
   usoBox.hidden = true;
   detalle.hidden = true;
   showError('');
   openPanel();
-  patenteInput.focus();
+  modeloInput.focus();
 }
 
 function openEdit(row) {
   editingId = row.id;
-  patenteInput.value = row.patente || '';
+  editingPatente = row.patente || null;
+  editingNombre = row.en_catalogo && !row.patente ? row.maquina : null;
+  modeloInput.value = row.modelo || '';
   maquinaInput.value = row.maquina || '';
-  anioInput.value = row.anio || '';
-  antiguedadEl.textContent = ageLabel(row.anio);
+  anioInput.value = row.anio_modelo || (/^\d{4}$/.test(row.anio || '') ? row.anio : '');
+  fechaInput.value = row.fecha_partida || ((row.anio || '').includes('/') ? row.anio : '');
+  antiguedadEl.textContent = ageLabel(fechaInput.value || anioInput.value);
   cumpleInput.value = row.cumple || '';
   colorInput.value = row.color || '';
+  chasisInput.value = row.chasis || '';
   tractoristaInput.value = row.tractorista || '';
-  campoInput.value = row.campos && row.campos.length ? String(row.campos[0].id_campo) : '';
-  panelTitle.textContent = row.patente || row.maquina || 'Tractor';
+  habilitadoInput.checked = row.habilitado !== false;
+  fillCampoChecks((row.campos || []).map(campo => campo.id_campo));
+  patenteInput.value = row.patente || '';
+  panelTitle.textContent = row.patente || row.modelo || row.maquina || 'Tractor';
   paintUso(row);
   paintDetalle(row);
   showError('');
   openPanel();
-  maquinaInput.focus();
+  modeloInput.focus();
+}
+
+function anioTexto(row) {
+  if (row.anio_modelo) return String(row.anio_modelo);
+  if (/^\d{4}$/.test(row.anio || '')) return row.anio;
+  return '—';
 }
 
 function visibleRows() {
   const q = norm(queryInput.value.trim());
   const campo = campoFilter.value;
   const estado = estadoFilter.value;
+  const hab = habFilter.value;
   return rows.filter(row => {
+    if (hab === '1' && !row.habilitado) return false;
+    if (hab === '0' && row.habilitado) return false;
     if (estado && row.estado !== estado) return false;
     if (campo && !(row.campos || []).some(item => String(item.id_campo) === campo)) return false;
     if (!q) return true;
-    const blob = [row.patente, row.maquina, row.tractorista, row.contratista, row.trabajador]
+    const blob = [row.patente, row.modelo, row.maquina, row.chasis, row.tractorista, row.contratista, row.trabajador]
       .concat((row.conductores || []).map(persona => persona.nombre))
       .map(norm).join(' ');
     return blob.includes(q);
@@ -276,15 +315,26 @@ function render() {
   empty.textContent = rows.length
     ? 'Ningún tractor coincide con el filtro.'
     : 'Todavía no hay tractores.';
+  if (rows.length && habFilter.value === '1' && shown.length === 0 && !queryInput.value && !campoFilter.value && !estadoFilter.value) {
+    empty.textContent = 'No hay tractores habilitados.';
+  }
   card.hidden = shown.length === 0;
   document.getElementById('tr-count').textContent =
     shown.length === rows.length ? String(rows.length) : `${shown.length} de ${rows.length}`;
-  tbody.innerHTML = shown.map(row => `<tr>
+  tbody.innerHTML = shown.map(row => {
+    const titulo = row.modelo || row.maquina || '—';
+    const app = row.modelo && row.maquina && row.modelo !== row.maquina
+      ? `<div class="tr-sub">${esc(row.maquina)}</div>` : '';
+    const extra = row.en_catalogo ? '' : ' <span class="tr-pill tr-pill--sin_tarjas">Solo tarjas</span>';
+    const off = row.habilitado ? '' : ' <span class="tr-pill tr-pill--quieto">No habilitado</span>';
+    return `<tr>
     <td>${esc(row.patente || '—')}</td>
-    <td>${esc(row.maquina || '—')}${row.en_catalogo ? '' : ' <span class="tr-pill tr-pill--sin_tarjas">Solo tarjas</span>'}${row.local ? ' <span class="tr-pill tr-pill--quieto">Borrador</span>' : ''}</td>
+    <td>${esc(titulo)}${app}${extra}${off}</td>
+    <td>${esc(row.chasis || '—')}</td>
     <td>${esc(row.tractorista || '—')}</td>
-    <td>${esc(nombresConductores(row))}</td>
     <td>${esc(campoTexto(row))}</td>
+    <td>${esc(anioTexto(row))}</td>
+    <td>${esc(row.fecha_partida || '—')}</td>
     <td>${esc(row.antiguedad || '—')}</td>
     <td class="tr-cumple--${esc(row.cumple || '')}">${esc(cumpleTexto(row.cumple))}</td>
     <td>${esc(row.ultima_tarja || '—')}</td>
@@ -292,14 +342,11 @@ function render() {
     <td class="tr-actions">
       <button type="button" class="btn btn-secondary btn-sm" data-edit="${esc(row.id)}">Editar</button>
     </td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
-function campoById(id) {
-  return campos.find(campo => String(campo.id_campo) === String(id));
-}
-
-form.addEventListener('submit', event => {
+form.addEventListener('submit', async event => {
   event.preventDefault();
   showError('');
   const maquina = maquinaInput.value.trim();
@@ -307,47 +354,64 @@ form.addEventListener('submit', event => {
     showError('El nombre en la app es obligatorio.');
     return;
   }
-  const anio = anioInput.value.trim();
-  if (anio && ageLabel(anio) === 'Fecha no válida') {
-    showError('La fecha es DD/MM/YYYY, o un año de 4 dígitos.');
+  const patente = patenteInput.value.trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,12}$/.test(patente)) {
+    showError('La patente tiene letras y números, sin espacios.');
     return;
   }
-  const campo = campoById(campoInput.value);
-  const next = {
-    patente: patenteInput.value.trim().toUpperCase() || null,
+  const anio = anioInput.value.trim();
+  if (anio && !/^\d{4}$/.test(anio)) {
+    showError('El año tiene 4 dígitos.');
+    return;
+  }
+  const fecha = fechaInput.value.trim();
+  if (fecha && ageLabel(fecha) === 'Fecha no válida') {
+    showError('La fecha de partida es DD/MM/YYYY.');
+    return;
+  }
+  const elegidos = checkedCampos();
+  if (!elegidos.length) {
+    showError('Elige al menos un campo.');
+    return;
+  }
+  const payload = {
+    patente,
+    modelo: modeloInput.value.trim() || null,
     maquina,
-    anio: anio || null,
-    antiguedad: ageLabel(anio),
-    cumple: cumpleInput.value || null,
     color: colorInput.value.trim() || null,
+    chasis: chasisInput.value.trim() || null,
+    anio: anio || null,
+    fecha_partida: fecha || null,
     tractorista: tractoristaInput.value.trim() || null,
-    campos: campo ? [{ id_campo: campo.id_campo, nombre: campo.nombre }] : [],
-    local: true,
+    cumple: cumpleInput.value || null,
+    campos: elegidos,
+    habilitado: habilitadoInput.checked,
+    reemplaza: editingNombre,
   };
-  if (editingId) {
-    const row = rows.find(item => item.id === editingId);
-    Object.assign(row, next);
-  } else {
-    rows.unshift({
-      id: 'local-' + (localSeq++),
-      registros: 0,
-      ultima_tarja: null,
-      estado: 'sin_tarjas',
-      estado_label: 'Sin uso',
-      en_catalogo: false,
-      conductores: [],
-      avisos: [],
-      ...next,
-    });
+  const creating = !editingPatente;
+  saveBtn.disabled = true;
+  const res = await fetch(creating ? '/api/tractores' : '/api/tractores/' + encodeURIComponent(editingPatente), {
+    method: creating ? 'POST' : 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  saveBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data && data.detail;
+    showError(typeof detail === 'string' ? detail : 'No se pudo guardar el tractor.');
+    return;
   }
   closePanel();
-  render();
-  pageError.textContent = 'Quedó solo en esta pantalla. Al recargar vuelve el catálogo de la app.';
-  pageError.hidden = false;
+  pageError.hidden = true;
+  await load();
 });
 
 anioInput.addEventListener('input', () => {
-  antiguedadEl.textContent = ageLabel(anioInput.value);
+  antiguedadEl.textContent = ageLabel(edadFuente());
+});
+fechaInput.addEventListener('input', () => {
+  antiguedadEl.textContent = ageLabel(edadFuente());
 });
 function hoy() {
   const now = new Date();
@@ -507,6 +571,7 @@ cdForm.addEventListener('submit', async event => {
 });
 queryInput.addEventListener('input', render);
 campoFilter.addEventListener('change', render);
+habFilter.addEventListener('change', render);
 estadoFilter.addEventListener('change', render);
 tbody.addEventListener('click', event => {
   const editBtn = event.target.closest('[data-edit]');
@@ -535,7 +600,7 @@ async function load() {
   tarifa = data.tarifa || null;
   renderTarifa();
   fillCampoOptions(campoFilter, campos, 'Todos');
-  fillCampoOptions(campoInput, campos, 'Sin campo');
+  if (!panel.hidden) fillCampoChecks(checkedCampos());
   addBtn.disabled = false;
   render();
   const perfiles = await fetch('/api/conductores');
