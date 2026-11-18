@@ -142,7 +142,7 @@ function renderLaborTable(rows) {
 function renderRanking(rows) {
   const tbody = document.getElementById('ranking-tbody');
   tbody.innerHTML = rows.map(r => `<tr>
-    <td class="cell-worker" title="${esc(r.trabajador)}">${esc(r.trabajador)}</td>
+    <td class="cell-worker" title="${esc(r.trabajador)}">${window.personCell(r.trabajador, r.rut_key || r.rut_trabajador, esc)}</td>
     <td class="cell-contractor" title="${esc(r.contratista)}">${esc(r.contratista)}</td>
     <td class="num">${r.promedio_diario != null ? fmtCLP.format(r.promedio_diario) : '-'}</td>
     <td class="num">${r.ganancia_hora != null ? fmtCLP.format(r.ganancia_hora) : '-'}</td>

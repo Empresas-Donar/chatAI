@@ -40,6 +40,69 @@ function cosechaDetailHtml(lines) {
   return `<span class="cosecha-detail">${lines.map(esc).join('<br>')}</span>`;
 }
 
+function fmtHours(n) {
+  const value = Math.round(Number(n) * 100) / 100;
+  if (!value) return '0';
+  if (Math.abs(value - Math.round(value)) < 0.001) return String(Math.round(value));
+  return value.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+}
+
+function pagoDetailLines(parts) {
+  if (!parts || !parts.length) return [];
+  const byRate = new Map();
+  let extraH = 0;
+  let extraM = 0;
+  const tratos = new Map();
+  parts.forEach(part => {
+    const tipo = String(part.tipo || '').toLowerCase();
+    const horas = Number(part.horas) || 0;
+    const extras = Number(part.extras) || 0;
+    const extraMoney = Number(part.extraMoney) || 0;
+    const amount = Number(part.amount) || 0;
+    const rate = Number(part.rate) || 0;
+    const rendimiento = Number(part.rendimiento) || 0;
+    const valorTrato = Number(part.valorTrato) || 0;
+    const isDay = tipo.includes('dia') || tipo.includes('día');
+    if (!isDay && rendimiento > 0 && valorTrato > 0) {
+      const key = Math.round(valorTrato);
+      const bucket = tratos.get(key) || { qty: 0, rate: valorTrato };
+      bucket.qty += rendimiento;
+      tratos.set(key, bucket);
+      return;
+    }
+    const base = extraMoney > 0 && amount + 0.5 >= extraMoney ? amount - extraMoney : amount;
+    if (horas > 0 && base > 0.5) {
+      const key = rate ? Math.round(rate) : 0;
+      const bucket = byRate.get(key) || { horas: 0, base: 0, rate };
+      bucket.horas += horas;
+      bucket.base += base;
+      byRate.set(key, bucket);
+    }
+    if (extras > 0 && extraMoney > 0) {
+      extraH += extras;
+      extraM += extraMoney;
+    }
+  });
+  const lines = [];
+  byRate.forEach(bucket => {
+    const shown = Math.round(bucket.rate);
+    if (shown > 0 && Math.abs(bucket.horas * shown - bucket.base) <= 1) {
+      lines.push(`${fmtHours(bucket.horas)} h × ${fmtCLP.format(shown)}`);
+    } else {
+      lines.push(`${fmtHours(bucket.horas)} h · ${fmtCLP.format(bucket.base)}`);
+    }
+  });
+  if (extraH > 0 && extraM > 0) {
+    lines.push(`${fmtHours(extraH)} h extra ${fmtCLP.format(extraM)}`);
+  }
+  tratos.forEach(bucket => {
+    if (bucket.qty > 0 && bucket.rate > 0) {
+      lines.push(`${fmtHours(bucket.qty)} × ${fmtCLP.format(Math.round(bucket.rate))}`);
+    }
+  });
+  return lines;
+}
+
 // Candidate column names for the worker field (AppSheet names vary)
 const WORKER_CANDIDATES = [
   'trabajador', 'Trabajador', 'nombre_trabajador', 'Nombre_trabajador',
@@ -117,6 +180,7 @@ async function queryData() {
 
     const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
       trabajador: person.trabajador,
+      rut_trabajador: person.rut || '',
       labor: person.labor || 'COSECHA',
       tipo_pago: person.tipo_pago || 'trato',
       fecha: person.fecha,
@@ -180,16 +244,20 @@ function renderPivot(columns, rows, umbralDiario) {
 
   rows.forEach(r => {
     const worker = workerCol ? (r[workerCol] ?? '(sin nombre)') : '(sin nombre)';
+    const rut = r.rut_trabajador || r.rut || r.rut_key || '';
     const labor  = r.labor ?? '';
     const tipo   = r.tipo_pago ?? '';
-    const key    = mergeLabores ? worker : `${worker}||${labor}||${tipo}`;
+    const ident = `${worker}\u0001${window.rutKey(rut)}`;
+    const key    = mergeLabores ? ident : `${ident}||${labor}||${tipo}`;
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
     const value  = Number(r.total_trabajado) || 0;
 
     const horas = parseFloat(r.horas_trabajadas) || 0;
 
     if (!groups.has(key)) {
-      groups.set(key, { worker, labor, tipo, totalGanado: 0, totalHoras: 0, byDate: {}, detail: {} });
+      groups.set(key, {
+        worker, rut, labor, tipo, totalGanado: 0, totalHoras: 0, byDate: {}, detail: {}, parts: {},
+      });
     }
 
     const g = groups.get(key);
@@ -199,6 +267,18 @@ function renderPivot(columns, rows, umbralDiario) {
       g.es_cosecha = true;
       g.cuarteles = r.cuarteles || '';
       if (fecha && r.cosecha_lineas && r.cosecha_lineas.length) g.detail[fecha] = r.cosecha_lineas;
+    } else if (fecha) {
+      if (!g.parts[fecha]) g.parts[fecha] = [];
+      g.parts[fecha].push({
+        tipo,
+        horas,
+        extras: parseFloat(r.horas_extras) || 0,
+        extraMoney: parseFloat(r.total_hora_extra) || 0,
+        amount: value,
+        rate: parseFloat(r.valor_jornada) || 0,
+        rendimiento: parseFloat(r.rendimiento) || 0,
+        valorTrato: parseFloat(r.valor_trato) || 0,
+      });
     }
     if (fecha) {
       g.byDate[fecha] = (g.byDate[fecha] || 0) + value;
@@ -239,11 +319,12 @@ function renderPivot(columns, rows, umbralDiario) {
   let grandTotal = 0;
 
   sorted.forEach(g => {
-    const isFirst = g.worker !== prevWorker;
-    prevWorker = g.worker;
+    const ident = `${g.worker}\u0001${window.rutKey(g.rut)}`;
+    const isFirst = ident !== prevWorker;
+    prevWorker = ident;
 
     const rowClass = isFirst ? 'worker-first' : '';
-    const workerCell = isFirst ? esc(g.worker) : '';
+    const workerCell = isFirst ? window.personCell(g.worker, g.rut, esc) : '';
 
     const rowTotal = dates.reduce((sum, d) => sum + (g.byDate[d] || 0), 0);
     grandTotal += rowTotal;
@@ -267,7 +348,7 @@ function renderPivot(columns, rows, umbralDiario) {
       colTotals[d] += val || 0;
       if (val != null && val > 0) {
         const cls = mark(val) ? 'cell-value cell-highlight' : 'cell-value';
-        const lines = g.detail[d] || [];
+        const lines = (g.detail[d] && g.detail[d].length) ? g.detail[d] : pagoDetailLines(g.parts[d]);
         const note = lines.length ? ` title="${esc(lines.join(' · '))}"` : '';
         html += `<td class="${cls}"${note}>${fmtCLPDec.format(val)}${cosechaDetailHtml(lines)}</td>`;
       } else {

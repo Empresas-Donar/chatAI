@@ -203,7 +203,7 @@ function renderDetail(rows, totales) {
   body.innerHTML = rows.map(r => `<tr>
     ${cell(esc(fmtDate(r.fecha)))}
     ${cell(esc(r.cuadrilla ?? '—'), true)}
-    ${cell(esc(r.trabajador || '—'))}
+    ${cell(window.personCell(r.trabajador || '—', r.rut, esc))}
     ${cell(esc(r.cuartel || '—'))}
     ${cell(esc(r.variedad || '—'))}
     ${cell(fmtNum.format(r.capachos || 0), true)}

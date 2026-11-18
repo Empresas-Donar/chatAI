@@ -22,6 +22,8 @@ from services.cosecha_rendimiento import (
     amount_due,
     fold,
     predios_for_empresa,
+    rut_display,
+    rut_key,
 )
 
 TIPO = "Cosecha"
@@ -532,6 +534,7 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
         SELECT
           COALESCE(e.fecha, e.fecha_y_hora::date) AS fecha,
           COALESCE(NULLIF(btrim(e.trabajador), ''), '(sin nombre)') AS trabajador,
+          NULLIF(btrim(e.rut_trabajador), '') AS rut,
           COALESCE(
             NULLIF(btrim(m.nombre), ''),
             NULLIF(btrim(c.contratistas), ''),
@@ -573,13 +576,14 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
         return _empty()
 
     days: dict[tuple, dict] = {}
-    for fecha, trabajador, nombre, _corto, cuartel, _cultivo, precio, piso in scans:
-        day_key = (_iso(fecha), trabajador, nombre or "")
+    for fecha, trabajador, rut, nombre, _corto, cuartel, _cultivo, precio, piso in scans:
+        day_key = (_iso(fecha), trabajador, nombre or "", rut_key(rut))
         day = days.get(day_key)
         if day is None:
             day = {
                 "fecha": day_key[0],
                 "trabajador": trabajador,
+                "rut": rut_display(rut),
                 "contratista": nombre or "",
                 "trato": 0,
                 "piso": 0,
@@ -612,6 +616,7 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
             {
                 "fecha": day["fecha"],
                 "trabajador": day["trabajador"],
+                "rut": day["rut"],
                 "contratista": day["contratista"],
                 "trato": day["trato"],
                 "piso": day["piso"],
@@ -663,7 +668,7 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
         "jornadas_al_dia": 0,
         "capachos": sum(row["capachos"] for row in personas_dias),
         "jornadas": jornadas,
-        "personas": len({row["trabajador"] for row in personas_dias}),
+        "personas": len({(row["trabajador"], rut_key(row.get("rut"))) for row in personas_dias}),
         "promedio_diario": round(total / jornadas) if jornadas else None,
         "lines": lines,
         "personas_dias": personas_dias,
@@ -701,7 +706,7 @@ def _merge_payables(parts: list[dict]) -> dict:
         "jornadas_al_dia": 0,
         "capachos": sum(row["capachos"] for row in personas_dias),
         "jornadas": jornadas,
-        "personas": len({row["trabajador"] for row in personas_dias}),
+        "personas": len({(row["trabajador"], rut_key(row.get("rut"))) for row in personas_dias}),
         "promedio_diario": round(total / jornadas) if jornadas else None,
         "lines": lines,
         "personas_dias": personas_dias,

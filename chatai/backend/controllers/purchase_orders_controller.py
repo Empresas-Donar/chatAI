@@ -1430,6 +1430,7 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: 8pt; color: #111; m
 .badge-aldia { color: #15803d; font-weight: 700; }
 .badge-cosecha { color: #8aa394; font-weight: 500; font-size: 6.5pt; }
 .cosecha-detail { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
+.person-rut { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
 """
 
 
@@ -1610,7 +1611,9 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
 
         cur.execute(
             f"""
-            SELECT trabajador, fecha::date::text AS fecha, tipo_pago,
+            SELECT trabajador,
+                   regexp_replace(upper(COALESCE(rut_trabajador, '')), '[^0-9K]', '', 'g') AS rut_key,
+                   fecha::date::text AS fecha, tipo_pago,
                    SUM(COALESCE(total_trabajado, 0)) AS total_trabajado
             FROM appsheet.tarjas_pagos
             WHERE contratista  = %s
@@ -1618,15 +1621,15 @@ def _fetch_billing_order(conn, contratista, empresa, fecha_inicio, fecha_termino
               AND estado       = 'Aprobado'
               AND fecha::date BETWEEN %s AND %s
               AND {not_tractorista_sql()}
-            GROUP BY trabajador, fecha::date, tipo_pago
+            GROUP BY trabajador, 2, fecha::date, tipo_pago
             ORDER BY trabajador, fecha::date, tipo_pago
             """,
             (contratista, empresa, fecha_inicio, fecha_termino),
         )
         pivot_rows = []
-        for trabajador, fecha, tipo, trab in cur.fetchall():
+        for trabajador, rut_key_val, fecha, tipo, trab in cur.fetchall():
             emp, trab_f, com = _billing_costo_parts(tipo, trab)
-            pivot_rows.append((trabajador, fecha, emp, trab_f, com, tipo))
+            pivot_rows.append((trabajador, fecha, emp, trab_f, com, tipo, rut_key_val or ""))
     return tipo_rows, pivot_rows
 
 
@@ -1731,6 +1734,7 @@ async def billing_order_data(
             "total_trabajado": _serialize(r[3]),
             "total_contratista": _serialize(r[4]),
             "tipo_pago": r[5] if len(r) > 5 else None,
+            "rut": r[6] if len(r) > 6 else "",
         }
         for r in pivot_rows
     ]
@@ -1744,6 +1748,7 @@ async def billing_order_data(
             "total_trabajado",
             "total_contratista",
             "tipo_pago",
+            "rut",
         ],
         "rows": rows,
         "count": len(rows),
@@ -1796,10 +1801,12 @@ async def billing_order_pdf(
 
     # Build pivot structure: date → {total, trabajado, comision}
     dates: list[str] = sorted({r[1] for r in pivot_rows if r[1]})
-    workers: dict[str, dict] = {}
-    worker_tipos: dict[str, set[str]] = {}
+    workers: dict[tuple, dict] = {}
+    worker_tipos: dict[tuple, set[str]] = {}
     for row in pivot_rows:
-        w = row[0] or "(sin nombre)"
+        wname = row[0] or "(sin nombre)"
+        wrut = row[6] if len(row) > 6 else ""
+        w = (wname, wrut or "")
         fecha = row[1]
         if w not in workers:
             workers[w] = {}
@@ -1820,9 +1827,13 @@ async def billing_order_pdf(
             _cosecha_detail_html,
             _cosecha_detail_lines,
         )
+        from services.cosecha_rendimiento import rut_key as _doc_key
 
         for person in cosecha["personas_dias"]:
-            worker = person["trabajador"] or "(sin nombre)"
+            worker = (
+                person["trabajador"] or "(sin nombre)",
+                _doc_key(person.get("rut")),
+            )
             fecha = person["fecha"]
             if worker not in workers:
                 workers[worker] = {}
@@ -1874,7 +1885,9 @@ async def billing_order_pdf(
     date_headers = "".join(f'<th class="num">{_fmt_date_short(d)}</th>' for d in dates)
 
     rows_html = ""
+    from controllers.tarjas_controller import _person_name_html
     for worker, wdata in sorted_workers:
+        name, wrut = worker
         row_trabajado = sum(wdata.get(d, _empty_cell())["trabajado"] for d in dates)
         cells = ""
         for d in dates:
@@ -1892,7 +1905,9 @@ async def billing_order_pdf(
             pct_comision_trato,
             pct_comision_al_dia,
         )
-        name_cell = f"{worker} {badges}".strip() if badges else worker
+        name_cell = _person_name_html(name, wrut)
+        if badges:
+            name_cell = f"{name_cell} {badges}"
         rows_html += (
             f'<tr class="{even_cls}"><td>{name_cell}</td>{cells}'
             f'<td class="tot">{_fmt_clp(row_trabajado)}</td></tr>'

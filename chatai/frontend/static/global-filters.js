@@ -349,3 +349,36 @@ window.saveGlobalFilters = saveGlobalFilters;
 window.currentWeekRange = currentWeekRange;
 window.decorateNavLinks = decorateNavLinks;
 window.globalFiltersReady = initGlobalFilters();
+
+function rutKey(raw) {
+  return String(raw || '').toUpperCase().replace(/[^0-9K]/g, '');
+}
+
+function rutDisplay(raw) {
+  const text = String(raw || '').trim();
+  const key = rutKey(text);
+  if (key.length !== 8 && key.length !== 9) return text;
+  const body = key.slice(0, -1);
+  const dv = key.slice(-1);
+  if (!/^\d+$/.test(body)) return text;
+  let sum = 0;
+  let factor = 2;
+  for (let i = body.length - 1; i >= 0; i -= 1) {
+    sum += Number(body[i]) * factor;
+    factor = factor === 7 ? 2 : factor + 1;
+  }
+  const rest = 11 - (sum % 11);
+  const expect = rest === 11 ? '0' : rest === 10 ? 'K' : String(rest);
+  if (dv !== expect) return text;
+  return `${body}-${dv}`;
+}
+
+window.rutKey = rutKey;
+window.rutDisplay = rutDisplay;
+window.personCell = function (name, rut, escapeHtml) {
+  const escFn = escapeHtml || (value => value);
+  const who = escFn(name || '');
+  const doc = rutDisplay(rut);
+  if (!doc) return who;
+  return `${who}<br><span class="person-rut">${escFn(doc)}</span>`;
+};

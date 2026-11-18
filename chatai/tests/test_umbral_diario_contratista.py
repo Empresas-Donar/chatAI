@@ -42,6 +42,46 @@ class _Cur:
         return (self.valor,)
 
 
+def test_pago_detail_explains_the_day():
+    day = {
+        "tipo_pago": "Al dia",
+        "horas": 7.5,
+        "horas_extras": 0.5,
+        "hora_extra": 1700,
+        "total": 31700,
+        "valor_jornada": 4000,
+        "valor_trato": 0,
+        "rendimiento": 0,
+    }
+    assert tc._pago_detail_lines([day]) == ["7,5 h × $4.000", "0,5 h extra $1.700"]
+    sunday = dict(day, valor_jornada=5600, total=43700)
+    assert tc._pago_detail_lines([sunday]) == ["7,5 h × $5.600", "0,5 h extra $1.700"]
+    duplicated = {
+        "tipo_pago": "Al dia",
+        "horas": 7.5,
+        "horas_extras": 0,
+        "hora_extra": 0,
+        "total": 27000,
+        "valor_jornada": 3600,
+        "valor_trato": 0,
+        "rendimiento": 0,
+    }
+    assert tc._pago_detail_lines([duplicated, duplicated]) == ["15 h × $3.600"]
+    trato = {
+        "tipo_pago": "trato",
+        "horas": 7.5,
+        "horas_extras": 0,
+        "hora_extra": 0,
+        "total": 19170,
+        "valor_jornada": 0,
+        "valor_trato": 270,
+        "rendimiento": 71,
+    }
+    assert tc._pago_detail_lines([trato]) == ["71 × $270"]
+    uneven = dict(day, valor_jornada=3466.666666667, total=27700)
+    assert tc._pago_detail_lines([uneven]) == ["7,5 h · $26.000", "0,5 h extra $1.700"]
+
+
 def _amount(text):
     if text.strip() in ("", "-"):
         return None

@@ -27,7 +27,7 @@ EMPRESA = "TALAGANTE"
 FECHA_INICIO = "2026-08-12"
 FECHA_TERMINO = "2026-08-18"
 
-_BOLD_NAME_RE = re.compile(r"<td[^>]*><b>([^<]+)</b></td>")
+_BOLD_NAME_RE = re.compile(r"<td[^>]*><b>([^<]+)</b>")
 
 
 def _connect():

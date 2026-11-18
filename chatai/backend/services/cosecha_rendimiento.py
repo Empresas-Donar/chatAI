@@ -108,6 +108,7 @@ def _person_key(row: dict) -> tuple:
         row["predio"],
         row["contratista"],
         row["trabajador"],
+        rut_key(row.get("rut")),
     )
 
 
@@ -148,6 +149,7 @@ def _group_person_days(rows: list[dict], bins_by_person: dict[tuple, int]) -> li
                 "cultivo": _labels(group, "cultivo"),
                 "variedad": _labels(group, "variedad"),
                 "trabajador": head["trabajador"],
+                "rut": head.get("rut") or "",
                 "capachos": capachos,
                 "bins": bins_by_person.get(key, 0),
                 "precio": next(iter(prices)) if len(prices) == 1 else None,
@@ -177,6 +179,29 @@ def _money(value) -> int:
     )
 
 
+def rut_key(raw) -> str:
+    """Document key: digits and K, without dots, dashes or spaces."""
+    return "".join(ch for ch in str(raw or "").upper() if ch.isdigit() or ch == "K")
+
+
+def rut_display(raw) -> str:
+    """Chilean RUT as BODY-DV when the check digit matches. Otherwise the typed text."""
+    text = str(raw or "").strip()
+    key = rut_key(text)
+    if len(key) not in (8, 9) or not key[:-1].isdigit():
+        return text
+    total = 0
+    factor = 2
+    for ch in reversed(key[:-1]):
+        total += int(ch) * factor
+        factor = 2 if factor == 7 else factor + 1
+    rest = 11 - (total % 11)
+    expect = "0" if rest == 11 else "K" if rest == 10 else str(rest)
+    if key[-1] != expect:
+        return text
+    return f"{key[:-1]}-{key[-1]}"
+
+
 def _per_person(capachos: int, personas: int):
     if not personas:
         return None
@@ -196,6 +221,7 @@ def _scan_sql(source: str) -> str:
               cu."cultivo" AS cultivo,
               COALESCE(e."variedad", cu."variedad") AS variedad,
               e."trabajador" AS trabajador,
+              e."rut_trabajador" AS rut,
               e."precio_trato_aplicado" AS precio,
               COALESCE(s.accion_piso, e."piso_aplicado") AS piso,
               COALESCE(e."id_bins", e."bins") AS bin_key
@@ -222,6 +248,7 @@ def _scan_sql(source: str) -> str:
               cu.cultivo AS cultivo,
               COALESCE(e.variedad, cu.variedad) AS variedad,
               e.trabajador AS trabajador,
+              e.rut_trabajador AS rut,
               e.precio_trato_aplicado AS precio,
               COALESCE(s.accion_piso, e.piso_aplicado) AS piso,
               COALESCE(e.id_bins, e.bins) AS bin_key
@@ -319,6 +346,7 @@ def _row_out(row: dict) -> dict:
         "cultivo": row["cultivo"],
         "variedad": row["variedad"],
         "trabajador": row["trabajador"],
+        "rut": rut_display(row.get("rut")),
         "capachos": int(row["capachos"] or 0),
         "precio": None if row["precio"] is None else _money(row["precio"]),
         "trato": trato,
@@ -366,7 +394,7 @@ def query_detalle(
         + """
         SELECT
           fecha, predio, contratista, cuadrilla, cuartel, cultivo, variedad,
-          trabajador,
+          trabajador, rut,
           count(*)::int AS capachos,
           CASE
             WHEN count(DISTINCT precio) = 1 THEN min(precio)
@@ -375,7 +403,7 @@ def query_detalle(
           COALESCE(sum(precio), 0) AS trato,
           COALESCE(max(piso), 0) AS piso
         FROM scans
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
         ORDER BY fecha, cuadrilla NULLS LAST, count(*) DESC, trabajador
         """,
         params,
@@ -388,12 +416,12 @@ def query_detalle(
         cte
         + """
         SELECT
-          fecha, predio, contratista, trabajador,
+          fecha, predio, contratista, trabajador, rut,
           count(DISTINCT bin_key) FILTER (
             WHERE bin_key IS NOT NULL AND btrim(bin_key::text) <> ''
           )::int AS bins
         FROM scans
-        GROUP BY 1, 2, 3, 4
+        GROUP BY 1, 2, 3, 4, 5
         """,
         params,
     )
@@ -457,7 +485,7 @@ def query_detalle(
         item["capachos_persona"] = _per_person(item["capachos"], item["trabajadores"])
 
     trabajadores = len(
-        {(r["predio"], r["trabajador"]) for r in rows if r["trabajador"]}
+        {(r["predio"], r["trabajador"], rut_key(r.get("rut"))) for r in rows if r["trabajador"]}
     )
     capachos = sum(r["capachos"] for r in rows)
     return {

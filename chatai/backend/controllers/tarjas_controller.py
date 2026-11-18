@@ -74,6 +74,7 @@ from services.cosecha_pago import LABOR as COSECHA_LABOR
 from services.cosecha_pago import TIPO as COSECHA_TIPO
 from services.cosecha_pago import calendar_counts, contratistas_en_periodo, payable as cosecha_payable
 from services.cosecha_rendimiento import fold as fold_name
+from services.cosecha_rendimiento import rut_display, rut_key
 from tarjas_empresa import (
     annotate_detalle_resumen,
     annotate_detalle_rows,
@@ -86,6 +87,10 @@ from tarjas_empresa import (
 )
 
 logger = logging.getLogger("controllers.tarjas")
+
+# Same document with a dash, a dot or an underscore stays one person.
+# A different number stays a different row, so a parent and a child show apart.
+_RUT_SQL = "regexp_replace(upper(COALESCE(rut_trabajador, '')), '[^0-9K]', '', 'g')"
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -123,6 +128,80 @@ def _cosecha_detail_lines(capachos, trato, piso, precios=None) -> list[str]:
     elif capachos_i:
         lines.append(f"{capachos_i} cap. · {_fmt_clp(trato_i)}")
     return lines
+
+
+def _fmt_qty(n) -> str:
+    value = float(n or 0)
+    if abs(value - round(value)) < 0.001:
+        return str(int(round(value)))
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def _pago_detail_lines(parts: list[dict]) -> list[str]:
+    """Why a tarjas day adds up: hours × rate, extra hours, or units × price."""
+    if not parts:
+        return []
+    by_rate: dict[int, dict] = {}
+    extra_hours = 0.0
+    extra_money = 0.0
+    tratos: dict[int, dict] = {}
+    for part in parts:
+        tipo = str(part.get("tipo_pago") or "").strip().lower()
+        horas = float(part.get("horas") or 0)
+        extras = float(part.get("horas_extras") or 0)
+        extra_pay = float(part.get("hora_extra") or 0)
+        amount = float(part.get("total") or 0)
+        rate = float(part.get("valor_jornada") or 0)
+        trato_rate = float(part.get("valor_trato") or 0)
+        rendimiento = float(part.get("rendimiento") or 0)
+        is_day = "dia" in tipo or "día" in tipo
+        if not is_day and rendimiento > 0 and trato_rate > 0:
+            bucket = tratos.setdefault(int(round(trato_rate)), {"qty": 0.0, "rate": trato_rate})
+            bucket["qty"] += rendimiento
+            continue
+        base = amount - extra_pay if extra_pay > 0 and amount + 0.5 >= extra_pay else amount
+        if horas > 0 and base > 0.5:
+            key = int(round(rate)) if rate else 0
+            bucket = by_rate.setdefault(key, {"horas": 0.0, "base": 0.0, "rate": rate})
+            bucket["horas"] += horas
+            bucket["base"] += base
+        if extras > 0 and extra_pay > 0:
+            extra_hours += extras
+            extra_money += extra_pay
+    lines: list[str] = []
+    for bucket in by_rate.values():
+        shown = round(bucket["rate"])
+        if shown > 0 and abs(bucket["horas"] * shown - bucket["base"]) <= 1:
+            lines.append(f"{_fmt_qty(bucket['horas'])} h × {_fmt_clp(shown)}")
+        else:
+            lines.append(f"{_fmt_qty(bucket['horas'])} h · {_fmt_clp(round(bucket['base']))}")
+    if extra_hours > 0 and extra_money > 0:
+        lines.append(f"{_fmt_qty(extra_hours)} h extra {_fmt_clp(round(extra_money))}")
+    for bucket in tratos.values():
+        if bucket["qty"] > 0 and bucket["rate"] > 0:
+            lines.append(f"{_fmt_qty(bucket['qty'])} × {_fmt_clp(round(bucket['rate']))}")
+    return lines
+
+
+def _person_name_html(name: str, rut, *, bold: bool = False) -> str:
+    shown = _escape_html(name or "")
+    if bold:
+        shown = f"<b>{shown}</b>"
+    doc = rut_display(rut)
+    if not doc:
+        return shown
+    return shown + '<br/><span class="person-rut">' + _escape_html(doc) + "</span>"
+
+
+def _excel_person(name, rut) -> str:
+    doc = rut_display(rut)
+    who = name or ""
+    return f"{who}\n{doc}" if doc else who
+
+
+def _row_rut_key(row: dict) -> str:
+    return row.get("rut_key") or rut_key(row.get("rut") or row.get("rut_trabajador"))
 
 
 def _cosecha_detail_html(lines: list[str]) -> str:
@@ -419,6 +498,7 @@ table.pivot-wide { table-layout: fixed; font-size: 6.5pt; }
 table.pivot-wide th, table.pivot-wide td { padding: 3px 3px; overflow: hidden; }
 .pdf-note { font-size: 7pt; font-style: italic; color: #666666; margin: 0 0 8px 0; }
 .cosecha-detail { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
+.person-rut { font-size: 6pt; font-weight: normal; line-height: 1.15; color: #64748b; }
 .pdf-summary { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; }
 .pdf-summary td { width: 33.33%; border: 1px solid #cccccc; background: #f7f7f7; padding: 6px 10px; font-size: 8pt; text-align: center; }
 .pdf-summary b { display: block; font-size: 11pt; color: #111111; }
@@ -814,6 +894,7 @@ async def get_tarjas_general(
                 f"""
                 SELECT
                     trabajador,
+                    {_RUT_SQL} AS rut_key,
                     contratista,
                     ROUND(AVG(total_trabajado)::numeric, 0)                        AS promedio_diario,
                     ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0)        AS ganancia_hora,
@@ -821,7 +902,7 @@ async def get_tarjas_general(
                     COALESCE(SUM(total_trabajado), 0)                              AS total
                 FROM appsheet.tarjas_pagos
                 {where}
-                GROUP BY trabajador, contratista
+                GROUP BY trabajador, {_RUT_SQL}, contratista
                 ORDER BY total DESC
                 LIMIT 6
             """,
@@ -2414,10 +2495,10 @@ async def get_tarjas_resumen_persona(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+                f"SELECT trabajador, {_RUT_SQL} AS rut_key, tipo_pago, fecha::date::text AS fecha, "
                 f"COALESCE(SUM(total_trabajado), 0) AS total_trabajado "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, tipo_pago, fecha::date "
+                f"GROUP BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
             )
@@ -2496,10 +2577,10 @@ async def download_tarjas_resumen_persona_excel(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
+                f"SELECT trabajador, contratista, {_RUT_SQL} AS rut_key, tipo_pago, fecha::date::text AS fecha, "
                 f"COALESCE(SUM(total_trabajado), 0) AS total_trabajado "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
+                f"GROUP BY trabajador, contratista, {_RUT_SQL}, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
             )
@@ -2525,6 +2606,7 @@ async def download_tarjas_resumen_persona_excel(
             rows.append(
                 {
                     "trabajador": person["trabajador"],
+                    "rut_key": rut_key(person.get("rut")),
                     "contratista": person["contratista"],
                     # Keep harvest off the tarjas "trato" row. Same person and
                     # day can also have a labor payment.
@@ -2539,7 +2621,7 @@ async def download_tarjas_resumen_persona_excel(
 
     workers: dict = {}
     for r in rows:
-        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
+        key = (r["trabajador"] or "", _row_rut_key(r), r["contratista"] or "", r["tipo_pago"] or "")
         if key not in workers:
             workers[key] = {"by_date": {}, "total": 0}
         workers[key]["by_date"][r["fecha"]] = workers[key]["by_date"].get(
@@ -2572,8 +2654,8 @@ async def download_tarjas_resumen_persona_excel(
 
     # Data rows
     row_num = 2
-    for (trab, cont, tipo), entry in sorted_workers:
-        ws.cell(row=row_num, column=1, value=trab)
+    for (trab, rutk, cont, tipo), entry in sorted_workers:
+        ws.cell(row=row_num, column=1, value=_excel_person(trab, rutk))
         ws.cell(row=row_num, column=2, value=cont)
         ws.cell(row=row_num, column=3, value=tipo)
         for col, d in enumerate(dates, 4):
@@ -2702,11 +2784,11 @@ async def get_tarjas_resumen_horas(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+                f"SELECT trabajador, {_RUT_SQL} AS rut_key, tipo_pago, fecha::date::text AS fecha, "
                 f"COALESCE(SUM(horas_extras), 0)::numeric AS horas_trabajadas, "
                 f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto_hora_extra "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, tipo_pago, fecha::date "
+                f"GROUP BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
             )
@@ -3077,13 +3159,13 @@ async def download_tarjas_general_excel(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT trabajador, contratista, labor, tipo_pago,
+                SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, labor, tipo_pago,
                        ROUND(AVG(total_trabajado)::numeric, 0)                  AS promedio_diario,
                        ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0)  AS ganancia_hora,
                        ROUND(SUM(total_pagar)::numeric    / {_horas_expr}, 0)   AS costo_hora,
                        COALESCE(SUM(total_trabajado),0) AS total
                 FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago
+                GROUP BY trabajador, {_RUT_SQL}, contratista, labor, tipo_pago
                 ORDER BY total DESC
             """,
                 params,
@@ -3110,6 +3192,7 @@ async def download_tarjas_general_excel(
             labor_name = person.get("labor") or "Cosecha"
             key = (
                 person["trabajador"],
+                rut_key(person.get("rut")),
                 person["contratista"],
                 labor_name,
                 person.get("tipo_pago") or "",
@@ -3117,10 +3200,11 @@ async def download_tarjas_general_excel(
             bucket = buckets.setdefault(key, {"total": 0.0, "days": 0})
             bucket["total"] += float(person["a_pagar"] or 0)
             bucket["days"] += 1
-        for (trab, cont, labor_name, tipo), bucket in buckets.items():
+        for (trab, rutk, cont, labor_name, tipo), bucket in buckets.items():
             rows.append(
                 {
                     "trabajador": trab,
+                    "rut_key": rutk,
                     "contratista": cont,
                     "labor": labor_name,
                     "tipo_pago": tipo,
@@ -3150,7 +3234,7 @@ async def download_tarjas_general_excel(
     )
     money = "#,##0"
     for i, r in enumerate(rows, 2):
-        ws.cell(i, 1, r["trabajador"])
+        ws.cell(i, 1, _excel_person(r["trabajador"], r.get("rut_key")))
         ws.cell(i, 2, r["contratista"])
         ws.cell(i, 3, r["labor"])
         ws.cell(i, 4, r["tipo_pago"])
@@ -3321,12 +3405,12 @@ async def download_tarjas_contratista_excel(
             umbral = _umbral_diario(cur)
             cur.execute(
                 f"""
-                SELECT trabajador, contratista, labor, tipo_pago,
+                SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, labor, tipo_pago,
                        fecha::date::text AS fecha,
                        COALESCE(SUM(total_trabajado), 0) AS total,
                        {_horas_sum} AS horas
                 FROM appsheet.tarjas_pagos {where}
-                GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
+                GROUP BY trabajador, {_RUT_SQL}, contratista, labor, tipo_pago, fecha::date
                 ORDER BY contratista, trabajador, labor, fecha::date
                 """,
                 params,
@@ -3353,6 +3437,7 @@ async def download_tarjas_contratista_excel(
             rows.append(
                 {
                     "trabajador": person["trabajador"],
+                    "rut_key": rut_key(person.get("rut")),
                     "contratista": person["contratista"],
                     "labor": person.get("labor") or "COSECHA",
                     "tipo_pago": person.get("tipo_pago") or "",
@@ -3367,7 +3452,7 @@ async def download_tarjas_contratista_excel(
     dates = sorted({r["fecha"] for r in rows})
     groups: dict = OrderedDict()
     for r in rows:
-        key = (r["trabajador"], r["contratista"], r["labor"], r["tipo_pago"])
+        key = (r["trabajador"], _row_rut_key(r), r["contratista"], r["labor"], r["tipo_pago"])
         if key not in groups:
             groups[key] = {"total_ganado": 0.0, "total_horas": 0.0, "by_date": {}}
         g = groups[key]
@@ -3393,9 +3478,9 @@ async def download_tarjas_contratista_excel(
     money = "#,##0"
     highlight_fill = PatternFill("solid", fgColor="FFEDD5")
     highlight_font = Font(bold=True, color="C2410C")
-    for i, ((trabajador, cont, lab, tipo), g) in enumerate(groups.items(), 2):
+    for i, ((trabajador, rutk, cont, lab, tipo), g) in enumerate(groups.items(), 2):
         costo_hora = round(g["total_ganado"] / g["total_horas"]) if g["total_horas"] > 0 else None
-        ws.cell(i, 1, trabajador)
+        ws.cell(i, 1, _excel_person(trabajador, rutk))
         ws.cell(i, 2, cont)
         ws.cell(i, 3, lab)
         ws.cell(i, 4, tipo)
@@ -3969,10 +4054,10 @@ async def download_tarjas_resumen_horas_excel(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, contratista, tipo_pago, fecha::date::text AS fecha, "
+                f"SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, tipo_pago, fecha::date::text AS fecha, "
                 f"COALESCE(SUM(horas_extras), 0)::numeric AS horas "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista, tipo_pago, fecha::date "
+                f"GROUP BY trabajador, {_RUT_SQL}, contratista, tipo_pago, fecha::date "
                 "ORDER BY trabajador, tipo_pago, fecha::date",
                 params,
             )
@@ -3983,7 +4068,7 @@ async def download_tarjas_resumen_horas_excel(
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
     for r in rows:
-        key = (r["trabajador"] or "", r["contratista"] or "", r["tipo_pago"] or "")
+        key = (r["trabajador"] or "", _row_rut_key(r), r["contratista"] or "", r["tipo_pago"] or "")
         if key not in workers:
             workers[key] = {"by_date": {}, "total": 0}
         workers[key]["by_date"][r["fecha"]] = workers[key]["by_date"].get(
@@ -3994,10 +4079,11 @@ async def download_tarjas_resumen_horas_excel(
     # Only keep workers whose horas_extras total for the whole period (across
     # every contratista/tipo_pago combination) is greater than zero.
     totals_by_worker: dict = {}
-    for (trab, _cont, _tipo), entry in workers.items():
-        totals_by_worker[trab] = totals_by_worker.get(trab, 0) + entry["total"]
+    for (trab, rutk, _cont, _tipo), entry in workers.items():
+        ident = (trab, rutk)
+        totals_by_worker[ident] = totals_by_worker.get(ident, 0) + entry["total"]
     workers = {
-        k: v for k, v in workers.items() if totals_by_worker.get(k[0], 0) > 0
+        k: v for k, v in workers.items() if totals_by_worker.get((k[0], k[1]), 0) > 0
     }
 
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
@@ -4013,8 +4099,8 @@ async def download_tarjas_resumen_horas_excel(
     from openpyxl.styles import PatternFill, Font
 
     total_fill = PatternFill("solid", fgColor="D6E4F0")
-    for row_num, ((trab, cont, tipo), entry) in enumerate(sorted_workers, 2):
-        ws.cell(row_num, 1, trab)
+    for row_num, ((trab, rutk, cont, tipo), entry) in enumerate(sorted_workers, 2):
+        ws.cell(row_num, 1, _excel_person(trab, rutk))
         ws.cell(row_num, 2, cont)
         ws.cell(row_num, 3, tipo)
         for col, d in enumerate(dates, 4):
@@ -4295,10 +4381,10 @@ def _build_resumen_persona_html(
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     cur.execute(
-        f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+        f"SELECT trabajador, {_RUT_SQL} AS rut_key, tipo_pago, fecha::date::text AS fecha, "
         f"COALESCE(SUM(total_trabajado),0) AS total "
         f"FROM appsheet.tarjas_pagos {where} "
-        "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+        f"GROUP BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date ORDER BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date",
         params,
     )
     rows = _rows_to_dicts(cur)
@@ -4324,6 +4410,7 @@ def _build_resumen_persona_html(
                 rows.append(
                     {
                         "trabajador": person["trabajador"],
+                        "rut_key": rut_key(person.get("rut")),
                         "tipo_pago": COSECHA_TIPO,
                         "fecha": person["fecha"],
                         "total": person["a_pagar"],
@@ -4336,7 +4423,7 @@ def _build_resumen_persona_html(
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
     for r in rows:
-        k = (r["trabajador"] or "", r["tipo_pago"] or "")
+        k = (r["trabajador"] or "", _row_rut_key(r), r["tipo_pago"] or "")
         if k not in workers:
             workers[k] = {"by_date": {}, "detail": {}, "total": 0}
         workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(
@@ -4345,11 +4432,11 @@ def _build_resumen_persona_html(
         workers[k]["total"] += float(r["total"] or 0)
         if r.get("cosecha_lineas"):
             workers[k]["detail"][r["fecha"]] = r["cosecha_lineas"]
-    # Alphabetical by worker name, keeping each worker's "Al día"/"trato"
-    # rows contiguous — required for the is_first "print name once" logic
-    # below (issue #137).
+    # Alphabetical by worker name, then document, keeping each person's
+    # "Al día"/"trato" rows contiguous (issue #137).
     sorted_workers = sorted(
-        workers.items(), key=lambda x: ((x[0][0] or "").lower(), x[0][1] or "")
+        workers.items(),
+        key=lambda x: ((x[0][0] or "").lower(), x[0][1] or "", x[0][2] or ""),
     )
 
     # Per-date pivot (one column per date), matching the on-screen table
@@ -4364,13 +4451,14 @@ def _build_resumen_persona_html(
     )
     rows_html = ""
     prev = None
-    for (trab, tipo), entry in sorted_workers:
-        is_first = prev != trab
-        prev = trab
+    for (trab, rutk, tipo), entry in sorted_workers:
+        ident = (trab, rutk)
+        is_first = prev != ident
+        prev = ident
         cls = "worker-first" if is_first else ""
         rows_html += (
             f'<tr class="{cls}">'
-            f'<td style="{w["worker"]}">{"<b>" + trab + "</b>" if is_first else ""}</td>'
+            f'<td style="{w["worker"]}">{_person_name_html(trab, rutk, bold=True) if is_first else ""}</td>'
             f'<td style="{w["tipo"]}">{tipo}</td>'
         )
         for d in dates:
@@ -4467,13 +4555,13 @@ def _build_general_html(
     labor_rows = _rows_to_dicts(cur)
     cur.execute(
         f"""
-        SELECT trabajador, contratista,
+        SELECT trabajador, {_RUT_SQL} AS rut_key, contratista,
                ROUND(AVG(total_trabajado)::numeric, 0)           AS promedio_diario,
                ROUND(SUM(total_trabajado)::numeric / {_horas_expr}, 0) AS ganancia_hora,
                ROUND(({_horas_sum})::numeric, 1)                 AS total_horas,
                COALESCE(SUM(total_trabajado), 0)                 AS total
         FROM appsheet.tarjas_pagos {where}
-        GROUP BY trabajador, contratista ORDER BY total DESC
+        GROUP BY trabajador, {_RUT_SQL}, contratista ORDER BY total DESC
     """,
         params,
     )
@@ -4536,7 +4624,7 @@ def _build_general_html(
         for r in labor_rows
     )
     ranking_html = "".join(
-        f'<tr><td style="{RW["trab"]}">{r["trabajador"]}</td>'
+        f'<tr><td style="{RW["trab"]}">{_person_name_html(r["trabajador"], r.get("rut_key"))}</td>'
         f'<td style="{RW["cont"]}">{r["contratista"]}</td>'
         f'<td class="num" style="{RW["prom"]}">{fmtCLP(r["promedio_diario"])}</td>'
         f'<td class="num" style="{RW["gan"]}">{fmtCLP(r["ganancia_hora"])}</td>'
@@ -4818,15 +4906,18 @@ def _build_contratista_html(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
-    _horas_sum = "COALESCE(SUM(horas_trabajadas), 0)"
     cur.execute(
         f"""
-        SELECT trabajador, contratista, labor, tipo_pago,
+        SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, labor, tipo_pago,
                fecha::date::text AS fecha,
-               COALESCE(SUM(total_trabajado), 0) AS total,
-               {_horas_sum} AS horas
+               COALESCE(total_trabajado, 0) AS total,
+               COALESCE(horas_trabajadas, 0) AS horas,
+               COALESCE(horas_extras, 0) AS horas_extras,
+               COALESCE(total_hora_extra, 0) AS hora_extra,
+               COALESCE(valor_jornada, 0) AS valor_jornada,
+               COALESCE(valor_trato, 0) AS valor_trato,
+               COALESCE(rendimiento, 0) AS rendimiento
         FROM appsheet.tarjas_pagos {where}
-        GROUP BY trabajador, contratista, labor, tipo_pago, fecha::date
         ORDER BY contratista, trabajador, labor, fecha::date
         """,
         params,
@@ -4848,6 +4939,7 @@ def _build_contratista_html(
             rows.append(
                 {
                     "trabajador": person["trabajador"],
+                    "rut_key": rut_key(person.get("rut")),
                     "contratista": person["contratista"],
                     "labor": person.get("labor") or "COSECHA",
                     "tipo_pago": person.get("tipo_pago") or "",
@@ -4872,15 +4964,23 @@ def _build_contratista_html(
     _check_pivot_date_range(dates, "Detalle contratista")
     groups: "OrderedDict" = OrderedDict()
     for r in rows:
-        key = (r["trabajador"], r["contratista"], r["labor"], r["tipo_pago"])
+        key = (r["trabajador"], _row_rut_key(r), r["contratista"], r["labor"], r["tipo_pago"])
         if key not in groups:
-            groups[key] = {"total_ganado": 0.0, "total_horas": 0.0, "by_date": {}, "detail": {}}
+            groups[key] = {
+                "total_ganado": 0.0,
+                "total_horas": 0.0,
+                "by_date": {},
+                "detail": {},
+                "parts": {},
+            }
         g = groups[key]
         g["total_ganado"] += float(r["total"] or 0)
         g["total_horas"] += float(r["horas"] or 0)
         g["by_date"][r["fecha"]] = g["by_date"].get(r["fecha"], 0) + float(r["total"] or 0)
         if r.get("cosecha_lineas"):
             g["detail"][r["fecha"]] = r["cosecha_lineas"]
+        else:
+            g["parts"].setdefault(r["fecha"], []).append(r)
 
     w = _pivot_col_widths(
         {"worker": 15, "labor": 17, "tipo": 7, "rate": 8, "total": 9},
@@ -4906,12 +5006,13 @@ def _build_contratista_html(
 
     rows_html = ""
     prev_worker = None
-    for (trabajador, cont, labor_, tipo), g in groups.items():
+    for (trabajador, rutk, cont, labor_, tipo), g in groups.items():
         trabajador = trabajador or ""
-        is_new_worker = trabajador != prev_worker
+        ident = (trabajador, rutk)
+        is_new_worker = ident != prev_worker
         row_cls = "worker-first" if is_new_worker else ""
-        worker_cell = trabajador if is_new_worker else ""
-        prev_worker = trabajador
+        worker_cell = _person_name_html(trabajador, rutk) if is_new_worker else ""
+        prev_worker = ident
         costo_hora = (
             clp(round(g["total_ganado"] / g["total_horas"]))
             if g["total_horas"] > 0
@@ -4923,7 +5024,7 @@ def _build_contratista_html(
                 w["date"],
                 g["by_date"].get(d),
                 dash_if_empty=True,
-                detail=g["detail"].get(d),
+                detail=g["detail"].get(d) or _pago_detail_lines(g["parts"].get(d) or []),
             )
             for d in dates
         )
@@ -5029,11 +5130,11 @@ def _build_resumen_horas_html(
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     cur.execute(
-        f"SELECT trabajador, tipo_pago, fecha::date::text AS fecha, "
+        f"SELECT trabajador, {_RUT_SQL} AS rut_key, tipo_pago, fecha::date::text AS fecha, "
         f"COALESCE(SUM(horas_extras), 0)::numeric AS horas, "
         f"COALESCE(SUM(total_hora_extra), 0)::numeric AS monto "
         f"FROM appsheet.tarjas_pagos {where} "
-        "GROUP BY trabajador, tipo_pago, fecha::date ORDER BY trabajador, tipo_pago, fecha::date",
+        f"GROUP BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date ORDER BY trabajador, {_RUT_SQL}, tipo_pago, fecha::date",
         params,
     )
     rows = _rows_to_dicts(cur)
@@ -5041,7 +5142,7 @@ def _build_resumen_horas_html(
     dates = sorted({r["fecha"] for r in rows})
     workers: dict = {}
     for r in rows:
-        k = (r["trabajador"] or "", r["tipo_pago"] or "")
+        k = (r["trabajador"] or "", _row_rut_key(r), r["tipo_pago"] or "")
         if k not in workers:
             workers[k] = {"by_date": {}, "total": 0, "monto": 0}
         workers[k]["by_date"][r["fecha"]] = workers[k]["by_date"].get(r["fecha"], 0) + (
@@ -5053,16 +5154,17 @@ def _build_resumen_horas_html(
     # Only keep workers whose horas_extras total for the whole period (across
     # every tipo_pago) is greater than zero.
     totals_by_worker: dict = {}
-    for (trab, _tipo), entry in workers.items():
-        totals_by_worker[trab] = totals_by_worker.get(trab, 0) + entry["total"]
+    for (trab, rutk, _tipo), entry in workers.items():
+        ident = (trab, rutk)
+        totals_by_worker[ident] = totals_by_worker.get(ident, 0) + entry["total"]
     workers = {
-        k: v for k, v in workers.items() if totals_by_worker.get(k[0], 0) > 0
+        k: v for k, v in workers.items() if totals_by_worker.get((k[0], k[1]), 0) > 0
     }
 
     sorted_workers = sorted(workers.items(), key=lambda x: -x[1]["total"])
 
     resumen_horas = sum(e["total"] for _, e in sorted_workers)
-    resumen_trabajadores = len({k[0] for k in workers})
+    resumen_trabajadores = len({(k[0], k[1]) for k in workers})
     resumen_monto = sum(e["monto"] for _, e in sorted_workers)
 
     _check_pivot_date_range(dates, "Horas extra por persona")
@@ -5074,13 +5176,14 @@ def _build_resumen_horas_html(
     )
     rows_html = ""
     prev = None
-    for (trab, tipo), entry in sorted_workers:
-        is_first = prev != trab
-        prev = trab
+    for (trab, rutk, tipo), entry in sorted_workers:
+        ident = (trab, rutk)
+        is_first = prev != ident
+        prev = ident
         cls = "worker-first" if is_first else ""
         rows_html += (
             f'<tr class="{cls}">'
-            f'<td style="{w["worker"]}">{"<b>" + trab + "</b>" if is_first else ""}</td>'
+            f'<td style="{w["worker"]}">{_person_name_html(trab, rutk, bold=True) if is_first else ""}</td>'
             f'<td style="{w["tipo"]}">{tipo}</td>'
         )
         for d in dates:
@@ -5220,9 +5323,9 @@ async def get_tarjas_jornadas_trabajador(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+                f"SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista "
+                f"GROUP BY trabajador, {_RUT_SQL}, contratista "
                 "ORDER BY contratista, trabajador",
                 params,
             )
@@ -5265,9 +5368,9 @@ async def download_tarjas_jornadas_trabajador_excel(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+                f"SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
                 f"FROM appsheet.tarjas_pagos {where} "
-                "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+                f"GROUP BY trabajador, {_RUT_SQL}, contratista ORDER BY contratista, trabajador",
                 params,
             )
             rows = _rows_to_dicts(cur)
@@ -5291,7 +5394,7 @@ async def download_tarjas_jornadas_trabajador_excel(
 
     total_jornadas = 0
     for row_num, r in enumerate(rows, 2):
-        ws.cell(row=row_num, column=1, value=r["trabajador"] or "")
+        ws.cell(row=row_num, column=1, value=_excel_person(r["trabajador"], r.get("rut_key")))
         ws.cell(row=row_num, column=2, value=r["contratista"] or "")
         jornadas = int(r["jornadas"] or 0)
         ws.cell(row=row_num, column=3, value=jornadas)
@@ -5341,9 +5444,9 @@ def _build_jornadas_trabajador_html(
         params.append(_empresa_to_campo(empresa))
     where = "WHERE " + " AND ".join(filters)
     cur.execute(
-        f"SELECT trabajador, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
+        f"SELECT trabajador, {_RUT_SQL} AS rut_key, contratista, COUNT(DISTINCT fecha::date) AS jornadas "
         f"FROM appsheet.tarjas_pagos {where} "
-        "GROUP BY trabajador, contratista ORDER BY contratista, trabajador",
+        f"GROUP BY trabajador, {_RUT_SQL}, contratista ORDER BY contratista, trabajador",
         params,
     )
     rows = _rows_to_dicts(cur)
@@ -5354,7 +5457,7 @@ def _build_jornadas_trabajador_html(
     # to near-zero width and overlapped its text (issue #132).
     W = {"trabajador": "width:47%", "contratista": "width:41%", "jornadas": "width:12%"}
     rows_html = "".join(
-        f'<tr><td style="{W["trabajador"]}">{r["trabajador"] or ""}</td>'
+        f'<tr><td style="{W["trabajador"]}">{_person_name_html(r["trabajador"], r.get("rut_key"))}</td>'
         f'<td style="{W["contratista"]}">{r["contratista"] or ""}</td>'
         f'<td class="num" style="{W["jornadas"]}">{r["jornadas"] or 0}</td></tr>'
         for r in rows
