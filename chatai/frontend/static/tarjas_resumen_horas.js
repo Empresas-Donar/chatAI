@@ -108,8 +108,10 @@ function renderPivot(rows) {
   const workers = new Map();
   rows.forEach(r => {
     const w = r.trabajador ?? '(sin nombre)';
-    if (!workers.has(w)) workers.set(w, new Map());
-    const tipos = workers.get(w);
+    const rut = r.rut_key || r.rut_trabajador || '';
+    const ident = `${w}\u0001${window.rutKey(rut)}`;
+    if (!workers.has(ident)) workers.set(ident, { name: w, rut, tipos: new Map() });
+    const tipos = workers.get(ident).tipos;
     if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, total: 0, monto: 0 });
     const entry = tipos.get(r.tipo_pago);
     const hrs = Number(r.horas_trabajadas) || 0;  // API alias → horas_extras
@@ -118,11 +120,11 @@ function renderPivot(rows) {
     entry.monto += Number(r.monto_hora_extra) || 0;
   });
 
-  const sortedWorkers = [...workers.entries()]
-    .map(([name, tipos]) => {
+  const sortedWorkers = [...workers.values()]
+    .map(person => {
       let grandTotal = 0;
-      tipos.forEach(e => { grandTotal += e.total; });
-      return { name, tipos, grandTotal };
+      person.tipos.forEach(e => { grandTotal += e.total; });
+      return { name: person.name, rut: person.rut, tipos: person.tipos, grandTotal };
     })
     .sort((a, b) => b.grandTotal - a.grandTotal);
 
@@ -154,7 +156,7 @@ function renderPivot(rows) {
 
     tipoEntries.forEach(([tipo, entry]) => {
       const rowClass = isFirst ? 'worker-first' : '';
-      const workerCell = isFirst ? esc(w.name) : '';
+      const workerCell = isFirst ? window.personCell(w.name, w.rut, esc) : '';
       isFirst = false;
 
       html += `<tr class="${rowClass}">`;

@@ -121,6 +121,7 @@ async function generate() {
 
     const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
       trabajador: person.trabajador,
+      rut: person.rut || '',
       fecha: person.fecha,
       total_pagar: person.a_pagar,
       total_trabajado: person.a_pagar,
@@ -207,15 +208,17 @@ function renderPivot(columns, rows, header) {
   const groups = new Map();
   rows.forEach(r => {
     const worker = workerCol ? (r[workerCol] ?? '(sin nombre)') : '(sin nombre)';
+    const rut = r.rut || r.rut_trabajador || '';
+    const ident = `${worker}\u0001${window.rutKey(rut)}`;
     const fecha  = typeof r.fecha === 'string' ? r.fecha.slice(0, 10) : '';
     const value  = Number(r.total_pagar) || 0;
     const trabajado = Number(r.total_trabajado) || 0;
     const comision = Number(r.total_contratista) || 0;
 
-    if (!groups.has(worker)) {
-      groups.set(worker, { worker, byDate: {}, tipos: new Set() });
+    if (!groups.has(ident)) {
+      groups.set(ident, { worker, rut, byDate: {}, tipos: new Set() });
     }
-    const g = groups.get(worker);
+    const g = groups.get(ident);
     const tipos = String(r.tipo_pago || '').split(',').map(s => s.trim()).filter(Boolean);
     tipos.forEach(t => g.tipos.add(t));
     if (fecha) {
@@ -295,7 +298,7 @@ function renderPivot(columns, rows, header) {
     grandTotal += rowTotal;
 
     html += `<tr>`;
-    html += `<td class="cell-worker">${esc(g.worker)} ${tipoBadgeHtml(g.tipos)}</td>`;
+    html += `<td class="cell-worker">${window.personCell(g.worker, g.rut, esc)} ${tipoBadgeHtml(g.tipos)}</td>`;
     dates.forEach(d => {
       const cell = g.byDate[d];
       if (cell) colTotals[d] += cell.trabajado;

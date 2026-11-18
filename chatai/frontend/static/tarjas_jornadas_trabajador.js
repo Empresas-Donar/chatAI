@@ -74,7 +74,7 @@ function renderTable(rows) {
     const j = Number(r.jornadas || 0);
     total += j;
     html += `<tr>
-      <td class="cell-worker">${esc(r.trabajador ?? '')}</td>
+      <td class="cell-worker">${window.personCell(r.trabajador ?? '', r.rut_key || r.rut_trabajador, esc)}</td>
       <td>${esc(r.contratista ?? '')}</td>
       <td class="cell-total">${j}</td>
     </tr>`;

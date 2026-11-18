@@ -105,6 +105,7 @@ async function queryData() {
     document.getElementById('empty-state').style.display = 'none';
     const cosechaRows = (data.cosecha?.personas_dias || []).map(person => ({
       trabajador: person.trabajador,
+      rut_trabajador: person.rut || '',
       // Tarjas also uses tipo "trato". A shared label would add the harvest
       // floor onto a labor payment from the same day.
       tipo_pago: 'Cosecha',
@@ -135,8 +136,10 @@ function renderPivot(rows) {
   const workers = new Map();
   rows.forEach(r => {
     const w = r.trabajador ?? '(sin nombre)';
-    if (!workers.has(w)) workers.set(w, new Map());
-    const tipos = workers.get(w);
+    const rut = r.rut_trabajador || r.rut || r.rut_key || '';
+    const ident = `${w}\u0001${window.rutKey(rut)}`;
+    if (!workers.has(ident)) workers.set(ident, { name: w, rut, tipos: new Map() });
+    const tipos = workers.get(ident).tipos;
     if (!tipos.has(r.tipo_pago)) tipos.set(r.tipo_pago, { byDate: {}, detail: {}, total: 0, es_cosecha: !!r.es_cosecha, cuarteles: r.cuarteles || '' });
     const entry = tipos.get(r.tipo_pago);
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + Number(r.total_trabajado || 0);
@@ -148,11 +151,11 @@ function renderPivot(rows) {
   });
 
   // Sort workers by total descending
-  const sortedWorkers = [...workers.entries()]
-    .map(([name, tipos]) => {
+  const sortedWorkers = [...workers.values()]
+    .map(person => {
       let grandTotal = 0;
-      tipos.forEach(e => { grandTotal += e.total; });
-      return { name, tipos, grandTotal };
+      person.tipos.forEach(e => { grandTotal += e.total; });
+      return { name: person.name, rut: person.rut, tipos: person.tipos, grandTotal };
     })
     .sort((a, b) => b.grandTotal - a.grandTotal);
 
@@ -183,7 +186,7 @@ function renderPivot(rows) {
 
     tipoEntries.forEach(([tipo, entry]) => {
       const rowClass = isFirst ? 'worker-first' : '';
-      const workerCell = isFirst ? esc(w.name) : '';
+      const workerCell = isFirst ? window.personCell(w.name, w.rut, esc) : '';
       isFirst = false;
 
       html += `<tr class="${rowClass}">`;
