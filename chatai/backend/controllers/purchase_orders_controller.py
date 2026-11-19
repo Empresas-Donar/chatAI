@@ -1848,7 +1848,10 @@ async def billing_order_pdf(
                 "cosecha": prev.get("cosecha", 0.0) + person["a_pagar"],
                 "cosecha_lineas": (prev.get("cosecha_lineas") or [])
                 + _cosecha_detail_lines(
-                    person.get("capachos"), person.get("trato"), person.get("piso")
+                    person.get("capachos"),
+                    person.get("trato"),
+                    person.get("piso"),
+                    person.get("precios"),
                 ),
             }
             lugares = ", ".join(person["cuarteles"])

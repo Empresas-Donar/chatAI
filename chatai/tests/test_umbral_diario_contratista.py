@@ -82,6 +82,12 @@ def test_pago_detail_explains_the_day():
     assert tc._pago_detail_lines([uneven]) == ["7,5 h · $26.000", "0,5 h extra $1.700"]
 
 
+def test_cosecha_detail_keeps_each_cuartel_price():
+    """Two cuartels on one day must not collapse into a fake average rate."""
+    lines = tc._cosecha_detail_lines(25, 25000, 15000, {"750": 20, "2000": 5})
+    assert lines == ["piso $15.000", "20 × $750", "5 × $2.000"]
+
+
 def _amount(text):
     if text.strip() in ("", "-"):
         return None

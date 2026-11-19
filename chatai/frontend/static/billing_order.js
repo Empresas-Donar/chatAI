@@ -15,6 +15,15 @@ function cosechaLineas(row) {
   const piso = Number(row.piso) || 0;
   const lines = [];
   if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  const precios = row.precios || {};
+  const prices = Object.keys(precios)
+    .map(price => ({ price: Number(price), qty: Number(precios[price]) || 0 }))
+    .filter(item => item.qty && item.price)
+    .sort((a, b) => a.price - b.price);
+  if (prices.length) {
+    prices.forEach(item => lines.push(`${item.qty} × ${fmtCLP.format(item.price)}`));
+    return lines;
+  }
   if (capachos) {
     const unit = trato % capachos === 0 ? trato / capachos : null;
     lines.push(unit != null
@@ -131,6 +140,7 @@ async function generate() {
       capachos: person.capachos,
       trato: person.trato,
       piso: person.piso,
+      precios: person.precios || {},
       cuarteles: (person.cuarteles || []).join(', '),
     }));
     const rows = (data.rows || []).concat(cosechaRows);
