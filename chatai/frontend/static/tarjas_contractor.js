@@ -26,6 +26,15 @@ function cosechaLineas(person) {
   const piso = Number(person.piso) || 0;
   const lines = [];
   if (piso) lines.push(`piso ${fmtCLP.format(piso)}`);
+  const precios = person.precios || {};
+  const prices = Object.keys(precios)
+    .map(price => ({ price: Number(price), qty: Number(precios[price]) || 0 }))
+    .filter(row => row.qty && row.price)
+    .sort((a, b) => a.price - b.price);
+  if (prices.length) {
+    prices.forEach(row => lines.push(`${row.qty} × ${fmtCLP.format(row.price)}`));
+    return lines;
+  }
   if (capachos) {
     const unit = trato % capachos === 0 ? trato / capachos : null;
     lines.push(unit != null

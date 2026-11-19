@@ -4415,7 +4415,10 @@ def _build_resumen_persona_html(
                         "fecha": person["fecha"],
                         "total": person["a_pagar"],
                         "cosecha_lineas": _cosecha_detail_lines(
-                            person.get("capachos"), person.get("trato"), person.get("piso")
+                            person.get("capachos"),
+                            person.get("trato"),
+                            person.get("piso"),
+                            person.get("precios"),
                         ),
                     }
                 )
@@ -4947,7 +4950,10 @@ def _build_contratista_html(
                     "total": person["a_pagar"],
                     "horas": 0,
                     "cosecha_lineas": _cosecha_detail_lines(
-                        person.get("capachos"), person.get("trato"), person.get("piso")
+                        person.get("capachos"),
+                        person.get("trato"),
+                        person.get("piso"),
+                        person.get("precios"),
                     ),
                 }
             )

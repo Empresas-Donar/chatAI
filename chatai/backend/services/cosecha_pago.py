@@ -612,6 +612,11 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
         # A day with only the floor is still cosecha a trato. The label
         # identifies it; the amount is the floor, unchanged.
         solo_piso = day["trato"] == 0 and day["piso"] > 0
+        precios: dict[str, int] = {}
+        for part in day["por_cuartel"].values():
+            for price, count in part["precios"].items():
+                key = str(price)
+                precios[key] = precios.get(key, 0) + int(count)
         personas_dias.append(
             {
                 "fecha": day["fecha"],
@@ -621,6 +626,7 @@ def _payable_source(cur, fecha_inicio, fecha_termino, contratista, source: str) 
                 "trato": day["trato"],
                 "piso": day["piso"],
                 "capachos": day["capachos"],
+                "precios": precios,
                 "a_pagar": pago,
                 "cuarteles": sorted(day["cuarteles"]),
                 "es_cosecha": True,
