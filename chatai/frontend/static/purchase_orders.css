@@ -302,3 +302,5 @@
 .nc-clear:hover { color: #1e293b; }
 .nc-adjusted { background: #fefce8 !important; }
 .nc-adjusted .nc-val { font-weight: 700; color: #92400e; }
+.oc-table td.tdt-con-descuento { background: rgba(27, 94, 32, 0.06); }
+.tdt-star { margin-left: 2px; color: #7d9a84; font-weight: 600; font-size: 12px; }

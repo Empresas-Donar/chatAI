@@ -15,6 +15,15 @@ function esc(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function moneyCell(amount, flagged) {
+  const n = Number(amount || 0);
+  const marked = flagged && n;
+  const star = marked
+    ? '<span class="tdt-star" title="Este monto tiene el 10% de descuento">*</span>'
+    : '';
+  return `<td class="num${marked ? ' tdt-con-descuento' : ''}">${fmtCLP.format(n)}${star}</td>`;
+}
+
 let _lastParams = null;
 
 // Empresa de la barra global es el campo (nombre_campo). El enlace
@@ -154,7 +163,7 @@ function renderPivotTable(data) {
 
   const headCols = data.columns.map(c => `<th class="num">${esc(c)}</th>`).join('');
   const bodyRows = data.dates.map(d => {
-    const cells = data.columns.map(c => `<td class="num">${fmtCLP.format(data.matrix[d][c] ?? 0)}</td>`).join('');
+    const cells = data.columns.map(c => moneyCell(data.matrix[d][c], data.descuento?.[d]?.[c])).join('');
     return `<tr>
       <td>${fmtDate(d)}</td>${cells}
       <td class="num"><strong>${fmtCLP.format(data.date_totals[d] ?? 0)}</strong></td>
@@ -218,7 +227,7 @@ function renderDocument(data) {
       <td>${esc(r.labor ?? '')}</td>
       <td class="num">${r.precio_hora != null ? fmtCLP.format(r.precio_hora) : '—'}</td>
       <td class="num">${r.horas != null ? fmtNum2.format(r.horas) : '—'}</td>
-      <td class="num">${r.total != null ? fmtCLP.format(r.total) : '—'}</td>
+      ${r.total != null ? moneyCell(r.total, r.con_descuento) : '<td class="num">—</td>'}
     </tr>`).join('');
 
     const section = document.createElement('div');

@@ -1777,7 +1777,7 @@ def _general_tractorista_where(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     maq_col = _resolve_maquina_column(cur)
-    if maq_col and maquina:
+    if maq_col and isinstance(maquina, str) and maquina.strip():
         frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
         filters.append(frag.as_string(cur.connection))
         params.append(maquina)
@@ -1810,7 +1810,7 @@ def _resumen_persona_tractorista_where(
         filters.append("nombre_campo = %s")
         params.append(_empresa_to_campo(empresa))
     maq_col = _resolve_maquina_column(cur)
-    if maq_col and maquina:
+    if maq_col and isinstance(maquina, str) and maquina.strip():
         frag = psql.SQL("{} = %s").format(psql.Identifier(maq_col))
         filters.append(frag.as_string(cur.connection))
         params.append(maquina)
@@ -1829,7 +1829,7 @@ def _tractorista_neto_source(where: str) -> str:
         {_CUMPLE_MAQUINA_SQL}
       ),
       base AS (
-        SELECT fecha, contratista, trabajador, labor,
+        SELECT fecha, contratista, trabajador, labor, cuartel_cc,
                total_tractor, maquina, horas_trabajadas, horas_extras
         FROM appsheet.tarjas_pagos
         {where}
@@ -1851,6 +1851,7 @@ def _tractorista_neto_source(where: str) -> str:
         b.contratista,
         b.trabajador,
         b.labor,
+        b.cuartel_cc,
         b.maquina,
         b.horas_trabajadas,
         b.horas_extras,
@@ -7061,7 +7062,10 @@ async def get_tarjas_tractorista_export_preview(
                     "order_line/product_id"             AS product_id,
                     "order_line/product_qty"            AS qty,
                     "order_line/analytic_distribution"  AS analytic,
-                    "order_line/price_unit"             AS price_unit
+                    "order_line/price_unit"             AS price_unit,
+                    fecha::text                         AS fecha,
+                    "Lineas del pedido/Código de Distribución Analítica/Código"::text AS cc,
+                    "Lineas del pedido/Producto/Nombre" AS labor
                 FROM appsheet.tarjas_reporte_odoo_tractorista
                 WHERE "Vendedor"   = %s
                   AND nombre_campo = %s
@@ -7071,6 +7075,24 @@ async def get_tarjas_tractorista_export_preview(
                 (contratista, campo, fecha_inicio, fecha_termino),
             )
             all_rows = cur.fetchall()
+            net_where = (
+                "WHERE fecha::date BETWEEN %s AND %s AND "
+                + _TRACTORISTA_PAGOS_SQL
+                + " AND contratista = %s AND nombre_campo = %s"
+            )
+            source = _tractorista_neto_source(net_where)
+            cur.execute(
+                f"""
+                SELECT fecha::date::text, cuartel_cc::text, labor, SUM(monto)
+                FROM {source} n
+                GROUP BY fecha::date, cuartel_cc, labor
+                """,
+                (fecha_inicio, fecha_termino, contratista, campo),
+            )
+            net_by_line = {
+                (fecha, cc, labor): float(monto or 0)
+                for fecha, cc, labor, monto in cur.fetchall()
+            }
     finally:
         conn.close()
 
@@ -7088,15 +7110,21 @@ async def get_tarjas_tractorista_export_preview(
         product_id_tractorista = "ARRIET-002"
 
     ok_rows, excl_rows = [], []
-    for _product_id, qty, analytic, price_unit in all_rows:
+    for _product_id, qty, analytic, price_unit, fecha, cc, labor in all_rows:
         qty_f = float(qty or 0)
-        price_f = float(price_unit or 0)
+        net = net_by_line.get((str(fecha), str(cc) if cc is not None else None, labor))
+        if net is not None and qty_f:
+            price_f = round(net / qty_f, 2)
+            total = net
+        else:
+            price_f = float(price_unit or 0)
+            total = round(qty_f * price_f, 0)
         row = {
             "product_id": product_id_tractorista,
             "qty": qty_f,
             "analytic_distribution": analytic or "–",
             "price_unit": price_f,
-            "total": round(qty_f * price_f, 0),
+            "total": total,
         }
         missing_cc = not analytic or '"": ' in (analytic or "")
         if missing_cc:
@@ -7168,6 +7196,28 @@ async def get_tarjas_tractorista_preview(
                 (contratista, campo, fecha_inicio, fecha_termino),
             )
             rows = cur.fetchall()
+            net_where = (
+                "WHERE fecha::date BETWEEN %s AND %s AND "
+                + _TRACTORISTA_PAGOS_SQL
+                + " AND contratista = %s AND nombre_campo = %s"
+            )
+            source = _tractorista_neto_source(net_where)
+            cur.execute(
+                f"""
+                SELECT fecha::date::text,
+                       cuartel_cc::text,
+                       labor,
+                       SUM(monto) AS monto,
+                       BOOL_OR(con_descuento) AS con_descuento
+                FROM {source} n
+                GROUP BY fecha::date, cuartel_cc, labor
+                """,
+                (fecha_inicio, fecha_termino, contratista, campo),
+            )
+            net_by_line = {
+                (fecha, cc, labor): (float(monto or 0), bool(flag))
+                for fecha, cc, labor, monto, flag in cur.fetchall()
+            }
     finally:
         conn.close()
 
@@ -7176,8 +7226,15 @@ async def get_tarjas_tractorista_preview(
     total_monto = 0.0
     for r in rows:
         horas = float(r[5]) if r[5] is not None else None
-        precio = float(r[6]) if r[6] is not None else None
-        total = (float(r[5] or 0) * float(r[6] or 0)) if r[6] is not None else None
+        net = net_by_line.get((str(r[0]), str(r[1]) if r[1] is not None else None, r[4]))
+        if net is not None:
+            total = net[0]
+            flagged = net[1]
+            precio = round(total / horas, 2) if horas else None
+        else:
+            precio = float(r[6]) if r[6] is not None else None
+            total = (float(r[5] or 0) * float(r[6] or 0)) if r[6] is not None else None
+            flagged = False
         total_horas += float(r[5] or 0)
         total_monto += float(total or 0)
         mapped.append(
@@ -7189,6 +7246,7 @@ async def get_tarjas_tractorista_preview(
                 "horas": horas,
                 "precio_hora": precio,
                 "total": total,
+                "con_descuento": flagged and bool(total),
                 "product_id": r[7],
             }
         )
@@ -7254,6 +7312,31 @@ async def export_tarjas_tractorista_odoo(
                 (contratista, campo, fecha_inicio, fecha_termino),
             )
             rows = cur.fetchall()
+            net_where = (
+                "WHERE fecha::date BETWEEN %s AND %s AND "
+                + _TRACTORISTA_PAGOS_SQL
+                + " AND contratista = %s AND nombre_campo = %s"
+            )
+            source = _tractorista_neto_source(net_where)
+            cur.execute(
+                f"""
+                SELECT
+                    (SELECT jsonb_object_agg(k, ROUND(v::numeric, 2))
+                     FROM jsonb_each_text(cc.valor_odoo) AS t(k, v)
+                     WHERE v IS NOT NULL AND v != '')::text AS analytic,
+                    SUM(n.monto) AS net
+                FROM {source} n
+                JOIN appsheet.tarjas_cc cc
+                  ON cc.id_cc::text = n.cuartel_cc::text
+                GROUP BY 1
+                """,
+                (fecha_inicio, fecha_termino, contratista, campo),
+            )
+            net_by_analytic = {
+                analytic: float(net or 0)
+                for analytic, net in cur.fetchall()
+                if analytic
+            }
     finally:
         conn.close()
 
@@ -7271,13 +7354,18 @@ async def export_tarjas_tractorista_odoo(
     ws.append(headers)
 
     for i, (partner_id, qty, analytic, price) in enumerate(rows):
+        qty_f = float(qty) if qty is not None else None
+        price_f = float(price) if price is not None else None
+        net = net_by_analytic.get(analytic)
+        if net is not None and qty_f:
+            price_f = round(net / qty_f, 2)
         ws.append(
             [
                 partner_id if i == 0 else None,
                 product_id_tractorista,
-                float(qty) if qty is not None else None,
+                qty_f,
                 analytic,
-                float(price) if price is not None else None,
+                price_f,
             ]
         )
 
@@ -7309,10 +7397,18 @@ def _fetch_tractorista_pivot_rows(
     the on-screen JSON preview, and the PDF pivot section, so the three never
     drift apart. `cc` optionally scopes it to a single centro de costo, to
     match a CC-filtered PDF."""
-    cc_filter = "AND cuartel_cc = %s" if cc else ""
-    params = [contratista, campo, fecha_inicio, fecha_termino]
+    filters = [
+        "fecha::date BETWEEN %s AND %s",
+        _TRACTORISTA_PAGOS_SQL,
+        "contratista = %s",
+        "nombre_campo = %s",
+    ]
+    params: list = [fecha_inicio, fecha_termino, contratista, campo]
     if cc:
+        filters.append("cuartel_cc = %s")
         params.append(cc)
+    where = "WHERE " + " AND ".join(filters)
+    source = _tractorista_neto_source(where)
     with conn.cursor() as cur:
         cur.execute(
             f"""
@@ -7320,13 +7416,9 @@ def _fetch_tractorista_pivot_rows(
                 fecha::date::text AS fecha,
                 trabajador,
                 labor,
-                SUM(total_tractor) AS monto
-            FROM appsheet.tarjas_pagos
-            WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
-              AND contratista  = %s
-              AND nombre_campo = %s
-              AND fecha::date BETWEEN %s AND %s
-              {cc_filter}
+                SUM(monto) AS monto,
+                BOOL_OR(con_descuento) AS con_descuento
+            FROM {source} n
             GROUP BY fecha::date, trabajador, labor
             ORDER BY fecha::date, trabajador, labor
             """,
@@ -7346,8 +7438,13 @@ def _build_tractorista_pivot(rows: list[dict]) -> dict:
     dates = sorted({r["fecha"] for r in rows})
     columns = sorted({_col(r) for r in rows})
     matrix = {d: {c: 0.0 for c in columns} for d in dates}
+    descuento = {d: {c: False for c in columns} for d in dates}
     for r in rows:
-        matrix[r["fecha"]][_col(r)] += float(r["monto"] or 0)
+        col = _col(r)
+        amount = float(r["monto"] or 0)
+        matrix[r["fecha"]][col] += amount
+        if r.get("con_descuento") and amount:
+            descuento[r["fecha"]][col] = True
     col_totals = {c: sum(matrix[d][c] for d in dates) for c in columns}
     date_totals = {d: sum(matrix[d].values()) for d in dates}
     grand_total = sum(col_totals.values())
@@ -7355,6 +7452,7 @@ def _build_tractorista_pivot(rows: list[dict]) -> dict:
         "dates": dates,
         "columns": columns,
         "matrix": matrix,
+        "descuento": descuento,
         "col_totals": col_totals,
         "date_totals": date_totals,
         "grand_total": grand_total,
@@ -7440,8 +7538,10 @@ async def pivot_tarjas_tractorista_excel(
         fecha_fmt = datetime.date.fromisoformat(fecha).strftime("%d/%m/%Y")
         ws.cell(row_idx, 1, fecha_fmt)
         for col_idx, col_name in enumerate(pivot["columns"], start=2):
-            cell = ws.cell(row_idx, col_idx, int(pivot["matrix"][fecha][col_name]))
-            cell.number_format = '$#,##0'
+            value = int(pivot["matrix"][fecha][col_name])
+            cell = ws.cell(row_idx, col_idx, value)
+            marked = bool(pivot["descuento"][fecha][col_name]) and value
+            cell.number_format = '$#,##0"*"' if marked else '$#,##0'
             cell.alignment = Alignment(horizontal="right")
         total_cell = ws.cell(row_idx, len(all_columns) + 1, int(pivot["date_totals"][fecha]))
         total_cell.number_format = '$#,##0'
@@ -7487,6 +7587,15 @@ async def pivot_tarjas_tractorista_excel(
 _OPERATOR_PIVOT_FECHA_PCT = 12.0
 _OPERATOR_PIVOT_TOTAL_PCT = 12.0
 _OPERATOR_PIVOT_MIN_COL_PCT = 12.0
+
+
+def _tractorista_oc_money_html(fmt, amount, flagged, style: str) -> str:
+    """One purchase-order amount. The star sits on the net that already lost 10%."""
+    value = float(amount or 0)
+    marked = bool(flagged) and value
+    tint = "background-color:#f4faf5;" if marked else ""
+    star = "*" if marked else ""
+    return f'<td class="num" style="{style};{tint}">{fmt(value)}{star}</td>'
 
 
 def _operator_pivot_header(column: str) -> str:
@@ -7540,7 +7649,9 @@ def _tractorista_operator_pivot_html(pivot: dict, fmt) -> str:
         for d in pivot["dates"]:
             d_fmt = datetime.date.fromisoformat(d).strftime("%d/%m/%Y")
             cells = "".join(
-                f'<td class="num" style="{widths["op"]}">{fmt(pivot["matrix"][d][c])}</td>'
+                _tractorista_oc_money_html(
+                    fmt, pivot["matrix"][d][c], pivot["descuento"][d][c], widths["op"]
+                )
                 for c in columns
             )
             body += (
@@ -7588,10 +7699,18 @@ async def download_tarjas_tractorista_pdf(
     cc_name = None  # set inside the DB block
     try:
         with conn.cursor() as cur:
-            cc_filter = "AND cuartel_cc = %s" if cc else ""
-            params = [contratista, campo, fecha_inicio, fecha_termino]
+            filters = [
+                "fecha::date BETWEEN %s AND %s",
+                _TRACTORISTA_PAGOS_SQL,
+                "contratista = %s",
+                "nombre_campo = %s",
+            ]
+            params: list = [fecha_inicio, fecha_termino, contratista, campo]
             if cc:
+                filters.append("cuartel_cc = %s")
                 params.append(cc)
+            where = "WHERE " + " AND ".join(filters)
+            source = _tractorista_neto_source(where)
             cur.execute(
                 f"""
                 SELECT
@@ -7600,13 +7719,9 @@ async def download_tarjas_tractorista_pdf(
                     labor,
                     maquina,
                     SUM(horas_trabajadas)    AS horas,
-                    SUM(total_tractor)       AS monto
-                FROM appsheet.tarjas_pagos
-                WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
-                  AND contratista   = %s
-                  AND nombre_campo  = %s
-                  AND fecha::date BETWEEN %s AND %s
-                  {cc_filter}
+                    SUM(monto)               AS monto,
+                    BOOL_OR(con_descuento)   AS con_descuento
+                FROM {source} n
                 GROUP BY fecha::date, trabajador, labor, maquina, horas_trabajadas
                 ORDER BY fecha::date, trabajador, labor, horas_trabajadas DESC
                 """,
@@ -7645,11 +7760,11 @@ async def download_tarjas_tractorista_pdf(
             rows_html += (
                 f'<tr>'
                 f'<td style="width:10%">{"<b>" + fecha_fmt + "</b>" if i == 0 else ""}</td>'
-                f'<td style="width:22%">{r["trabajador"] or ""}</td>'
-                f'<td style="width:20%">{r["labor"] or ""}</td>'
+                f'<td style="width:22%">{_escape_html(r["trabajador"] or "")}</td>'
+                f'<td style="width:20%">{_escape_html(r["labor"] or "")}</td>'
                 f'<td class="num" style="width:10%">{fmt_horas(r["horas"])}</td>'
-                f'<td style="width:20%">{r["maquina"] or "–"}</td>'
-                f'<td class="num" style="width:18%">{fmt(monto)}</td>'
+                f'<td style="width:20%">{_escape_html(r["maquina"] or "–")}</td>'
+                f'{_tractorista_oc_money_html(fmt, monto, r.get("con_descuento"), "width:18%")}'
                 f'</tr>'
             )
 
@@ -7705,6 +7820,7 @@ async def download_tarjas_tractorista_pdf(
           {cc_line}
           <div class="sub">{fi_fmt} al {ft_fmt}</div>
           <div class="sub">{_escape_html(_CUMPLE_NOTA)}</div>
+          <div class="sub">El * marca el monto que ya tiene el 10% de descuento. Si no hay monto, no se marca.</div>
         </td>
       </tr>
     </table>
