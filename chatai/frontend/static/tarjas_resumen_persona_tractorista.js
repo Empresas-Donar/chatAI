@@ -125,11 +125,13 @@ function renderPivot(rows) {
         maquina: r.maquina,
         horas_extras: r.horas_extras,
         byDate: {},
+        byDesc: {},
         total: 0,
       });
     }
     const entry = rowMap.get(rowKey);
     entry.byDate[r.fecha] = (entry.byDate[r.fecha] || 0) + Number(r.total_tractor || 0);
+    if (r.con_descuento) entry.byDesc[r.fecha] = true;
     entry.total += Number(r.total_tractor || 0);
   });
 
@@ -178,17 +180,22 @@ function renderPivot(rows) {
       html += `<td class="cell-tipo">${entry.maquina ? esc(entry.maquina) : '<span class="cell-null">-</span>'}</td>`;
       html += `<td class="cell-tipo">${entry.horas_extras ? esc(entry.horas_extras) : '<span class="cell-null">-</span>'}</td>`;
 
+      let rowMarked = false;
       dates.forEach(d => {
         const val = entry.byDate[d];
+        const marked = entry.byDesc[d] && val > 0;
+        if (marked) rowMarked = true;
         if (val && val > 0) {
           dateTotals[d] += val;
-          html += `<td class="cell-value has-value">${fmtCLP.format(val)}</td>`;
+          const star = marked ? '<span class="tdt-star" title="Este monto tiene el 10% de descuento">*</span>' : '';
+          html += `<td class="cell-value has-value${marked ? ' tdt-con-descuento' : ''}">${fmtCLP.format(val)}${star}</td>`;
         } else {
           html += '<td class="cell-zero">0</td>';
         }
       });
 
-      html += `<td class="cell-total">${fmtCLP.format(entry.total)}</td>`;
+      const totalStar = rowMarked && entry.total ? '<span class="tdt-star" title="Este monto tiene el 10% de descuento">*</span>' : '';
+      html += `<td class="cell-total${totalStar ? ' tdt-con-descuento' : ''}">${fmtCLP.format(entry.total)}${totalStar}</td>`;
       html += '</tr>';
     });
   });
@@ -235,6 +242,7 @@ function printWithHeader(title, filters) {
     + '<div class="ph-title-block">'
     + '<h2>' + esc(title) + '</h2>'
     + '<p class="ph-subtitle">Generado el ' + now + '</p>'
+    + '<p class="ph-subtitle">Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%. El * marca el monto que ya tiene el 10%.</p>'
     + '</div></div>'
     + '<div class="ph-filters">' + chips + '</div>';
   const el = document.getElementById('print-header');

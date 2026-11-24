@@ -8,7 +8,7 @@
   <div class="page-header tr-head">
     <div>
       <h1>Tractores</h1>
-      <p>La ficha del tractor se guarda: máquina, chasis, año, fecha de partida y campo. La del conductor también.</p>
+      <p>La ficha del tractor se guarda: máquina, chasis, año, fecha de partida y campo. La del conductor también. Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%.</p>
     </div>
     <button type="button" class="btn btn-primary" id="tr-add" disabled>Agregar</button>
   </div>
@@ -69,9 +69,15 @@
           <th>Año</th>
           <th>Fecha partida</th>
           <th>Antigüedad</th>
-          <th>Cumple</th>
+          <th class="tr-cumple-head" title="El tractor tiene más de 5 años y por eso se descuenta el 10%.">
+            Cumple
+            <span>Más de 5 años, se descuenta el 10%</span>
+          </th>
           <th>Última tarja</th>
-          <th>Estado</th>
+          <th class="tr-estado-head" title="En uso: la última tarja tiene 14 días o menos. Quieto: lleva más de 14 días sin tarja.">
+            Estado
+            <span>En uso: últimos 14 días. Quieto: más de 14 sin tarja</span>
+          </th>
           <th></th>
         </tr>
       </thead>
@@ -188,6 +194,7 @@
           <option value="SI">Sí</option>
           <option value="NO">No</option>
         </select>
+        <p class="tr-hint">Sí cuando el tractor tiene más de 5 años. En ese caso se descuenta el 10%.</p>
       </div>
       <div class="tr-field">
         <label>Campo</label>
@@ -270,7 +277,7 @@
         <label for="cd-costo-75">Jornada de 7,5 h</label>
         <input id="cd-costo-75" inputmode="numeric" autocomplete="off" />
       </div>
-      <p class="tr-hint">Si dejas el monto de la tarifa, el precio sigue la licencia. Si lo cambias, queda fijo para este conductor.</p>
+      <p class="tr-hint">Si dejas el monto de la tarifa, el precio sigue la licencia. Si lo cambias, queda fijo para este conductor. Si el tractor cumple (más de 5 años), se descuenta el 10%.</p>
       <p class="err-text" id="cd-error" hidden></p>
     </div>
     <div class="tr-panel-actions">
@@ -310,6 +317,15 @@
 .tr-pill--en_uso { background: #e5f4e8; color: #1b5e20; }
 .tr-pill--quieto { background: #fff4d6; color: #8a5a00; }
 .tr-pill--sin_tarjas { background: #eeeae4; color: #6b6258; }
+#tr-card .tr-cumple-head,
+#tr-card .tr-estado-head { white-space: normal; min-width: 9.5rem; line-height: 1.2; }
+#tr-card .tr-cumple-head span,
+#tr-card .tr-estado-head span {
+  display: block; margin-top: 3px; font-size: 10px; font-weight: 500;
+  letter-spacing: 0; color: #f3e2b0;
+}
+.tr-estado { min-width: 11rem; }
+.tr-estado .tr-sub { display: block; margin-top: 4px; max-width: 16rem; white-space: normal; }
 .tr-cumple--SI { color: #1b5e20; font-weight: 700; }
 .tr-cumple--NO { color: var(--danger); font-weight: 700; }
 .tr-overlay {
@@ -384,5 +400,5 @@
   display: flex; gap: 10px; padding: 12px 18px 18px; border-top: 1px solid var(--border);
 }
 </style>
-<script src="/static/tractores.js?v={{ static_v }}"></script>
+<script src="/static/tractores.js?v={{ static_v }}&e=2"></script>
 {% endblock %}

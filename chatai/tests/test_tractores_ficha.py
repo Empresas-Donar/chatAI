@@ -87,6 +87,85 @@ def test_clean_requires_a_campo():
     assert bad.value.status_code == 422
 
 
+def test_cumple_note_explains_the_five_year_discount():
+    base = {
+        "maquina": "VPYY10-Same 65",
+        "modelo": "Same Frutetto 65",
+        "anio": "01/01/2018",
+        "anio_modelo": 2018,
+        "fecha_partida": datetime.date(2018, 1, 1),
+        "color": "ROJO",
+        "patente": "VPYY10",
+        "chasis": "ZKDCK702W0RS10415",
+        "tractorista": "RD",
+        "campo": "1",
+        "habilitado": True,
+    }
+    conductores = [{"maquina": "VPYY10-Same 65", "trabajador": "Felipe Cordova"}]
+    esquemas = [{
+        "trabajador": "Felipe Cordova",
+        "desde": datetime.date(2026, 1, 1),
+        "hasta": None,
+        "esquema": "lun_vie",
+        "con_operador": True,
+        "carnet": True,
+    }]
+
+    def avisos(cumple):
+        rows = build_tractores(
+            maquinas=[{**base, "cumple": cumple}],
+            uso_rows=[],
+            ultimo_rows=[],
+            campos=[{"id_campo": 1, "nombre": "TALAGANTE"}],
+            conductores=conductores,
+            esquemas=esquemas,
+            today=_TODAY,
+        )
+        return rows[0]["avisos"]
+
+    assert avisos("SI") == [
+        "Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%."
+    ]
+    assert avisos("NO") == [
+        "No cumple: el tractor tiene 5 años o menos y no se descuenta el 10%."
+    ]
+
+
+def test_estado_says_why_it_is_en_uso_or_quieto():
+    def one(hasta):
+        rows = build_tractores(
+            maquinas=[{
+                "maquina": "PTFK72-Same 3 75",
+                "patente": "PTFK72",
+                "campo": "3",
+                "habilitado": True,
+                "cumple": "SI",
+            }],
+            uso_rows=[{
+                "maquina": "PTFK72-Same 3 75",
+                "hasta": hasta,
+                "desde": hasta,
+                "registros": 1,
+            }],
+            ultimo_rows=[],
+            campos=[{"id_campo": 3, "nombre": "ZÚÑIGA"}],
+            conductores=[],
+            esquemas=[],
+            today=_TODAY,
+        )
+        return rows[0]
+
+    en_uso = one(datetime.date(2026, 11, 16))
+    assert en_uso["estado"] == "en_uso"
+    assert en_uso["estado_motivo"].startswith("Hace 1 día")
+    assert "14 días o menos" in en_uso["estado_motivo"]
+
+    quieto = one(datetime.date(2026, 10, 1))
+    assert quieto["estado"] == "quieto"
+    assert quieto["estado_motivo"].startswith("Hace 47 días")
+    assert "más de 14 días" in quieto["estado_motivo"]
+
+
 def test_age_uses_fecha_partida_when_the_model_year_differs():
     rows = build_tractores(
         maquinas=[{

@@ -26,7 +26,7 @@
 {% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/tarjas_resumen_persona.css?v={{ static_v }}&f=1" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 {% endblock %}
 
@@ -36,7 +36,7 @@
   <div class="page-header">
     <div>
       <h1>Detalle trabajador tractorista</h1>
-      <p>Totales diarios por trabajador — solo tractoristas</p>
+      <p>Totales diarios por trabajador — solo tractoristas. Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%. El * marca el monto que ya tiene el 10%.</p>
     </div>
   </div>
 
@@ -66,5 +66,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_resumen_persona_tractorista.js?v={{ static_v }}&c=1"></script>
+<script src="/static/tarjas_resumen_persona_tractorista.js?v={{ static_v }}&c=2"></script>
 {% endblock %}

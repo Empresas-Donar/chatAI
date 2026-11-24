@@ -187,6 +187,9 @@
 }
 .trp-pivot tfoot .cell-total { background: #fde68a; }
 
+.trp-pivot td.tdt-con-descuento { background: rgba(27, 94, 32, 0.06); }
+.tdt-star { margin-left: 2px; color: #7d9a84; font-weight: 600; font-size: 12px; }
+
 /* Download buttons */
 .filter-actions {
   display: flex;

@@ -9,3 +9,5 @@
   border-top: 2px solid #ea8c1e;
 }
 .tg-table tfoot td.num { text-align: right; }
+.tg-table td.tdt-con-descuento { background: rgba(27, 94, 32, 0.06); }
+.tdt-star { margin-left: 2px; color: #7d9a84; font-weight: 600; font-size: 12px; }

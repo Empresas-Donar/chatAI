@@ -114,7 +114,11 @@ def test_152_august_range_returns_pending_rows(conn):
             (FECHA_INICIO, FECHA_TERMINO),
         )
         expected_sum, expected_n = cur.fetchone()
-    assert float(data["total"]) == float(expected_sum)
+        where, params = tc._detalle_tractorista_where(FECHA_INICIO, FECHA_TERMINO)
+        rows = tc._fetch_detalle_tractorista_rows(cur, where, params)
+    neto = sum(float(r["monto"] or 0) for r in rows)
+    assert float(data["total"]) == neto
+    assert neto <= float(expected_sum) + 0.01
     assert int(data["jornadas"]) == int(expected_n)
 
 

@@ -444,10 +444,14 @@ def _attach(group: dict, conductores: list[dict], esquemas: list[dict], today: d
         if persona["aviso"] and persona["aviso"] not in avisos:
             avisos.append(persona["aviso"])
     cumple = (group.get("cumple") or "").upper()
-    if cumple == "NO" and any(row["carnet"] for row in personas):
-        avisos.append("Este tractor no cumple. Igual, si el conductor tiene carnet, la jornada se cobra con carnet.")
-    if cumple == "SI" and any(row["licencia"] == "Sin carnet" for row in personas):
-        avisos.append("Este tractor cumple, pero hay un conductor sin carnet. Su jornada se cobra sin carnet.")
+    if cumple == "SI":
+        avisos.append(
+            "Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%."
+        )
+    elif cumple == "NO":
+        avisos.append(
+            "No cumple: el tractor tiene 5 años o menos y no se descuenta el 10%."
+        )
     return {"conductores": personas, "avisos": avisos}
 
 
@@ -524,10 +528,21 @@ def build_tractores(
         hasta = found.get("fecha") or found.get("hasta")
         if hasta is None:
             estado, estado_label = "sin_tarjas", "Sin uso"
-        elif hasta >= limite:
-            estado, estado_label = "en_uso", "En uso"
+            estado_motivo = "Nunca tuvo una tarja"
         else:
-            estado, estado_label = "quieto", "Quieto"
+            dias = (today - hasta).days
+            if dias == 0:
+                cuando = "Tarja de hoy"
+            elif dias == 1:
+                cuando = "Hace 1 día"
+            else:
+                cuando = f"Hace {dias} días"
+            if hasta >= limite:
+                estado, estado_label = "en_uso", "En uso"
+                estado_motivo = f"{cuando}. En uso si la última tarja tiene {_EN_USO_DIAS} días o menos"
+            else:
+                estado, estado_label = "quieto", "Quieto"
+                estado_motivo = f"{cuando}. Quieto si lleva más de {_EN_USO_DIAS} días sin tarja"
         extra = _attach(group, conductores, esquemas, today)
         extra.pop("_nombres", None)
         out.append({
@@ -557,6 +572,7 @@ def build_tractores(
             "campo_tarja": found.get("nombre_campo") or None,
             "estado": estado,
             "estado_label": estado_label,
+            "estado_motivo": estado_motivo,
             "en_catalogo": group["en_catalogo"],
             **extra,
         })
