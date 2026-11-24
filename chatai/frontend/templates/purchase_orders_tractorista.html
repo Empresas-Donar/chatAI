@@ -16,7 +16,7 @@
 {% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}" />
+<link rel="stylesheet" href="/static/purchase_orders.css?v={{ static_v }}&f=1" />
 {% endblock %}
 
 {% block body %}
@@ -29,7 +29,7 @@
         Genera la orden de compra semanal por contratista tractorista y campo.
         La cantidad corresponde a las jornadas por labor y CC (<code>total_tractor</code> promedio como precio unitario).
         Diseñado para importar directamente en Odoo como orden de compra.
-        Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%.
+        Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%. El * marca el monto que ya tiene el 10%.
       </p>
     </div>
   </div>
@@ -150,5 +150,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/purchase_orders_tractorista.js?v={{ static_v }}&r=3"></script>
+<script src="/static/purchase_orders_tractorista.js?v={{ static_v }}&r=4"></script>
 {% endblock %}
