@@ -100,6 +100,19 @@ _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 _TRACTORISTA_PAGOS_SQL = "(LOWER(TRIM(tipo_pago)) = 'tractorista')"
 _DETALLE_TRACT_ESTADOS = ("Pendiente", "Aprobado")
+# Cumple on the tractor (more than 5 years) discounts that tarja by 10%.
+_CUMPLE_MAQUINA_SQL = """
+SELECT upper(btrim(maquina)) AS maquina,
+       CASE
+         WHEN bool_or(upper(btrim(cumple)) = 'SI')
+          AND NOT bool_or(upper(btrim(cumple)) = 'NO') THEN 'SI'
+         WHEN bool_or(upper(btrim(cumple)) = 'NO')
+          AND NOT bool_or(upper(btrim(cumple)) = 'SI') THEN 'NO'
+       END AS cumple
+FROM appsheet.tarjas_maquina
+WHERE btrim(coalesce(maquina, '')) <> ''
+GROUP BY 1
+"""
 
 
 def _fmt_clp(v) -> str:
@@ -519,6 +532,16 @@ table.detalle-tract-pivot { margin-top: 12px; }
 table.detalle-tract-pivot th.th-group { background: #1F4E79; color: #ffffff; text-align: center; }
 table.detalle-tract-pivot tfoot td { font-weight: bold; background: #e8eef4; }
 """
+
+# Shown on tractorista screens, PDFs and the purchase order. Cumple is the
+# tractor older than 5 years; that age is why the 10% discount applies.
+_CUMPLE_NOTA = (
+    "Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%."
+)
+
+
+def _cumple_pdf_note() -> str:
+    return f'<p class="pdf-note">{_escape_html(_CUMPLE_NOTA)}</p>'
 
 
 # A Detalle Contratistas day cell is a CLP amount such as $31.700.
@@ -1586,25 +1609,146 @@ def _fetch_detalle_tractorista_filter_options(cur, where: str, params: list) -> 
 
 def _fetch_detalle_tractorista_rows(cur, where: str, params: list) -> list[dict]:
     """Raw (fecha, contratista, trabajador, labor, monto) cells for the
-    Looker nested pivot. Shared by JSON, Excel and PDF (issues #152/#153)."""
+    Looker nested pivot. Shared by JSON, Excel and PDF (issues #152/#153).
+
+    `monto` is what the report shows. When the tractor cumple, that tarja
+    is already minus 10%. A row without máquina takes the tractor of that
+    worker that day, when the day has only one.
+    """
     cur.execute(
         f"""
+        WITH catalogo AS (
+            {_CUMPLE_MAQUINA_SQL}
+        ),
+        base AS (
+            SELECT fecha, contratista, trabajador, labor, estado,
+                   total_tractor, maquina, horas_trabajadas
+            FROM appsheet.tarjas_pagos
+            {where}
+        ),
+        dia AS (
+            SELECT b.fecha::date AS fecha,
+                   b.trabajador,
+                   CASE
+                     WHEN count(DISTINCT upper(btrim(b.maquina)))
+                          FILTER (WHERE btrim(coalesce(b.maquina, '')) <> '') = 1
+                     THEN max(c.cumple)
+                   END AS cumple,
+                   array_agg(DISTINCT btrim(b.maquina))
+                     FILTER (WHERE btrim(coalesce(b.maquina, '')) <> '') AS tractores
+            FROM base b
+            LEFT JOIN catalogo c ON c.maquina = upper(btrim(b.maquina))
+            GROUP BY b.fecha::date, b.trabajador
+        )
         SELECT
-            fecha::date::text AS fecha,
-            contratista,
-            trabajador,
-            labor,
-            COALESCE(SUM(total_tractor), 0) AS monto,
-            MIN(estado) AS estado,
-            COUNT(DISTINCT estado) AS n_estados
-        FROM appsheet.tarjas_pagos
-        {where}
-        GROUP BY fecha::date, contratista, trabajador, labor
-        ORDER BY contratista, fecha::date, trabajador, labor
+            b.fecha::date::text AS fecha,
+            b.contratista,
+            b.trabajador,
+            b.labor,
+            COALESCE(SUM(
+                CASE
+                  WHEN coalesce(
+                         c.cumple,
+                         CASE
+                           WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+                         END
+                       ) = 'SI'
+                  THEN ROUND(COALESCE(b.total_tractor, 0)::numeric * 0.9)
+                  ELSE COALESCE(b.total_tractor, 0)
+                END
+            ), 0) AS monto,
+            COALESCE(SUM(COALESCE(b.total_tractor, 0)), 0) AS monto_bruto,
+            COALESCE(SUM(
+                CASE
+                  WHEN coalesce(
+                         c.cumple,
+                         CASE
+                           WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+                         END
+                       ) = 'SI'
+                  THEN COALESCE(b.total_tractor, 0)
+                  ELSE 0
+                END
+            ), 0) AS monto_base,
+            COALESCE(SUM(
+                CASE
+                  WHEN lower(trim(coalesce(b.labor, ''))) LIKE '%%hora extra%%'
+                  THEN COALESCE(b.horas_trabajadas, 0)
+                  ELSE 0
+                END
+            ), 0) AS horas,
+            BOOL_OR(
+                coalesce(
+                    c.cumple,
+                    CASE
+                      WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+                    END
+                ) = 'SI'
+                AND COALESCE(b.total_tractor, 0) <> 0
+            ) AS con_descuento,
+            BOOL_AND(
+                coalesce(
+                    c.cumple,
+                    CASE
+                      WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+                    END
+                ) = 'SI'
+                OR COALESCE(b.total_tractor, 0) = 0
+            ) AS descuento_total,
+            MIN(b.estado) AS estado,
+            COUNT(DISTINCT b.estado) AS n_estados,
+            COALESCE(
+                array_agg(DISTINCT btrim(b.maquina))
+                  FILTER (WHERE btrim(coalesce(b.maquina, '')) <> ''),
+                max(d.tractores)
+            ) AS tractores
+        FROM base b
+        LEFT JOIN catalogo c ON c.maquina = upper(btrim(b.maquina))
+        LEFT JOIN dia d
+          ON d.fecha = b.fecha::date
+         AND d.trabajador IS NOT DISTINCT FROM b.trabajador
+        GROUP BY b.fecha::date, b.contratista, b.trabajador, b.labor
+        ORDER BY b.contratista, b.fecha::date, b.trabajador, b.labor
         """,
         params,
     )
-    return _rows_to_dicts(cur)
+    rows = _rows_to_dicts(cur)
+    _stamp_detalle_carnet(cur, rows)
+    return rows
+
+
+def _stamp_detalle_carnet(cur, rows: list[dict]) -> None:
+    """Carnet vigente that day. No ficha is charged as con carnet."""
+    cur.execute(
+        """
+        SELECT trabajador, desde, hasta, carnet
+        FROM appsheet.tarjas_esquema_tractorista
+        """
+    )
+    esquemas = cur.fetchall()
+    for row in rows:
+        day = datetime.date.fromisoformat(row["fecha"]) if row.get("fecha") else None
+        name = row.get("trabajador") or ""
+        hits = [
+            item for item in esquemas
+            if item[0] == name and day is not None
+            and item[1] <= day and (item[2] is None or item[2] >= day)
+        ]
+        if not hits:
+            row["carnet"] = True
+            continue
+        vigente = max(hits, key=lambda item: item[1])
+        row["carnet"] = bool(vigente[3])
+
+
+def _carnet_etiqueta(flags: set[bool]) -> str:
+    if flags == {True}:
+        return "Con carnet"
+    if flags == {False}:
+        return "Sin carnet"
+    if True in flags and False in flags:
+        return "Carnet según el día"
+    return ""
 
 
 def _general_tractorista_where(
@@ -1673,16 +1817,82 @@ def _resumen_persona_tractorista_where(
     return "WHERE " + " AND ".join(filters), params
 
 
+def _tractorista_neto_source(where: str) -> str:
+    """Tarjas in `where`, with the 10% already off when the tractor cumple.
+
+    A row without máquina takes the tractor of that worker that day, when
+    the day has only one. Same rule as Detalle tractorista.
+    """
+    return f"""
+    (
+      WITH catalogo AS (
+        {_CUMPLE_MAQUINA_SQL}
+      ),
+      base AS (
+        SELECT fecha, contratista, trabajador, labor,
+               total_tractor, maquina, horas_trabajadas, horas_extras
+        FROM appsheet.tarjas_pagos
+        {where}
+      ),
+      dia AS (
+        SELECT b.fecha::date AS fecha,
+               b.trabajador,
+               CASE
+                 WHEN count(DISTINCT upper(btrim(b.maquina)))
+                      FILTER (WHERE btrim(coalesce(b.maquina, '')) <> '') = 1
+                 THEN max(c.cumple)
+               END AS cumple
+        FROM base b
+        LEFT JOIN catalogo c ON c.maquina = upper(btrim(b.maquina))
+        GROUP BY b.fecha::date, b.trabajador
+      )
+      SELECT
+        b.fecha,
+        b.contratista,
+        b.trabajador,
+        b.labor,
+        b.maquina,
+        b.horas_trabajadas,
+        b.horas_extras,
+        (
+          coalesce(
+            c.cumple,
+            CASE
+              WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+            END
+          ) = 'SI'
+          AND COALESCE(b.total_tractor, 0) <> 0
+        ) AS con_descuento,
+        CASE
+          WHEN coalesce(
+                 c.cumple,
+                 CASE
+                   WHEN btrim(coalesce(b.maquina, '')) = '' THEN d.cumple
+                 END
+               ) = 'SI'
+          THEN ROUND(COALESCE(b.total_tractor, 0)::numeric * 0.9)
+          ELSE COALESCE(b.total_tractor, 0)
+        END AS monto
+      FROM base b
+      LEFT JOIN catalogo c ON c.maquina = upper(btrim(b.maquina))
+      LEFT JOIN dia d
+        ON d.fecha = b.fecha::date
+       AND d.trabajador IS NOT DISTINCT FROM b.trabajador
+    )
+    """
+
+
 def _fetch_general_tractorista_tables(cur, where: str, params: list) -> tuple[list, list]:
-    """Labor summary + person ranking. Shared by JSON, Excel and PDF."""
+    """Labor summary + person ranking. Amounts are net of the 10%."""
+    source = _tractorista_neto_source(where)
     cur.execute(
         f"""
         SELECT
             labor,
-            ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
-            COALESCE(SUM(total_tractor), 0)       AS total
-        FROM appsheet.tarjas_pagos
-        {where}
+            ROUND(AVG(monto)::numeric, 2) AS avg_rate,
+            COALESCE(SUM(monto), 0)       AS total,
+            BOOL_OR(con_descuento)        AS con_descuento
+        FROM {source} n
         GROUP BY labor
         ORDER BY total DESC
         """,
@@ -1694,10 +1904,10 @@ def _fetch_general_tractorista_tables(cur, where: str, params: list) -> tuple[li
         SELECT
             trabajador,
             contratista,
-            ROUND(AVG(total_tractor)::numeric, 2) AS avg_rate,
-            COALESCE(SUM(total_tractor), 0)       AS total
-        FROM appsheet.tarjas_pagos
-        {where}
+            ROUND(AVG(monto)::numeric, 2) AS avg_rate,
+            COALESCE(SUM(monto), 0)       AS total,
+            BOOL_OR(con_descuento)        AS con_descuento
+        FROM {source} n
         GROUP BY trabajador, contratista
         ORDER BY total DESC
         """,
@@ -1709,26 +1919,19 @@ def _fetch_general_tractorista_tables(cur, where: str, params: list) -> tuple[li
 def _fetch_resumen_persona_tractorista_rows(cur, where: str, params: list) -> list[dict]:
     """Worker × contratista × máquina × horas × fecha cells. Shared by
     JSON, Excel and PDF (screen / standalone / bulk /reportes)."""
-    conn = cur.connection
-    maq_col = _resolve_maquina_column(cur)
-    maq_select = (
-        psql.SQL(", {col} AS maquina")
-        .format(col=psql.Identifier(maq_col))
-        .as_string(conn)
-        if maq_col
-        else ", NULL AS maquina"
-    )
+    source = _tractorista_neto_source(where)
     cur.execute(
         f"""
-        SELECT trabajador, contratista{maq_select},
+        SELECT trabajador, contratista, maquina,
                CASE
                    WHEN lower(trim(COALESCE(labor, ''))) LIKE '%%hora extra%%'
                    THEN horas_trabajadas
                    ELSE horas_extras
                END AS horas_extras,
                fecha::date::text AS fecha,
-               COALESCE(SUM(total_tractor), 0) AS total_tractor
-        FROM appsheet.tarjas_pagos {where}
+               COALESCE(SUM(monto), 0) AS total_tractor,
+               BOOL_OR(con_descuento) AS con_descuento
+        FROM {source} n
         GROUP BY trabajador, contratista, maquina,
                  CASE
                      WHEN lower(trim(COALESCE(labor, ''))) LIKE '%%hora extra%%'
@@ -1765,12 +1968,15 @@ def _pivot_resumen_persona_tractorista(rows: list[dict]) -> tuple[list[str], lis
                 "maquina": maq,
                 "horas_extras": hextra,
                 "by_date": {},
+                "descuento": {},
                 "total": 0.0,
             }
         amt = float(r.get("total_tractor") or 0)
         entry = g["rows"][rkey]
         fecha = r["fecha"]
         entry["by_date"][fecha] = entry["by_date"].get(fecha, 0.0) + amt
+        if r.get("con_descuento"):
+            entry["descuento"][fecha] = True
         entry["total"] += amt
         g["grand"] += amt
     sorted_groups = sorted(groups.values(), key=lambda g: -g["grand"])
@@ -1781,6 +1987,30 @@ def _pivot_resumen_persona_tractorista(rows: list[dict]) -> tuple[list[str], lis
 
 def _detalle_tract_col_key(trabajador: str, labor: str) -> str:
     return f"{trabajador}||{labor}"
+
+
+def _tractor_patente(name: str) -> str:
+    """Patente only. The brand after the dash is not shown."""
+    text = (name or "").strip()
+    plate, sep, _brand = text.partition("-")
+    plate = plate.strip()
+    if sep and re.fullmatch(r"[A-Za-z]{4}\d{2}", plate):
+        return plate.upper()
+    return text
+
+
+def _tractores_texto(values) -> str:
+    """Tractor patentes entered on the tarja, in a stable order."""
+    if not values:
+        return ""
+    if isinstance(values, str):
+        values = [values]
+    seen = []
+    for name in values:
+        text = _tractor_patente(str(name or ""))
+        if text and text not in seen:
+            seen.append(text)
+    return " · ".join(seen)
 
 
 def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
@@ -1806,11 +2036,26 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
             worker = r.get("trabajador") or "(sin nombre)"
             worker_labores[worker].add(r.get("labor") or "")
 
+        carnet_flags: dict[str, set[bool]] = defaultdict(set)
+        carnet_dia: dict[str, dict[str, str]] = defaultdict(dict)
+        for r in crows:
+            worker = r.get("trabajador") or "(sin nombre)"
+            fecha = r.get("fecha")
+            if not fecha:
+                continue
+            has = bool(r.get("carnet", True))
+            carnet_flags[worker].add(has)
+            carnet_dia[fecha][worker] = "Con carnet" if has else "Sin carnet"
+
         workers = []
         columns = []
         for worker in sorted(worker_labores):
             labores = sorted(worker_labores[worker])
-            workers.append({"name": worker, "labores": labores})
+            workers.append({
+                "name": worker,
+                "labores": labores,
+                "carnet": _carnet_etiqueta(carnet_flags.get(worker, set())),
+            })
             for labor in labores:
                 columns.append(
                     {
@@ -1822,6 +2067,11 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
 
         keys = [c["key"] for c in columns]
         matrix = {d: {k: None for k in keys} for d in dates}
+        bruto = {d: {} for d in dates}
+        base = {d: {} for d in dates}
+        horas = {d: {} for d in dates}
+        descuento = {d: {} for d in dates}
+        tractores = {d: {} for d in dates}
         for r in crows:
             fecha = r.get("fecha")
             if not fecha:
@@ -1832,6 +2082,18 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
             amount = float(r.get("monto") or 0)
             current = matrix[fecha].get(key)
             matrix[fecha][key] = amount if current is None else current + amount
+            bruto[fecha][key] = bruto[fecha].get(key, 0.0) + float(r.get("monto_bruto") or 0)
+            base[fecha][key] = base[fecha].get(key, 0.0) + float(r.get("monto_base") or 0)
+            horas[fecha][key] = horas[fecha].get(key, 0.0) + float(r.get("horas") or 0)
+            tractor = _tractores_texto(r.get("tractores"))
+            if tractor:
+                tractores[fecha][key] = tractor
+            if r.get("con_descuento"):
+                mark = "si" if r.get("descuento_total") else "parcial"
+                previous = descuento[fecha].get(key)
+                if previous and previous != mark:
+                    mark = "parcial"
+                descuento[fecha][key] = mark
 
         col_totals = {
             k: sum(matrix[d][k] or 0.0 for d in dates) for k in keys
@@ -1839,6 +2101,17 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
         date_totals = {
             d: sum(v or 0.0 for v in matrix[d].values()) for d in dates
         }
+        date_descuento = {}
+        date_base = {}
+        for d in dates:
+            off = 0.0
+            for k in keys:
+                neto = matrix[d].get(k)
+                if neto is None:
+                    continue
+                off += max(0.0, round(float(bruto[d].get(k) or 0) - neto))
+            date_descuento[d] = off
+            date_base[d] = sum(float(base[d].get(k) or 0) for k in keys)
         estados_by_date: dict[str, set[str]] = defaultdict(set)
         for r in crows:
             fecha = r.get("fecha")
@@ -1866,8 +2139,17 @@ def _build_detalle_tractorista_pivots(rows: list[dict]) -> list[dict]:
                 "workers": workers,
                 "columns": columns,
                 "matrix": matrix,
+                "bruto": bruto,
+                "horas": horas,
+                "descuento": descuento,
+                "tractores": tractores,
+                "carnet_dia": carnet_dia,
                 "col_totals": col_totals,
                 "date_totals": date_totals,
+                "date_descuento": date_descuento,
+                "date_base": date_base,
+                "descuento_total": sum(date_descuento.values()),
+                "base_total": sum(date_base.values()),
                 "date_estados": date_estados,
                 "grand_total": sum(col_totals.values()),
             }
@@ -1917,7 +2199,7 @@ async def get_tarjas_detalle_tractorista(
     campo: str = Query(None),
 ):
     """Looker-style nested pivot: fecha × trabajador × labor, one block per
-    contratista. Amounts are SUM(total_tractor) from tarjas_pagos."""
+    contratista. Amounts are SUM(total_tractor), minus 10% where the tractor cumple."""
     if not _DATE_RE.match(fecha_inicio) or not _DATE_RE.match(fecha_termino):
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
 
@@ -1942,16 +2224,15 @@ async def get_tarjas_detalle_tractorista(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT
-                    COALESCE(SUM(total_tractor), 0) AS total,
-                    COUNT(*) AS jornadas
+                SELECT COUNT(*) AS jornadas
                 FROM appsheet.tarjas_pagos
                 {where}
                 """,
                 params,
             )
-            total, jornadas = cur.fetchone()
+            jornadas = cur.fetchone()[0]
             rows = _fetch_detalle_tractorista_rows(cur, where, params)
+            total = sum(float(r.get("monto") or 0) for r in rows)
             date_where, date_params = _detalle_tractorista_where(
                 fecha_inicio, fecha_termino
             )
@@ -3034,53 +3315,28 @@ async def get_tarjas_general_tractorista(
             labor_summary, person_ranking = _fetch_general_tractorista_tables(
                 cur, where, params
             )
-            maq_col = _resolve_maquina_column(cur)
 
-            # 3) Daily average by labor × worker (top 6) — same filters as ranking
-            p_filters = [
-                "p.fecha::date BETWEEN %s AND %s",
-                "(LOWER(TRIM(p.tipo_pago)) = 'tractorista')",
-            ]
-            p_params: list = [fecha_inicio, fecha_termino]
-            if centro_costo:
-                p_filters.append("p.cuartel_cc = %s")
-                p_params.append(centro_costo)
-            if labor:
-                p_filters.append("p.labor = %s")
-                p_params.append(labor)
-            if contratista:
-                p_filters.append("p.contratista = %s")
-                p_params.append(contratista)
-            if empresa:
-                p_filters.append("p.nombre_campo = %s")
-                p_params.append(_empresa_to_campo(empresa))
-            if maq_col and maquina:
-                frag = psql.SQL("p.{} = %s").format(psql.Identifier(maq_col))
-                p_filters.append(frag.as_string(conn))
-                p_params.append(maquina)
-            p_where = "WHERE " + " AND ".join(p_filters)
-
+            source = _tractorista_neto_source(where)
             cur.execute(
                 f"""
-                WITH top_workers AS (
+                WITH neto AS {source},
+                top_workers AS (
                     SELECT trabajador
-                    FROM appsheet.tarjas_pagos
-                    {where}
+                    FROM neto
                     GROUP BY trabajador
-                    ORDER BY SUM(total_tractor) DESC
+                    ORDER BY SUM(monto) DESC
                     LIMIT 6
                 )
                 SELECT
-                    p.labor,
-                    p.trabajador,
-                    ROUND(AVG(p.total_tractor)::numeric, 2) AS avg_daily
-                FROM appsheet.tarjas_pagos p
-                JOIN top_workers tw ON tw.trabajador = p.trabajador
-                {p_where}
-                GROUP BY p.labor, p.trabajador
-                ORDER BY p.labor, avg_daily DESC
+                    n.labor,
+                    n.trabajador,
+                    ROUND(AVG(n.monto)::numeric, 2) AS avg_daily
+                FROM neto n
+                JOIN top_workers tw ON tw.trabajador = n.trabajador
+                GROUP BY n.labor, n.trabajador
+                ORDER BY n.labor, avg_daily DESC
             """,
-                params + p_params,
+                params,
             )
             chart_data = _rows_to_dicts(cur)
     finally:
@@ -3571,7 +3827,8 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
     n = len(pivot["columns"])
     if n == 0:
         return start_row
-    total_col = 2 + n
+    desc_col = 2 + n
+    total_col = 3 + n
     money = "$#,##0"
 
     def _paint(cell, value=None):
@@ -3588,10 +3845,23 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
     _paint(ws.cell(start_row, 2), pivot["contratista"])
     for col in range(3, 2 + n):
         _paint(ws.cell(start_row, col))
-    _paint(ws.cell(start_row, total_col), f"Total {pivot['contratista']}")
+    _paint(
+        ws.cell(start_row, desc_col),
+        "Descuento\nEl * marca el monto con 10%. No es sobre el total.",
+    )
+    _paint(
+        ws.cell(start_row, total_col),
+        f"Total {pivot['contratista']}\nYa con el descuento restado",
+    )
 
     ws.merge_cells(
         start_row=start_row, start_column=1, end_row=start_row + 2, end_column=1
+    )
+    ws.merge_cells(
+        start_row=start_row,
+        start_column=desc_col,
+        end_row=start_row + 2,
+        end_column=desc_col,
     )
     ws.merge_cells(
         start_row=start_row,
@@ -3611,7 +3881,10 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
                 end_row=start_row + 1,
                 end_column=end_col,
             )
-        _paint(ws.cell(start_row + 1, col), wk["name"])
+        titulo = wk["name"]
+        if wk.get("carnet") == "Con carnet":
+            titulo = f'{wk["name"]}\nCon carnet'
+        _paint(ws.cell(start_row + 1, col), titulo)
         for i in range(span):
             _paint(ws.cell(start_row + 1, col + i))
         col += span
@@ -3621,6 +3894,7 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
 
     for r in range(start_row, start_row + 3):
         _paint(ws.cell(r, 1))
+        _paint(ws.cell(r, desc_col))
         _paint(ws.cell(r, total_col))
 
     right = Alignment(horizontal="right")
@@ -3633,8 +3907,17 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
             val = pivot["matrix"][fecha].get(c["key"])
             if val is not None:
                 cell = ws.cell(row, 2 + i, int(round(val)))
-                cell.number_format = money
+                marked = (pivot.get("descuento") or {}).get(fecha, {}).get(c["key"])
+                cell.number_format = '$#,##0"*"' if marked and val else money
                 cell.alignment = right
+        off = (pivot.get("date_descuento") or {}).get(fecha) or 0
+        base = (pivot.get("date_base") or {}).get(fecha) or 0
+        if off:
+            desc = ws.cell(
+                row, desc_col, f"10% de {_fmt_clp(base)}\n−{_fmt_clp(off)}"
+            )
+            desc.font = Font(color="1B5E20")
+            desc.alignment = Alignment(horizontal="right", wrap_text=True)
         tot = ws.cell(row, total_col, int(round(pivot["date_totals"][fecha])))
         tot.number_format = money
         tot.font = bold
@@ -3649,6 +3932,16 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
         cell.font = bold
         cell.fill = total_fill
         cell.alignment = right
+    desc_total = int(round(pivot.get("descuento_total") or 0))
+    if desc_total:
+        desc_foot = ws.cell(
+            row,
+            desc_col,
+            f"10% de {_fmt_clp(pivot.get('base_total') or 0)}\n−{_fmt_clp(desc_total)}",
+        )
+        desc_foot.font = Font(color="1B5E20", bold=True)
+        desc_foot.fill = total_fill
+        desc_foot.alignment = Alignment(horizontal="right", wrap_text=True)
     grand = ws.cell(row, total_col, int(round(pivot["grand_total"])))
     grand.number_format = money
     grand.font = bold
@@ -3658,6 +3951,7 @@ def _write_detalle_tractorista_excel_pivot(ws, pivot: dict, start_row: int) -> i
     ws.column_dimensions["A"].width = 14
     for i in range(n):
         ws.column_dimensions[get_column_letter(2 + i)].width = 16
+    ws.column_dimensions[get_column_letter(desc_col)].width = 24
     ws.column_dimensions[get_column_letter(total_col)].width = max(
         18, min(36, len(f"Total {pivot['contratista']}") + 2)
     )
@@ -3670,11 +3964,13 @@ def _detalle_tractorista_pivot_table_html(pivot: dict) -> str:
     if n == 0:
         return ""
     _check_pivot_date_range(pivot["columns"], "Detalle tractorista")
-    w = _pivot_col_widths({"fecha": 10, "total": 12}, n, date_pct=6.0)
+    w = _pivot_col_widths({"fecha": 10, "descuento": 12, "total": 12}, n, date_pct=6.0)
     contratista = _escape_html(pivot["contratista"])
     group = 'class="th-group" style="text-align:center;background:#1F4E79;color:#ffffff"'
     worker_ths = "".join(
-        f'<th {group} colspan="{len(wk["labores"])}">{_escape_html(wk["name"])}</th>'
+        f'<th {group} colspan="{len(wk["labores"])}">{_escape_html(wk["name"])}'
+        + ('<br><span style="font-size:6.5pt;font-weight:normal">Con carnet</span>' if wk.get("carnet") == "Con carnet" else "")
+        + "</th>"
         for wk in pivot["workers"]
     )
     labor_ths = "".join(
@@ -3683,17 +3979,35 @@ def _detalle_tractorista_pivot_table_html(pivot: dict) -> str:
         for c in pivot["columns"]
     )
 
-    def money(v) -> str:
-        return _fmt_clp(v) if v is not None else ""
+    def money(fecha: str, col: dict) -> tuple[str, bool]:
+        v = pivot["matrix"][fecha].get(col["key"])
+        if v is None:
+            return "", False
+        marked = bool((pivot.get("descuento") or {}).get(fecha, {}).get(col["key"])) and bool(v)
+        shown = _fmt_clp(v)
+        return (f"{shown}*" if marked else shown), marked
+
+    def descuento_cell(fecha: str) -> str:
+        off = (pivot.get("date_descuento") or {}).get(fecha) or 0
+        base = (pivot.get("date_base") or {}).get(fecha) or 0
+        if not off:
+            return ""
+        return (
+            f'<div style="color:#333333;font-size:6.5pt">10% de {_fmt_clp(base)}</div>'
+            f'<div style="color:#1b5e20">−{_fmt_clp(off)}</div>'
+        )
 
     body = ""
     for d in pivot["dates"]:
-        cells = "".join(
-            f'<td class="num" style="{w["date"]}">{money(pivot["matrix"][d].get(c["key"]))}</td>'
-            for c in pivot["columns"]
-        )
+        cells = []
+        for c in pivot["columns"]:
+            shown, marked = money(d, c)
+            tint = "background-color:#f4faf5;" if marked else ""
+            cells.append(f'<td class="num" style="{w["date"]};{tint}">{shown}</td>')
+        cells = "".join(cells)
         body += (
             f'<tr><td style="{w["fecha"]}">{_fmt_date_slash(d)}</td>{cells}'
+            f'<td class="num" style="{w["descuento"]}">{descuento_cell(d)}</td>'
             f'<td class="num" style="{w["total"]}">{_fmt_clp(pivot["date_totals"][d])}</td></tr>'
         )
     foot = "".join(
@@ -3706,17 +4020,20 @@ def _detalle_tractorista_pivot_table_html(pivot: dict) -> str:
         <tr>
           <th style="{w["fecha"]}"></th>
           <th {group} colspan="{n}">{contratista}</th>
+          <th style="{w["descuento"]}"></th>
           <th style="{w["total"]}"></th>
         </tr>
         <tr>
           <th style="{w["fecha"]}"></th>
           {worker_ths}
+          <th style="{w["descuento"]}"></th>
           <th style="{w["total"]}"></th>
         </tr>
         <tr>
           <th style="{w["fecha"]};background:#1F4E79;color:#ffffff">Fecha</th>
           {labor_ths}
-          <th class="num" style="{w["total"]};background:#1F4E79;color:#ffffff">Total {contratista}</th>
+          <th class="num" style="{w["descuento"]};background:#1F4E79;color:#ffffff">Descuento<br><span style="font-size:6pt;font-weight:normal">El * marca el monto con 10%. No es sobre el total.</span></th>
+          <th class="num" style="{w["total"]};background:#1F4E79;color:#ffffff">Total {contratista}<br><span style="font-size:6pt;font-weight:normal">Ya con el descuento restado</span></th>
         </tr>
       </thead>
       <tbody>{body}</tbody>
@@ -3724,6 +4041,7 @@ def _detalle_tractorista_pivot_table_html(pivot: dict) -> str:
         <tr>
           <td style="{w["fecha"]}">Suma total</td>
           {foot}
+          <td class="num" style="{w["descuento"]};color:#1b5e20">{(f'10% de {_fmt_clp(pivot.get("base_total") or 0)}<br>−{_fmt_clp(pivot.get("descuento_total"))}') if pivot.get("descuento_total") else ""}</td>
           <td class="num" style="{w["total"]}">{_fmt_clp(pivot["grand_total"])}</td>
         </tr>
       </tfoot>
@@ -3771,6 +4089,8 @@ def _build_detalle_tractorista_html(
     )
     return f"""
     {header}
+    {_cumple_pdf_note()}
+    <p class="pdf-note">El * marca el monto que ya tiene el 10% de descuento. Si no hay monto, no se marca.</p>
     {tables}
     """
 
@@ -3862,7 +4182,7 @@ async def download_tarjas_general_tractorista_excel(
         c2 = ws.cell(i, 2, float(r["avg_rate"] or 0))
         c2.number_format = money2
         c3 = ws.cell(i, 3, float(r["total"] or 0))
-        c3.number_format = money
+        c3.number_format = money + '"*"' if r.get("con_descuento") and r.get("total") else money
     foot = 2 + len(labor_summary)
     ws.cell(foot, 1, "Suma total")
     tot = ws.cell(
@@ -3881,7 +4201,7 @@ async def download_tarjas_general_tractorista_excel(
         c3 = ws2.cell(i, 3, float(r["avg_rate"] or 0))
         c3.number_format = money2
         c4 = ws2.cell(i, 4, float(r["total"] or 0))
-        c4.number_format = money
+        c4.number_format = money + '"*"' if r.get("con_descuento") and r.get("total") else money
     foot = 2 + len(person_ranking)
     ws2.cell(foot, 1, "Suma total")
     tot = ws2.cell(
@@ -3930,10 +4250,16 @@ def _build_general_tractorista_html(
             return "$" + n.replace(",", "X").replace(".", ",").replace("X", ".")
         return _fmt_clp(v)
 
+    def marked(v, flag) -> str:
+        text = money(v)
+        if flag and v:
+            return f'<span style="background-color:#f4faf5">{text}*</span>'
+        return text
+
     labor_rows = "".join(
         f'<tr><td>{_escape_html(r["labor"] or "")}</td>'
         f'<td class="num">{money(r["avg_rate"], True)}</td>'
-        f'<td class="total">{money(r["total"])}</td></tr>'
+        f'<td class="total">{marked(r["total"], r.get("con_descuento"))}</td></tr>'
         for r in labor_summary
     )
     labor_sum = sum(float(r["total"] or 0) for r in labor_summary)
@@ -3941,7 +4267,7 @@ def _build_general_tractorista_html(
         f'<tr><td>{_escape_html(r["trabajador"] or "")}</td>'
         f'<td>{_escape_html(r["contratista"] or "")}</td>'
         f'<td class="num">{money(r["avg_rate"], True)}</td>'
-        f'<td class="total">{money(r["total"])}</td></tr>'
+        f'<td class="total">{marked(r["total"], r.get("con_descuento"))}</td></tr>'
         for r in person_ranking
     )
     rank_sum = sum(float(r["total"] or 0) for r in person_ranking)
@@ -3959,6 +4285,8 @@ def _build_general_tractorista_html(
     )
     return f"""
     {header}
+    {_cumple_pdf_note()}
+    <p class="pdf-note">El * marca el monto que ya tiene el 10% de descuento. Si no hay monto, no se marca.</p>
     <h2 style="font-size:12pt;margin:10px 0 6px">Ganancia promedio por labor</h2>
     <table style="width:70%;table-layout:fixed"><thead>
       <tr><th style="width:50%">Labor</th>
@@ -4171,14 +4499,18 @@ async def download_tarjas_resumen_persona_tractorista_excel(
             ws.cell(row_num, 2, g["contratista"] or None)
             ws.cell(row_num, 3, entry["maquina"] or None)
             ws.cell(row_num, 4, entry["horas_extras"] if entry["horas_extras"] != "" else None)
+            row_marked = False
             for col, d in enumerate(dates, 5):
                 v = entry["by_date"].get(d, 0)
+                starred = bool((entry.get("descuento") or {}).get(d)) and v
+                if starred:
+                    row_marked = True
                 c = ws.cell(row_num, col, v if v else None)
                 if v:
-                    c.number_format = money
+                    c.number_format = money + '"*"' if starred else money
                     date_totals[d] += v
             tc = ws.cell(row_num, 5 + len(dates), entry["total"])
-            tc.number_format = money
+            tc.number_format = money + '"*"' if row_marked and entry["total"] else money
             tc.fill = total_fill
             tc.font = Font(bold=True)
             overall += entry["total"]
@@ -4258,17 +4590,25 @@ def _build_resumen_persona_tractorista_html(
                 f'<td style="{w["maq"]}">{maq}</td>'
                 f'<td style="{w["hextra"]}">{hextra}</td>'
             )
+            row_marked = False
             for d in dates:
                 v = entry["by_date"].get(d, 0)
+                starred = bool((entry.get("descuento") or {}).get(d)) and v
+                if starred:
+                    row_marked = True
                 if v:
                     date_totals[d] += v
+                    tint = "background-color:#f4faf5;" if starred else ""
+                    star = "*" if starred else ""
                     rows_html += (
-                        f'<td class="num" style="{w["date"]}">{_fmt_clp(v)}</td>'
+                        f'<td class="num" style="{w["date"]};{tint}">{_fmt_clp(v)}{star}</td>'
                     )
                 else:
                     rows_html += f'<td class="num" style="{w["date"]}">0</td>'
+            total_star = "*" if row_marked and entry["total"] else ""
+            total_tint = "background-color:#f4faf5;" if total_star else ""
             rows_html += (
-                f'<td class="total" style="{w["total"]}">{_fmt_clp(entry["total"])}</td></tr>'
+                f'<td class="total" style="{w["total"]};{total_tint}">{_fmt_clp(entry["total"])}{total_star}</td></tr>'
             )
             overall += entry["total"]
     foot_dates = "".join(
@@ -4289,6 +4629,8 @@ def _build_resumen_persona_tractorista_html(
     )
     return f"""
     {header}
+    {_cumple_pdf_note()}
+    <p class="pdf-note">El * marca el monto que ya tiene el 10% de descuento. Si no hay monto, no se marca.</p>
     <table class="pivot-wide" style="{w['table']}"><thead>
       <tr>
         <th style="{w['worker']}">Trabajador</th>
@@ -7362,6 +7704,7 @@ async def download_tarjas_tractorista_pdf(
           <div class="sub">{contratista} &mdash; {campo}</div>
           {cc_line}
           <div class="sub">{fi_fmt} al {ft_fmt}</div>
+          <div class="sub">{_escape_html(_CUMPLE_NOTA)}</div>
         </td>
       </tr>
     </table>

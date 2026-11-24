@@ -155,22 +155,17 @@ class TestApiPivotMatchesPagos:
         )
         assert data["pivots"], "July 2026 tractorista pivot should not be empty"
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    fecha::date::text AS fecha,
-                    COALESCE(contratista, '(sin contratista)') AS contratista,
-                    COALESCE(trabajador, '(sin nombre)') AS trabajador,
-                    COALESCE(labor, '') AS labor,
-                    COALESCE(SUM(total_tractor), 0) AS monto
-                FROM appsheet.tarjas_pagos
-                WHERE LOWER(TRIM(tipo_pago)) = 'tractorista'
-                  AND fecha::date BETWEEN %s AND %s
-                GROUP BY 1, 2, 3, 4
-                """,
-                (JUL_INICIO, JUL_TERMINO),
-            )
-            expected = {(r[0], r[1], r[2], r[3]): float(r[4]) for r in cur.fetchall()}
+            where, params = tc._detalle_tractorista_where(JUL_INICIO, JUL_TERMINO)
+            rows = tc._fetch_detalle_tractorista_rows(cur, where, params)
+        expected = {
+            (
+                r["fecha"],
+                r.get("contratista") or "(sin contratista)",
+                r.get("trabajador") or "(sin nombre)",
+                r.get("labor") or "",
+            ): float(r["monto"] or 0)
+            for r in rows
+        }
         for p in data["pivots"]:
             for fecha in p["dates"]:
                 for col in p["columns"]:
@@ -186,6 +181,53 @@ class TestApiPivotMatchesPagos:
                         assert exp == 0.0
                     else:
                         assert abs(float(cell) - exp) < 0.01
+
+    def test_153_cumple_shows_amount_minus_ten_percent(self, conn):
+        """A tractor marked Cumple is shown at 90% of total_tractor."""
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.fecha::date::text, p.contratista, p.trabajador, p.labor,
+                       SUM(p.total_tractor) AS bruto
+                FROM appsheet.tarjas_pagos p
+                JOIN appsheet.tarjas_maquina m
+                  ON upper(btrim(m.maquina)) = upper(btrim(p.maquina))
+                 AND upper(btrim(m.cumple)) = 'SI'
+                WHERE lower(trim(p.tipo_pago)) = 'tractorista'
+                  AND p.fecha::date BETWEEN %s AND %s
+                  AND COALESCE(p.total_tractor, 0) <> 0
+                GROUP BY 1, 2, 3, 4
+                HAVING count(DISTINCT upper(btrim(p.maquina))) = 1
+                LIMIT 1
+                """,
+                (JUL_INICIO, "2026-11-30"),
+            )
+            sample = cur.fetchone()
+        if sample is None:
+            pytest.skip("no cumple tractor in the sample range")
+        fecha, contratista, trabajador, labor, bruto = sample
+        data = run(
+            tc.get_tarjas_detalle_tractorista(
+                fecha_inicio=fecha,
+                fecha_termino=fecha,
+                contratista=contratista,
+                empresa=None,
+                centro_costo=None,
+                labor=labor,
+                campo=None,
+            )
+        )
+        key = tc._detalle_tract_col_key(trabajador, labor or "")
+        cell = None
+        mark = None
+        for pivot in data["pivots"]:
+            if pivot["contratista"] != contratista:
+                continue
+            cell = pivot["matrix"].get(fecha, {}).get(key)
+            mark = (pivot.get("descuento") or {}).get(fecha, {}).get(key)
+        assert cell is not None
+        assert abs(float(cell) - round(float(bruto) * 0.9)) < 0.01
+        assert mark == "si"
 
     def test_153_column_and_grand_totals_match_matrix(self):
         data = run(

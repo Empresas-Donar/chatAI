@@ -107,11 +107,18 @@ async function queryData() {
 function show(id) { document.getElementById(id).style.display = ''; }
 function hide(id) { document.getElementById(id).style.display = 'none'; }
 
+function discountCell(amount, flagged) {
+  const n = Number(amount || 0);
+  const marked = flagged && n;
+  const star = marked ? '<span class="tdt-star" title="Este monto tiene el 10% de descuento">*</span>' : '';
+  return `<td class="num${marked ? ' tdt-con-descuento' : ''}">${fmtCLP.format(n)}${star}</td>`;
+}
+
 function renderLaborTable(rows) {
   document.getElementById('labor-tbody').innerHTML = rows.map(r => `<tr>
     <td class="cell-labor" title="${esc(r.labor)}">${esc(r.labor)}</td>
     <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
-    <td class="num">${fmtCLP.format(r.total)}</td>
+    ${discountCell(r.total, r.con_descuento)}
   </tr>`).join('');
   const sum = rows.reduce((s, r) => s + Number(r.total || 0), 0);
   document.getElementById('labor-tfoot').innerHTML = `<tr>
@@ -125,7 +132,7 @@ function renderRanking(rows) {
     <td class="cell-worker" title="${esc(r.trabajador)}">${esc(r.trabajador)}</td>
     <td class="cell-contractor" title="${esc(r.contratista)}">${esc(r.contratista)}</td>
     <td class="num">${fmtCLPDec.format(r.avg_rate)}</td>
-    <td class="num">${fmtCLP.format(r.total)}</td>
+    ${discountCell(r.total, r.con_descuento)}
   </tr>`).join('');
   const sum = rows.reduce((s, r) => s + Number(r.total || 0), 0);
   document.getElementById('ranking-tfoot').innerHTML = `<tr>
@@ -204,6 +211,7 @@ function printWithHeader(title, filters) {
     + '<div class="ph-title-block">'
     + '<h2>' + esc(title) + '</h2>'
     + '<p class="ph-subtitle">Generado el ' + now + '</p>'
+    + '<p class="ph-subtitle">Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%. El * marca el monto que ya tiene el 10%.</p>'
     + '</div></div>'
     + '<div class="ph-filters">' + chips + '</div>';
   const el = document.getElementById('print-header');

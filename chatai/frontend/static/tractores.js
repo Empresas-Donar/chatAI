@@ -138,7 +138,7 @@ function campoTexto(row) {
 }
 
 function cumpleTexto(value) {
-  if (value === 'SI') return 'Sí';
+  if (value === 'SI') return 'Sí, −10%';
   if (value === 'NO') return 'No';
   return '—';
 }
@@ -206,7 +206,8 @@ function renderTarifa() {
     </tr>`;
   tarifaNote.textContent =
     `El carnet suma ${clp(tarifa.carnet)} y solo entra en esta jornada, si el conductor va con operador. ` +
-    `Sin operador, la jornada de 9 h es ${clp(tarifa.sin_operador_9h)} y no lleva carnet.`;
+    `Sin operador, la jornada de 9 h es ${clp(tarifa.sin_operador_9h)} y no lleva carnet. ` +
+    `Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%.`;
 }
 
 function paintDetalle(row) {
@@ -338,7 +339,10 @@ function render() {
     <td>${esc(row.antiguedad || '—')}</td>
     <td class="tr-cumple--${esc(row.cumple || '')}">${esc(cumpleTexto(row.cumple))}</td>
     <td>${esc(row.ultima_tarja || '—')}</td>
-    <td><span class="tr-pill tr-pill--${esc(row.estado)}">${esc(row.estado_label)}</span></td>
+    <td class="tr-estado">
+      <span class="tr-pill tr-pill--${esc(row.estado)}">${esc(row.estado_label)}</span>
+      <span class="tr-sub">${esc(row.estado_motivo || '')}</span>
+    </td>
     <td class="tr-actions">
       <button type="button" class="btn btn-secondary btn-sm" data-edit="${esc(row.id)}">Editar</button>
     </td>

@@ -134,17 +134,32 @@ function showSaveStatus(msg, kind) {
   el.textContent = msg;
 }
 
+function fmtDescuentoCell(base, off) {
+  const n = Math.round(Number(off) || 0);
+  if (!n) return '';
+  const de = Math.round(Number(base) || 0);
+  const baseLine = de ? `<div class="tdt-desc-base">10% de ${fmtCLP.format(de)}</div>` : '';
+  return baseLine + `<div>−${fmtCLP.format(n)}</div>`;
+}
+
 function moneyCell(p, d, c) {
   const v = p.matrix[d][c.key];
   if (v == null) return '<td class="cell-empty"></td>';
-  return `<td class="num tdt-cell-edit">
+  const desc = (p.descuento && p.descuento[d] && p.descuento[d][c.key]) || '';
+  const factor = desc === 'si' ? ' data-factor="0.9"' : '';
+  const marked = desc && Number(v) !== 0;
+  const star = marked
+    ? '<span class="tdt-star" title="Este monto tiene el 10% de descuento">*</span>'
+    : '';
+  return `<td class="num tdt-cell-edit${marked ? ' tdt-con-descuento' : ''}">
     <input class="tdt-monto" inputmode="numeric"
       data-contratista="${esc(p.contratista)}"
       data-fecha="${esc(d)}"
       data-trabajador="${esc(c.trabajador)}"
       data-labor="${esc(c.labor)}"
       data-original="${v}"
-      value="${esc(fmtCLP.format(v))}" />
+      ${factor}
+      value="${esc(fmtCLP.format(v))}" />${star}
   </td>`;
 }
 
@@ -168,9 +183,12 @@ function renderOnePivot(p) {
   const nCols = p.columns.length;
   if (!nCols) return '';
 
-  const workerRow = p.workers.map(w =>
-    `<th class="th-worker" colspan="${w.labores.length}">${esc(w.name)}</th>`
-  ).join('');
+  const workerRow = p.workers.map(w => {
+    const mark = w.carnet === 'Con carnet'
+      ? '<span class="tdt-carnet">Con carnet</span>'
+      : '';
+    return `<th class="th-worker" colspan="${w.labores.length}">${esc(w.name)}${mark}</th>`;
+  }).join('');
   const laborRow = p.columns.map(c =>
     `<th class="th-labor">${esc(c.labor)}</th>`
   ).join('');
@@ -182,6 +200,7 @@ function renderOnePivot(p) {
       <td class="cell-date">${formatDate(d)}</td>
       ${estadoSelect(p, d)}
       ${cells}
+      <td class="num tdt-desc-col">${fmtDescuentoCell(p.date_base && p.date_base[d], p.date_descuento && p.date_descuento[d])}</td>
       <td class="num cell-total">${fmtCLP.format(p.date_totals[d])}</td>
     </tr>`;
   }).join('');
@@ -199,7 +218,8 @@ function renderOnePivot(p) {
             <th class="th-fecha" rowspan="3">Fecha</th>
             <th class="th-estado" rowspan="3">Estado</th>
             <th class="th-contratista" colspan="${nCols}">${esc(p.contratista)}</th>
-            <th class="th-total" rowspan="3">Total ${esc(p.contratista)}</th>
+            <th class="th-descuento" rowspan="3">Descuento<span class="tdt-desc-how">El * marca el monto con 10%. No es sobre el total.</span></th>
+            <th class="th-total" rowspan="3">Total ${esc(p.contratista)}<span class="tdt-desc-how">Ya con el descuento restado</span></th>
           </tr>
           <tr>${workerRow}</tr>
           <tr>${laborRow}</tr>
@@ -209,6 +229,7 @@ function renderOnePivot(p) {
           <tr>
             <td colspan="2">Suma total</td>
             ${foot}
+            <td class="num tdt-desc-col">${fmtDescuentoCell(p.base_total, p.descuento_total)}</td>
             <td class="num cell-total">${fmtCLP.format(p.grand_total)}</td>
           </tr>
         </tfoot>
@@ -269,6 +290,9 @@ async function saveMonto(input) {
   input.disabled = true;
   showSaveStatus('Guardando monto…', 'pending');
   try {
+    const stored = input.dataset.factor === '0.9'
+      ? Math.round(next * 10 / 9)
+      : next;
     const res = await fetchRetry('/api/tarjas/detalle-tractorista/celda', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -277,7 +301,7 @@ async function saveMonto(input) {
         fecha: input.dataset.fecha,
         trabajador: input.dataset.trabajador,
         labor: input.dataset.labor,
-        total_tractor: next,
+        total_tractor: stored,
       }),
     });
     if (!res.ok) {
@@ -362,6 +386,7 @@ function printWithHeader(title, filters) {
     + '<div class="ph-title-block">'
     + '<h2>' + esc(title) + '</h2>'
     + '<p class="ph-subtitle">Generado el ' + now + '</p>'
+    + '<p class="ph-subtitle">Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%.</p>'
     + '</div></div>'
     + '<div class="ph-filters">' + chips + '</div>';
   const el = document.getElementById('print-header');

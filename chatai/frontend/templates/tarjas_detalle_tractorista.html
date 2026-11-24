@@ -23,7 +23,7 @@
 
 {% block head_extra %}
 <link rel="stylesheet" href="/static/tarjas_detail.css?v={{ static_v }}" />
-<link rel="stylesheet" href="/static/tarjas_detalle_tractorista.css?v={{ static_v }}&f=5" />
+<link rel="stylesheet" href="/static/tarjas_detalle_tractorista.css?v={{ static_v }}&f=18" />
 <link rel="stylesheet" href="/static/tarjas_print.css?v={{ static_v }}" />
 {% endblock %}
 
@@ -33,7 +33,7 @@
   <div class="page-header tdt-page-header">
     <div>
       <h1>Detalle de la semana tractorista</h1>
-      <p>Revisar montos y estado (Pendiente / Aprobado) — se guarda en tarjas al cambiar</p>
+      <p>Revisar montos y estado (Pendiente / Aprobado) — se guarda en tarjas al cambiar. Cumple: el tractor tiene más de 5 años y por eso se descuenta el 10%.</p>
     </div>
     <div id="tdt-save-status" class="tdt-save-status" hidden></div>
   </div>
@@ -54,5 +54,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/tarjas_detalle_tractorista.js?v={{ static_v }}&f=6"></script>
+<script src="/static/tarjas_detalle_tractorista.js?v={{ static_v }}&f=20"></script>
 {% endblock %}
