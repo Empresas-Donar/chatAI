@@ -122,6 +122,8 @@ def test_136_calendario_audit_flow_edit_and_delete():
     assert "Registró" in js
     assert "Aprobación" in js
     assert "dupKey" in js
+    assert "row.maquina" in js
+    assert "k_maq" in block
     assert "data-delete-rec" in js
     assert "method: 'DELETE'" in js
     start = js.index("async function deleteRegistro")
