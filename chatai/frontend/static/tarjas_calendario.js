@@ -515,6 +515,7 @@ function dupKey(row) {
     normKeyPart(row && row.nombre_campo),
     normKeyPart(row && row.contratista),
     normKeyPart(row && row.cuartel_cc),
+    normKeyPart(row && row.maquina),
     hourKey(row && row.horas_trabajadas),
     hourKey(row && row.horas_extras),
   ].join('|');

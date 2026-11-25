@@ -8969,6 +8969,7 @@ async def get_tarjas_calendario(
                     lower(regexp_replace(trim(COALESCE(nombre_campo, '')), '\\s+', ' ', 'g')) AS k_campo,
                     lower(regexp_replace(trim(COALESCE(contratista, '')), '\\s+', ' ', 'g')) AS k_cont,
                     lower(regexp_replace(trim(COALESCE(cuartel_cc, '')), '\\s+', ' ', 'g')) AS k_cc,
+                    lower(regexp_replace(trim(COALESCE(maquina, '')), '\\s+', ' ', 'g')) AS k_maq,
                     COALESCE(horas_trabajadas, 0) AS h_trab,
                     COALESCE(horas_extras, 0) AS h_extra
                   FROM appsheet.tarjas_pagos
@@ -8980,7 +8981,7 @@ async def get_tarjas_calendario(
                   SELECT *,
                     COUNT(*) OVER (
                       PARTITION BY fecha, k_trab, k_labor, k_campo, k_cont, k_cc,
-                                   h_trab, h_extra
+                                   k_maq, h_trab, h_extra
                     ) AS copies
                   FROM base
                 )
